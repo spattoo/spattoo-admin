@@ -1,0 +1,24 @@
+{
+  "name": "spatto-admin",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@spattoo/designer": "file:../spattoo-core",
+    "@supabase/supabase-js": "^2.103.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "@react-three/fiber": "^8.18.0",
+    "@react-three/drei": "^9.122.0",
+    "three": "^0.183.2",
+    "react-colorful": "^5.6.1",
+    "vite": "^6.3.0"
+  }
+}
