@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement } from '../lib/api.js';
+import { fetchElementTypes, fetchParentElements, getSignedUploadUrl, uploadToR2, createGlobalElement } from '../lib/api.js';
 
 const ASSET_TYPES = [
   { value: '2D', label: '2D Image',       folder: 'elements/files/2D' },
@@ -40,6 +40,15 @@ const s = {
     fontSize: 13, fontFamily: "'Quicksand', sans-serif",
     color: '#2C4433', background: '#fff', outline: 'none',
     boxSizing: 'border-box',
+  },
+  checkRow: {
+    display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+  },
+  checkbox: {
+    width: 18, height: 18, accentColor: '#3D5A44', cursor: 'pointer',
+  },
+  checkLabel: {
+    fontSize: 13, fontWeight: 700, color: '#2C4433',
   },
   radioRow: { display: 'flex', gap: 12 },
   radioBtn: (active) => ({
@@ -85,14 +94,17 @@ function FileDropZone({ label, accept, file, onChange }) {
 }
 
 export default function AddElement() {
-  const [elementTypes, setElementTypes] = useState([]);
-  const [name, setName] = useState('');
+  const [elementTypes, setElementTypes]   = useState([]);
+  const [parentOptions, setParentOptions] = useState([]);
+  const [name, setName]                   = useState('');
   const [elementTypeId, setElementTypeId] = useState('');
-  const [assetType, setAssetType] = useState('2D');
-  const [assetFile, setAssetFile] = useState(null);
+  const [isParent, setIsParent]           = useState(false);
+  const [parentId, setParentId]           = useState('');
+  const [assetType, setAssetType]         = useState('2D');
+  const [assetFile, setAssetFile]         = useState(null);
   const [thumbnailFile, setThumbnailFile] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState(null);
+  const [saving, setSaving]               = useState(false);
+  const [msg, setMsg]                     = useState(null);
 
   useEffect(() => {
     fetchElementTypes()
@@ -100,9 +112,27 @@ export default function AddElement() {
       .catch(err => setMsg({ ok: false, text: err.message }));
   }, []);
 
+  // When element type changes and this is a child, fetch parent options
+  useEffect(() => {
+    if (!elementTypeId || isParent) { setParentOptions([]); setParentId(''); return; }
+    fetchParentElements(elementTypeId)
+      .then(setParentOptions)
+      .catch(() => setParentOptions([]));
+  }, [elementTypeId, isParent]);
+
+  function handleIsParentToggle() {
+    setIsParent(p => !p);
+    setParentId('');
+    setParentOptions([]);
+  }
+
   async function handleSave() {
     if (!name.trim() || !elementTypeId || !assetFile) {
       setMsg({ ok: false, text: 'Name, element type and asset file are required.' });
+      return;
+    }
+    if (!isParent && !parentId) {
+      setMsg({ ok: false, text: 'Select a parent element or check "Is Parent".' });
       return;
     }
     setSaving(true);
@@ -128,6 +158,7 @@ export default function AddElement() {
       await createGlobalElement({
         name:            name.trim(),
         element_type_id: elementTypeId,
+        parent_id:       isParent ? null : parentId,
         image_url:       assetKey,
         thumbnail_url:   thumbnailKey,
         sort_order:      0,
@@ -136,6 +167,8 @@ export default function AddElement() {
       setMsg({ ok: true, text: 'Element saved!' });
       setName('');
       setElementTypeId('');
+      setIsParent(false);
+      setParentId('');
       setAssetFile(null);
       setThumbnailFile(null);
     } catch (err) {
@@ -159,11 +192,28 @@ export default function AddElement() {
 
           <div style={s.field}>
             <label style={s.label}>Element Type</label>
-            <select style={s.select} value={elementTypeId} onChange={e => setElementTypeId(e.target.value)}>
+            <select style={s.select} value={elementTypeId} onChange={e => { setElementTypeId(e.target.value); setParentId(''); }}>
               <option value="">Select type…</option>
               {elementTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
+
+          <div style={s.field}>
+            <label style={s.checkRow}>
+              <input type="checkbox" style={s.checkbox} checked={isParent} onChange={handleIsParentToggle} />
+              <span style={s.checkLabel}>Is Parent</span>
+            </label>
+          </div>
+
+          {!isParent && elementTypeId && (
+            <div style={s.field}>
+              <label style={s.label}>Parent Element</label>
+              <select style={s.select} value={parentId} onChange={e => setParentId(e.target.value)}>
+                <option value="">Select parent…</option>
+                {parentOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          )}
 
           <div style={s.field}>
             <label style={s.label}>Asset Type</label>

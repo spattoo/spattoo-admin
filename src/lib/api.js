@@ -30,6 +30,10 @@ export async function fetchElementTypes() {
   return get('/api/element-types');
 }
 
+export async function fetchParentElements(elementTypeId) {
+  return get(`/api/elements?parents_only=true&element_type_id=${elementTypeId}`);
+}
+
 export async function getSignedUploadUrl(folder, filename, contentType) {
   return post('/api/storage/sign-upload', { folder, filename, contentType });
 }
