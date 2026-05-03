@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, useGLTF } from '@react-three/drei';
+import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { fetchElementTypes, fetchParentElements, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
@@ -109,11 +109,10 @@ function FileDropZone({ label, accept, file, onChange }) {
   );
 }
 
-function GLBModel({ url, color, onLoad, onTextureDetected }) {
+function GLBModel({ url, color, roughness, metalness, onLoad, onTextureDetected }) {
   const { scene }  = useGLTF(url);
   const { camera, controls } = useThree();
 
-  // Detect textures once on load, apply color to untextured meshes
   useEffect(() => {
     if (!scene) return;
     let hasAnyTexture = false;
@@ -133,11 +132,15 @@ function GLBModel({ url, color, onLoad, onTextureDetected }) {
       if (!obj.isMesh) return;
       const mat = obj.material;
       const hasTexture = mat && (mat.map || mat.normalMap || mat.roughnessMap);
-      if (!hasTexture) {
-        obj.material = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0 });
+      if (!hasTexture && color) {
+        obj.material = new THREE.MeshStandardMaterial({ color, roughness, metalness });
+      } else if (mat) {
+        mat.roughness = roughness;
+        mat.metalness = metalness;
+        mat.needsUpdate = true;
       }
     });
-  }, [scene, color]);
+  }, [scene, color, roughness, metalness]);
 
   useEffect(() => {
     if (!scene) return;
@@ -166,7 +169,7 @@ function GLBModel({ url, color, onLoad, onTextureDetected }) {
   return <primitive object={scene} />;
 }
 
-function GLBPreview({ file, color, canvasRef, onCapture, onTextureDetected }) {
+function GLBPreview({ file, color, roughness, metalness, envPreset, canvasRef, onCapture, onTextureDetected }) {
   const [objectUrl, setObjectUrl] = useState(null);
   const [panMode, setPanMode]     = useState(false);
 
@@ -184,11 +187,12 @@ function GLBPreview({ file, color, canvasRef, onCapture, onTextureDetected }) {
     <div style={{ position: 'relative' }}>
       <div style={s.previewBox} ref={canvasRef}>
         <Canvas flat gl={{ preserveDrawingBuffer: true }} camera={{ position: [0, 1, 3], fov: 45 }}>
-          <ambientLight intensity={1} />
-          <directionalLight position={[2, 2, 2]} intensity={0.6} />
-          <directionalLight position={[-2, 1, -2]} intensity={0.4} />
+          <ambientLight intensity={envPreset === 'none' ? 1 : 0.3} />
+          <directionalLight position={[2, 2, 2]} intensity={envPreset === 'none' ? 0.6 : 0.2} />
+          <directionalLight position={[-2, 1, -2]} intensity={envPreset === 'none' ? 0.4 : 0.1} />
           <Suspense fallback={null}>
-            {objectUrl && <GLBModel url={objectUrl} color={color} onLoad={onCapture} onTextureDetected={onTextureDetected} />}
+            {objectUrl && <GLBModel url={objectUrl} color={color} roughness={roughness} metalness={metalness} onLoad={onCapture} onTextureDetected={onTextureDetected} />}
+            {envPreset !== 'none' && <Environment preset={envPreset} />}
           </Suspense>
           <OrbitControls enablePan makeDefault mouseButtons={mouseButtons} />
         </Canvas>
@@ -223,6 +227,10 @@ export default function AddElement() {
   const [parentId, setParentId]           = useState('');
   const [assetType, setAssetType]         = useState('2D');
   const [elementColor, setElementColor]   = useState('#F0DEB8');
+  const [userPickedColor, setUserPickedColor] = useState(false);
+  const [glbRoughness, setGlbRoughness]   = useState(0.6);
+  const [glbMetalness, setGlbMetalness]   = useState(0);
+  const [glbEnvPreset, setGlbEnvPreset]   = useState('none');
   const [glbHasTexture, setGlbHasTexture] = useState(null);
   const [assetFile, setAssetFile]         = useState(null);
   const [thumbnailBlob, setThumbnailBlob] = useState(null);
@@ -324,7 +332,7 @@ export default function AddElement() {
         thumbnail_url:    thumbKey,
         allowed_zones:    applicableZones,
         allowed_actions:  capabilities,
-        default_color:    assetType === '3D' ? elementColor : null,
+        default_color:    assetType === '3D' && userPickedColor ? elementColor : null,
         sort_order:       0,
       });
 
@@ -336,6 +344,10 @@ export default function AddElement() {
       setParentId('');
       setAssetFile(null);
       setElementColor('#F0DEB8');
+      setUserPickedColor(false);
+      setGlbRoughness(0.6);
+      setGlbMetalness(0);
+      setGlbEnvPreset('none');
       setThumbnailBlob(null);
       setCapabilities({ resize: true, duplicate: true, color: false, delete: true });
     } catch (err) {
@@ -415,29 +427,66 @@ export default function AddElement() {
             label={assetType === '3D' ? 'GLB File' : 'Image File'}
             accept={assetType === '3D' ? '.glb,.gltf' : 'image/*'}
             file={assetFile}
-            onChange={f => { setAssetFile(f); setGlbHasTexture(null); }}
+            onChange={f => { setAssetFile(f); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); }}
           />
 
           {/* 3D preview + auto-capture */}
           {assetType === '3D' && assetFile && (
             <div style={s.field}>
               <label style={s.label}>3D Preview</label>
-              {glbHasTexture === false && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <label style={s.label} htmlFor="elColor">Element Color</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+                {glbHasTexture === false && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }} htmlFor="elColor">Color</label>
+                    <input
+                      id="elColor"
+                      type="color"
+                      value={elementColor}
+                      onChange={e => { setElementColor(e.target.value); setUserPickedColor(true); }}
+                      style={{ width: 40, height: 32, border: '1.5px solid #C5D4C8', borderRadius: 6, cursor: 'pointer', padding: 2 }}
+                    />
+                    <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600 }}>{elementColor}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Roughness</label>
                   <input
-                    id="elColor"
-                    type="color"
-                    value={elementColor}
-                    onChange={e => setElementColor(e.target.value)}
-                    style={{ width: 40, height: 32, border: '1.5px solid #C5D4C8', borderRadius: 6, cursor: 'pointer', padding: 2 }}
+                    type="range" min="0" max="1" step="0.01"
+                    value={glbRoughness}
+                    onChange={e => setGlbRoughness(parseFloat(e.target.value))}
+                    style={{ flex: 1, accentColor: '#3D5A44' }}
                   />
-                  <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600 }}>{elementColor}</span>
+                  <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600, minWidth: 30 }}>{glbRoughness.toFixed(2)}</span>
                 </div>
-              )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Metalness</label>
+                  <input
+                    type="range" min="0" max="1" step="0.01"
+                    value={glbMetalness}
+                    onChange={e => setGlbMetalness(parseFloat(e.target.value))}
+                    style={{ flex: 1, accentColor: '#3D5A44' }}
+                  />
+                  <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600, minWidth: 30 }}>{glbMetalness.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Environment</label>
+                  <select
+                    value={glbEnvPreset}
+                    onChange={e => setGlbEnvPreset(e.target.value)}
+                    style={{ ...s.select, flex: 1 }}
+                  >
+                    {['none','studio','city','sunset','dawn','warehouse','forest','park','lobby'].map(p => (
+                      <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <GLBPreview
                 file={assetFile}
-                color={glbHasTexture === false ? elementColor : undefined}
+                color={glbHasTexture === false && userPickedColor ? elementColor : undefined}
+                roughness={glbRoughness}
+                metalness={glbMetalness}
+                envPreset={glbEnvPreset}
                 canvasRef={canvasRef}
                 onCapture={captureThumbnail}
                 onTextureDetected={setGlbHasTexture}
