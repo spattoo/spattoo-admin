@@ -259,8 +259,9 @@ export default function AddElement() {
   const [parentOptions, setParentOptions] = useState([]);
   const [name, setName]                   = useState('');
   const [description, setDescription]     = useState('');
-  const [suggesting,  setSuggesting]       = useState(false);
-  const [suggestions, setSuggestions]      = useState(null);
+  const [suggesting,    setSuggesting]     = useState(false);
+  const [suggestions,   setSuggestions]   = useState(null);
+  const [suggestError,  setSuggestError]  = useState(null);
   const [elementTypeId, setElementTypeId] = useState('');
   const [applicableZones, setApplicableZones] = useState([]);
   const [isParent, setIsParent]           = useState(false);
@@ -395,12 +396,14 @@ export default function AddElement() {
     if (!thumbnailBlob) return;
     setSuggesting(true);
     setSuggestions(null);
+    setSuggestError(null);
     try {
       const elementTypeName = elementTypes.find(t => t.id === elementTypeId)?.name ?? '';
       const result = await suggestElementMeta(thumbnailBlob, elementTypeName);
       setSuggestions(result);
     } catch (e) {
-      setMsg({ ok: false, text: `Suggestion failed: ${e.message}` });
+      console.error('Suggest failed:', e);
+      setSuggestError(e.message || 'Unknown error');
     } finally {
       setSuggesting(false);
     }
@@ -695,6 +698,11 @@ export default function AddElement() {
               </button>
             </div>
             <input style={s.input} value={name} onChange={e => { setName(e.target.value); setSuggestions(null); }} placeholder="e.g. Rainbow Topper" />
+            {suggestError && (
+              <div style={{ fontSize: 11, color: '#c0392b', fontWeight: 600, marginTop: 6, padding: '6px 10px', background: '#fdf0ee', borderRadius: 6 }}>
+                ✕ {suggestError}
+              </div>
+            )}
             {suggestions?.names && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                 {suggestions.names.map(n => (
