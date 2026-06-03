@@ -674,16 +674,17 @@ export default function AddElement() {
                     <span style={{ fontSize: 11, color: '#6B8C74', fontWeight: 600, minWidth: 32, textAlign: 'right' }}>{glbRotation[idx]}°</span>
                   </div>
                 ))}
-                <button
-                  onClick={() => setGlbRotation([0, 0, 0])}
-                  style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif", marginTop: 2 }}>
-                  Reset
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                  <button onClick={() => setGlbRotation([0, 0, 0])}
+                    style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
+                    Reset
+                  </button>
+                  <button onClick={captureThumbnail}
+                    style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: 'none', background: '#3D5A44', color: '#fff', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
+                    ✓ This is the front — Set Thumbnail
+                  </button>
+                </div>
               </div>
-
-              <button style={s.smallBtn} onClick={captureThumbnail}>
-                Re-capture Thumbnail
-              </button>
             </div>
           )}
 
