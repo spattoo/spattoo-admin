@@ -185,7 +185,20 @@ function GeomSpherePreview({ color, roughness, metalness, envPreset, canvasRef, 
 }
 
 // ── GLB components (same as AddElement) ──────────────────────────────────────
-function GLBModel({ url, color, roughness, metalness, rotation, onLoad, onTextureDetected, onMaterialRead }) {
+function CameraCapture({ camRef }) {
+  const { camera } = useThree();
+  useEffect(() => { camRef.current = camera; }, [camera]);
+  return null;
+}
+
+function cameraToModelRotation(initialQuat, currentQuat) {
+  const delta = initialQuat.clone().invert().multiply(currentQuat);
+  const euler = new THREE.Euler().setFromQuaternion(delta, 'XYZ');
+  const toDeg = r => ((r * 180 / Math.PI) % 360 + 360) % 360;
+  return [toDeg(euler.x), toDeg(euler.y), toDeg(euler.z)];
+}
+
+function GLBModel({ url, color, roughness, metalness, onLoad, onTextureDetected, onMaterialRead }) {
   const { scene } = useGLTF(url);
   const { camera, controls } = useThree();
 
@@ -241,18 +254,12 @@ function GLBModel({ url, color, roughness, metalness, rotation, onLoad, onTextur
     return () => clearTimeout(t);
   }, [scene]);
 
-  const DEG = Math.PI / 180;
-  return (
-    <group rotation={[(rotation?.[0] ?? 0) * DEG, (rotation?.[1] ?? 0) * DEG, (rotation?.[2] ?? 0) * DEG]}>
-      <primitive object={scene} />
-    </group>
-  );
+  return <primitive object={scene} />;
 }
 
 // Accepts either a File object or a URL string
-function GLBPreview({ file, url, color, roughness, metalness, envPreset, rotation, onRotate, canvasRef, onCapture, onTextureDetected, onMaterialRead }) {
+function GLBPreview({ file, url, color, roughness, metalness, envPreset, camRef, canvasRef, onCapture, onTextureDetected, onMaterialRead }) {
   const [objectUrl, setObjectUrl] = useState(null);
-  const dragRef = useRef(null);
 
   useEffect(() => {
     if (!file) { setObjectUrl(null); return; }
@@ -264,51 +271,27 @@ function GLBPreview({ file, url, color, roughness, metalness, envPreset, rotatio
   const glbUrl = file ? objectUrl : url;
   if (!glbUrl) return null;
 
-  function handlePointerDown(e) {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { x: e.clientX, y: e.clientY, button: e.button };
-  }
-  function handlePointerMove(e) {
-    if (!dragRef.current) return;
-    const dx = e.clientX - dragRef.current.x;
-    const dy = e.clientY - dragRef.current.y;
-    dragRef.current = { ...dragRef.current, x: e.clientX, y: e.clientY };
-    if (dragRef.current.button === 2) onRotate?.(0, 0, dx);
-    else                              onRotate?.(dx, dy, 0);
-  }
-  function handlePointerUp(e) {
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    dragRef.current = null;
-  }
-
   return (
-    <div style={{ position: 'relative' }}>
-      <div style={{ ...s.previewBox, cursor: 'grab' }} ref={canvasRef}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onContextMenu={e => e.preventDefault()}>
-        <Canvas flat gl={{ preserveDrawingBuffer: true }} camera={{ position: [0, 1, 3], fov: 45 }}>
-          <ambientLight intensity={envPreset === 'none' ? 1 : 0.3} />
-          <directionalLight position={[2, 2, 2]}  intensity={envPreset === 'none' ? 0.6 : 0.2} />
-          <directionalLight position={[-2, 1, -2]} intensity={envPreset === 'none' ? 0.4 : 0.1} />
-          <Suspense fallback={null}>
-            <GLBModel
-              url={glbUrl}
-              color={color}
-              roughness={roughness}
-              metalness={metalness}
-              rotation={rotation}
-              onLoad={onCapture}
-              onTextureDetected={onTextureDetected}
-              onMaterialRead={onMaterialRead}
-            />
-            {envPreset !== 'none' && <Environment preset={envPreset} />}
-          </Suspense>
-          <OrbitControls enableRotate={false} enablePan={false} enableZoom makeDefault />
-        </Canvas>
-      </div>
+    <div style={s.previewBox} ref={canvasRef}>
+      <Canvas flat gl={{ preserveDrawingBuffer: true }} camera={{ position: [0, 1, 3], fov: 45 }}>
+        <ambientLight intensity={envPreset === 'none' ? 1 : 0.3} />
+        <directionalLight position={[2, 2, 2]}  intensity={envPreset === 'none' ? 0.6 : 0.2} />
+        <directionalLight position={[-2, 1, -2]} intensity={envPreset === 'none' ? 0.4 : 0.1} />
+        <Suspense fallback={null}>
+          <GLBModel
+            url={glbUrl}
+            color={color}
+            roughness={roughness}
+            metalness={metalness}
+            onLoad={onCapture}
+            onTextureDetected={onTextureDetected}
+            onMaterialRead={onMaterialRead}
+          />
+          {envPreset !== 'none' && <Environment preset={envPreset} />}
+        </Suspense>
+        <OrbitControls makeDefault enablePan />
+        <CameraCapture camRef={camRef} />
+      </Canvas>
     </div>
   );
 }
@@ -350,6 +333,8 @@ export default function ManageElements() {
   const [glbRotation,      setGlbRotation]      = useState([0, 0, 0]);
   const [frontConfirmed,   setFrontConfirmed]   = useState(false);
   const [rotationDirty,    setRotationDirty]    = useState(false);
+  const camRef      = useRef(null);
+  const initialQuat = useRef(null);
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState(null);
   const canvasRef = useRef();
@@ -399,6 +384,7 @@ export default function ManageElements() {
     setGlbRotation(pc.rotation ?? [0, 0, 0]);
     setFrontConfirmed(false);
     setRotationDirty(false);
+    initialQuat.current = null;
     setDescription(el.description ?? '');
   }
 
@@ -419,6 +405,22 @@ export default function ManageElements() {
     const canvas = canvasRef.current?.querySelector('canvas');
     if (!canvas) return;
     canvas.toBlob(blob => processRemoveBg(blob), 'image/png');
+  }
+
+  function captureInitialQuat() {
+    if (camRef.current && !initialQuat.current) {
+      initialQuat.current = camRef.current.quaternion.clone();
+    }
+  }
+
+  function confirmFrontView() {
+    if (camRef.current && initialQuat.current) {
+      const rotation = cameraToModelRotation(initialQuat.current, camRef.current.quaternion);
+      setGlbRotation(rotation);
+      setRotationDirty(true);
+    }
+    setFrontConfirmed(true);
+    captureThumbnail();
   }
 
   async function handleSave() {
@@ -713,14 +715,9 @@ export default function ManageElements() {
                         roughness={glbRoughness}
                         metalness={glbMetalness}
                         envPreset={glbEnvPreset}
-                        rotation={glbRotation}
-                        onRotate={(dx, dy, dz) => { setRotationDirty(true); setFrontConfirmed(false); setGlbRotation(r => [
-                          ((r[0] + dy * 0.5) % 360 + 360) % 360,
-                          ((r[1] + dx * 0.5) % 360 + 360) % 360,
-                          ((r[2] + dz * 0.5) % 360 + 360) % 360,
-                        ]); }}
+                        camRef={camRef}
                         canvasRef={canvasRef}
-                        onCapture={captureThumbnail}
+                        onCapture={() => { captureInitialQuat(); captureThumbnail(); }}
                         onTextureDetected={() => {}}
                         onMaterialRead={({ roughness, metalness, color }) => {
                           setGlbRoughness(roughness);
@@ -732,26 +729,21 @@ export default function ManageElements() {
                       {/* Orientation calibration */}
                       <div style={{ marginTop: 10, padding: '10px 12px', background: '#f5f8f5', borderRadius: 10, border: '1.5px solid #C5D4C8' }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44', marginBottom: 8, fontFamily: "'Quicksand',sans-serif" }}>
-                          Orientation — rotate until front faces you and top faces up
+                          Orbit with mouse to find the front view, then confirm below
                         </div>
                         {[['X', 0, '#e05252'], ['Y', 1, '#52c452'], ['Z', 2, '#5252e0']].map(([axis, idx, axisColor]) => (
-                          <div key={axis} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <div key={axis} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                             <span style={{ fontSize: 11, fontWeight: 700, color: axisColor, width: 14, flexShrink: 0 }}>{axis}</span>
-                            <input type="range" min="0" max="359" step="1"
-                              value={glbRotation[idx]}
-                              onChange={e => { setRotationDirty(true); setFrontConfirmed(false); setGlbRotation(r => { const n = [...r]; n[idx] = parseInt(e.target.value); return n; }); }}
-                              style={{ flex: 1, accentColor: axisColor }} />
-                            <span style={{ fontSize: 11, color: '#6B8C74', fontWeight: 600, minWidth: 32, textAlign: 'right' }}>{glbRotation[idx]}°</span>
+                            <div style={{ flex: 1, height: 4, background: '#e8ede9', borderRadius: 2, position: 'relative' }}>
+                              <div style={{ width: `${(glbRotation[idx] / 359) * 100}%`, height: '100%', background: axisColor, borderRadius: 2 }} />
+                            </div>
+                            <span style={{ fontSize: 11, color: '#6B8C74', fontWeight: 600, minWidth: 32, textAlign: 'right' }}>{Math.round(glbRotation[idx])}°</span>
                           </div>
                         ))}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-                          <button onClick={() => setGlbRotation([0, 0, 0])}
-                            style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
-                            Reset
-                          </button>
-                          <button onClick={() => { setFrontConfirmed(true); captureThumbnail(); }}
-                            style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: `2px solid ${frontConfirmed ? '#3D5A44' : rotationDirty ? '#e05252' : '#3D5A44'}`, background: frontConfirmed ? '#3D5A44' : rotationDirty ? '#fff' : '#3D5A44', color: frontConfirmed ? '#fff' : rotationDirty ? '#e05252' : '#fff', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
-                            {frontConfirmed ? '✓ Front set' : rotationDirty ? '✱ Set front view (required)' : '✓ This is the front — Set Thumbnail'}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                          <button onClick={confirmFrontView}
+                            style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: `2px solid ${frontConfirmed ? '#3D5A44' : '#e05252'}`, background: frontConfirmed ? '#3D5A44' : '#fff', color: frontConfirmed ? '#fff' : '#e05252', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
+                            {frontConfirmed ? '✓ Front set' : '✱ Set front view (required)'}
                           </button>
                         </div>
                       </div>
