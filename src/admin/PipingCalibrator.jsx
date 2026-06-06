@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Environment } from '@react-three/drei';
+import { OrbitControls, Environment, RoundedBox } from '@react-three/drei';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { fetchAllElements, fetchElementTypes, createGlobalElement, getSignedUploadUrl, uploadToR2 } from '../lib/api';
@@ -47,6 +47,62 @@ const CAKE_RADIUS = 1.2;   // designer TIER_RADII[0]
 const CAKE_HEIGHT = 1.45;  // designer BOTTOM_H
 const Y_BASE      = 0.1;   // top of board (designer BOTTOM_BASE)
 const SWAG_LIFT   = 0.55;  // attachment height the festoon hangs from when swag is first enabled
+
+// ── Sheet (rectangular) cake samples ──────────────────────────────────────────
+// Preview-only: lets you check the pattern on a sheet cake as well as the round one.
+// Standard US bakery sizes (w × d inches), scaled so the half sheet's long side reads
+// at roughly the round cake's footprint (diameter 2.4). w = long side (world X), d = short (Z).
+const SHEET_INCH_TO_WORLD = 0.12;
+const inToW = (n) => +(n * SHEET_INCH_TO_WORLD).toFixed(3);
+const SHEET_SIZES = [
+  { key: 'quarter', label: 'Quarter', inches: '9×13',  w: inToW(13), d: inToW(9)  },
+  { key: 'half',    label: 'Half',    inches: '13×18', w: inToW(18), d: inToW(13) },
+  { key: 'full',    label: 'Full',    inches: '18×26', w: inToW(26), d: inToW(18) },
+];
+const SHEET_CORNER_R = 0.14;   // fillet on the sheet cake's vertical corners
+
+// Build the rounded-rect perimeter for a sheet `shape` ({ halfW, halfD, cornerR }) or
+// null for a circle. Exposes { length, at(s) → { x, z, nx, nz } } where (nx,nz) is the
+// unit OUTWARD normal — the shell's facing is atan2(nz,nx), so on a circle this reduces
+// to the same polar angle the round ring already uses.
+function roundedRectPerimeter(halfW, halfD, cornerR) {
+  const cr = Math.max(0, Math.min(cornerR, halfW, halfD));
+  const sx = halfW - cr, sz = halfD - cr;
+  const A = (Math.PI / 2) * cr, HP = Math.PI / 2;
+  const line = (x0, z0, x1, z1, nx, nz) => ({
+    len: Math.hypot(x1 - x0, z1 - z0),
+    at: (u) => ({ x: x0 + (x1 - x0) * u, z: z0 + (z1 - z0) * u, nx, nz }),
+  });
+  const arc = (cx, cz, a0, a1) => ({
+    len: A,
+    at: (u) => { const a = a0 + (a1 - a0) * u, nx = Math.cos(a), nz = Math.sin(a);
+                 return { x: cx + cr * nx, z: cz + cr * nz, nx, nz }; },
+  });
+  // Start at front-centre (0,+halfD), wind once around. s=0 is the cake front (+Z).
+  const segs = [
+    line(0, halfD, sx, halfD, 0, 1),
+    arc(sx, sz, HP, 0),
+    line(halfW, sz, halfW, -sz, 1, 0),
+    arc(sx, -sz, 0, -HP),
+    line(sx, -halfD, -sx, -halfD, 0, -1),
+    arc(-sx, -sz, -HP, -Math.PI),
+    line(-halfW, -sz, -halfW, sz, -1, 0),
+    arc(-sx, sz, Math.PI, HP),
+    line(-sx, halfD, 0, halfD, 0, 1),
+  ];
+  const length = segs.reduce((t, s) => t + s.len, 0);
+  return {
+    length,
+    at(s) {
+      let d = ((s % length) + length) % length;
+      for (let k = 0; k < segs.length; k++) {
+        if (d <= segs[k].len || k === segs.length - 1) return segs[k].at(segs[k].len ? d / segs[k].len : 0);
+        d -= segs[k].len;
+      }
+      return segs[0].at(0);
+    },
+  };
+}
 
 // ── Bend a straight strip GLB into U-shaped festoons (swags) on the cake wall ──
 // One strip = one swag, its whole mesh bent into a U (belly hangs, ends attach high).
@@ -141,7 +197,7 @@ function buildShellGeo(scene, flip) {
   return { geometry: geo, shellScale: sc, bbDepth: bb.z, bbWidth: bb.x };
 }
 
-function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl }) {
+function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape = null }) {
   const { scene } = useGLTF(glbUrl);
   const { scene: sceneAlt } = useGLTF(altGlbUrl || glbUrl);
 
@@ -151,14 +207,27 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl }) {
 
   const pattern = patternStr(cfg);
   const altActive = cfg.altEnabled;
+  const isRect = shape?.kind === 'rect';
 
-  // Ring positions — identical formula to BottomPipingRing in the designer
+  // Ring positions — identical formula to BottomPipingRing in the designer.
+  // Sheet cakes walk a rounded-rect perimeter; round cakes keep the circle.
   const positions = useMemo(() => {
     if (!A) return [];
     // Board hugs the side wall (outward); rim sits on the top surface (inward).
     const halfDepth = (A.bbDepth / 2) * A.shellScale;
-    const r    = CAKE_RADIUS + (inward ? -halfDepth : halfDepth) + cfg.radialOffset;
+    const off  = (inward ? -halfDepth : halfDepth) + cfg.radialOffset;
+    const r    = CAKE_RADIUS + off;
     const step = A.shellScale * A.bbWidth * 0.9 * (cfg.spacing ?? 1);
+    if (isRect) {
+      // Swag/bend aren't modelled on rectangles yet — fall back to a flat wrapped ring.
+      const perim = roundedRectPerimeter(shape.halfW, shape.halfD, shape.cornerR);
+      let count = Math.max(6, Math.round(perim.length / step));
+      if (altActive) { const L = pattern.length || 1; count = Math.max(L, Math.ceil(count / L) * L); }
+      return Array.from({ length: count }, (_, i) => {
+        const p = perim.at((i / count) * perim.length);
+        return { pos: [p.x + off * p.nx, anchorY + cfg.yOffset, p.z + off * p.nz], rotY: Math.atan2(p.nz, p.nx), tq: [0, 0, 0, 1] };
+      });
+    }
     if (cfg.swagCount > 0 && cfg.swagDepth > 0) {
       return buildSwagRing({ r, baseY: anchorY + cfg.yOffset, step, swagCount: cfg.swagCount, swagDepth: cfg.swagDepth, swagTilt: cfg.swagTilt });
     }
@@ -168,11 +237,11 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl }) {
       const angle = (i / count) * Math.PI * 2;
       return { pos: [Math.cos(angle) * r, anchorY + cfg.yOffset, Math.sin(angle) * r], rotY: angle, tq: [0, 0, 0, 1] };
     });
-  }, [A, cfg.radialOffset, cfg.yOffset, cfg.spacing, cfg.swagCount, cfg.swagDepth, cfg.swagTilt, anchorY, inward, altActive, pattern]);
+  }, [A, cfg.radialOffset, cfg.yOffset, cfg.spacing, cfg.swagCount, cfg.swagDepth, cfg.swagTilt, anchorY, inward, altActive, pattern, isRect, shape]);
 
-  // Bend mode: deform the whole strip into U festoons draped on the wall.
+  // Bend mode: deform the whole strip into U festoons draped on the wall (round-only).
   const festoonGeos = useMemo(() => {
-    if (!cfg.bend) return null;
+    if (!cfg.bend || isRect) return null;
     return buildFestoons(scene, {
       flip: false,
       festoons: cfg.festoons,
@@ -180,7 +249,7 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl }) {
       attachY: anchorY + cfg.yOffset,
       radius: CAKE_RADIUS + cfg.radialOffset,
     });
-  }, [scene, cfg.bend, cfg.festoons, cfg.bendDepth, cfg.yOffset, cfg.radialOffset, anchorY]);
+  }, [scene, cfg.bend, cfg.festoons, cfg.bendDepth, cfg.yOffset, cfg.radialOffset, anchorY, isRect]);
 
   if (!A) return null;
 
@@ -363,19 +432,36 @@ export function PatternCakeThumb({
 }
 
 // ── Cake + board backdrop ─────────────────────────────────────────────────────
-function CakeScene() {
+// `shape` null → round cylinder; { kind:'rect', halfW, halfD, cornerR } → sheet cake.
+function CakeScene({ shape = null }) {
+  const isRect = shape?.kind === 'rect';
   return (
     <>
-      {/* Board */}
-      <mesh position={[0, 0.05, 0]} receiveShadow>
-        <cylinderGeometry args={[CAKE_RADIUS + 0.6, CAKE_RADIUS + 0.6, 0.1, 64]} />
-        <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
-      </mesh>
-      {/* Cake */}
-      <mesh position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[CAKE_RADIUS, CAKE_RADIUS, CAKE_HEIGHT, 64]} />
-        <meshStandardMaterial color="#f5c6d0" roughness={0.68} />
-      </mesh>
+      {isRect ? (
+        <>
+          {/* Board — rounded slab a little larger than the cake footprint */}
+          <RoundedBox position={[0, 0.05, 0]} args={[(shape.halfW + 0.45) * 2, 0.1, (shape.halfD + 0.45) * 2]} radius={0.05} smoothness={4} receiveShadow>
+            <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
+          </RoundedBox>
+          {/* Sheet cake body */}
+          <RoundedBox position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]} args={[shape.halfW * 2, CAKE_HEIGHT, shape.halfD * 2]} radius={shape.cornerR} smoothness={4} castShadow receiveShadow>
+            <meshStandardMaterial color="#f5c6d0" roughness={0.68} />
+          </RoundedBox>
+        </>
+      ) : (
+        <>
+          {/* Board */}
+          <mesh position={[0, 0.05, 0]} receiveShadow>
+            <cylinderGeometry args={[CAKE_RADIUS + 0.6, CAKE_RADIUS + 0.6, 0.1, 64]} />
+            <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
+          </mesh>
+          {/* Cake */}
+          <mesh position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[CAKE_RADIUS, CAKE_RADIUS, CAKE_HEIGHT, 64]} />
+            <meshStandardMaterial color="#f5c6d0" roughness={0.68} />
+          </mesh>
+        </>
+      )}
       {/* Floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
         <planeGeometry args={[20, 20]} />
@@ -465,6 +551,15 @@ export default function PipingCalibrator() {
   const [altBlobUrl, setAltBlobUrl] = useState(null);
   const [showRing, setShowRing] = useState(false);
   const [target, setTarget] = useState('board'); // which config the sliders edit: 'board' | 'rim'
+  const [sampleShape, setSampleShape] = useState('cylinder'); // preview cake: 'cylinder' | 'rect'
+  const [sheetKey,    setSheetKey]    = useState('half');     // which sheet size when rect
+
+  // Preview shape passed to the cake + rings. null = round; else the sheet's rounded-rect.
+  const shape = useMemo(() => {
+    if (sampleShape !== 'rect') return null;
+    const sz = SHEET_SIZES.find(z => z.key === sheetKey) ?? SHEET_SIZES[1];
+    return { kind: 'rect', halfW: sz.w / 2, halfD: sz.d / 2, cornerR: SHEET_CORNER_R };
+  }, [sampleShape, sheetKey]);
 
   // Independent configs — the board ring sits OUTSIDE the wall, the rim pulls INWARD,
   // so each needs its own rotation/offsets. The Board/Rim selector just swaps which one
@@ -588,6 +683,34 @@ export default function PipingCalibrator() {
       <div style={{ width: 320, flexShrink: 0, overflowY: 'auto', background: '#fff', borderRight: '1.5px solid #E8EFE9', padding: 20, position: 'relative', zIndex: 10 }}>
 
         <div style={{ fontSize: 15, fontWeight: 800, color: '#2C4433', marginBottom: 12 }}>Piping Calibrator</div>
+
+        {/* Sample cake shape — check the pattern on a round or sheet cake (preview only) */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', marginBottom: 4 }}>Sample cake</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[{ v: 'cylinder', label: 'Round' }, { v: 'rect', label: 'Sheet' }].map(({ v, label }) => (
+              <button key={v} onClick={() => setSampleShape(v)}
+                style={{ flex: 1, fontSize: 11, padding: '6px 0', borderRadius: 6, border: `2px solid ${sampleShape === v ? '#3D5A44' : '#C5D4C8'}`, background: sampleShape === v ? '#3D5A44' : '#fff', color: sampleShape === v ? '#fff' : '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {sampleShape === 'rect' && (
+            <>
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                {SHEET_SIZES.map(sz => (
+                  <button key={sz.key} onClick={() => setSheetKey(sz.key)} title={`${sz.label} sheet · ${sz.inches}"`}
+                    style={{ flex: 1, fontSize: 10, padding: '5px 0', borderRadius: 6, border: `2px solid ${sheetKey === sz.key ? '#9B5F72' : '#C5D4C8'}`, background: sheetKey === sz.key ? '#9B5F72' : '#fff', color: sheetKey === sz.key ? '#fff' : '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
+                    {sz.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 10, color: '#9BB5A2', marginTop: 6, lineHeight: 1.5 }}>
+                Preview only — checks the pattern on a sheet cake. Swag/bend aren’t modelled on sheets yet (they show as a flat ring), and the copied JSON is unchanged.
+              </div>
+            </>
+          )}
+        </div>
 
         {/* Mode: tune a local GLB (copy JSON) vs create a pattern from a library element */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
@@ -849,15 +972,15 @@ export default function PipingCalibrator() {
           <color attach="background" args={['#f4f0ea']} />
           <Environment preset="apartment" backgroundBlurriness={1} />
 
-          <CakeScene />
+          <CakeScene shape={shape} />
 
           <Suspense fallback={null}>
             {/* Both rings render together; a ring shows when it's included OR being edited. */}
             {activeGlbUrl && (includeBoard || target === 'board') && (
-              <CalibScene glbUrl={activeGlbUrl} cfg={boardCfg} showRing={showRing} anchorY={Y_BASE} inward={false} altGlbUrl={altBlobUrl} />
+              <CalibScene glbUrl={activeGlbUrl} cfg={boardCfg} showRing={showRing} anchorY={Y_BASE} inward={false} altGlbUrl={altBlobUrl} shape={shape} />
             )}
             {activeGlbUrl && (includeRim || target === 'rim') && (
-              <CalibScene glbUrl={activeGlbUrl} cfg={rimCfg} showRing={showRing} anchorY={Y_BASE + CAKE_HEIGHT} inward={true} altGlbUrl={altBlobUrl} />
+              <CalibScene glbUrl={activeGlbUrl} cfg={rimCfg} showRing={showRing} anchorY={Y_BASE + CAKE_HEIGHT} inward={true} altGlbUrl={altBlobUrl} shape={shape} />
             )}
           </Suspense>
 
