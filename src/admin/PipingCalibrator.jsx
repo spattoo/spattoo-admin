@@ -806,7 +806,7 @@ export default function PipingCalibrator() {
         thumbnail_url:    thumbKey,
         allowed_zones:    zones,
         placement_config,
-        allowed_actions:  { resize: true, duplicate: true, color: true, delete: true },
+        allowed_actions:  { resize: true, duplicate: true, color: true, delete: true, move: false, tilt: false },
         sort_order:       0,
       });
       setMsg({ ok: true, text: `Pattern "${patternName.trim()}" created.` });

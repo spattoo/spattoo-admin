@@ -396,7 +396,7 @@ export default function ManageElements() {
   const [isParent,         setIsParent]         = useState(false);
   const [parentId,         setParentId]         = useState('');
   const [parentOptions,    setParentOptions]    = useState([]);
-  const [capabilities,     setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true });
+  const [capabilities,     setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
   const [defaultColor,     setDefaultColor]     = useState('#F0DEB8');
   const [isActive,         setIsActive]         = useState(true);
 
@@ -463,7 +463,7 @@ export default function ManageElements() {
     setApplicableZones(el.allowed_zones ?? []);
     setIsParent(!el.parent_id);
     setParentId(el.parent_id ?? '');
-    setCapabilities(el.allowed_actions ?? { resize: true, duplicate: true, color: false, delete: true });
+    setCapabilities(el.allowed_actions ?? { resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
     setDefaultColor(el.default_color ?? '#F0DEB8');
     setPreviewColor(el.default_color ?? '#f5e6c8');   // seed pattern-thumbnail cream from default
     setIsActive(el.is_active ?? true);
@@ -1260,6 +1260,8 @@ export default function ManageElements() {
                       { key: 'duplicate', label: 'Duplicatable',     hint: 'Copy button creates another instance' },
                       { key: 'color',     label: 'Color changeable', hint: 'Color picker in designer (GLB only)' },
                       { key: 'delete',    label: 'Deletable',        hint: 'Remove button shown when selected' },
+                      { key: 'move',      label: 'Movable',          hint: 'Nudge ◀▶▲▼ position on the cake' },
+                      { key: 'tilt',      label: 'Tiltable',         hint: 'Lean / rotate slightly in the designer' },
                     ].map(({ key, label, hint }) => (
                       <label key={key} style={{ ...s.checkRow, alignItems: 'flex-start', cursor: 'pointer' }}>
                         <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}

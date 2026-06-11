@@ -273,7 +273,7 @@ export default function AddElement() {
   const [thumbnailBlob, setThumbnailBlob] = useState(null);
   const [placementConfig, setPlacementConfig] = useState({});
   const [placementScale, setPlacementScale]   = useState('');
-  const [capabilities, setCapabilities]       = useState({ resize: true, duplicate: true, color: false, delete: true });
+  const [capabilities, setCapabilities]       = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
   const [glbRotation, setGlbRotation]         = useState([0, 0, 0]);
   const [frontConfirmed, setFrontConfirmed]   = useState(false);
   const [pipingBottomFlip, setPipingBottomFlip] = useState(true);
@@ -586,7 +586,7 @@ export default function AddElement() {
       setThumbnailBlob(null);
       setPlacementConfig({});
       setPlacementScale('');
-      setCapabilities({ resize: true, duplicate: true, color: false, delete: true });
+      setCapabilities({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
       setPipingBottomFlip(true);
       setCraftRecs([]);
       setCraftConsistency('');
@@ -937,6 +937,8 @@ export default function AddElement() {
                 { key: 'duplicate', label: 'Duplicatable',     hint: 'Copy button creates another instance with same size and color' },
                 { key: 'color',     label: 'Color changeable', hint: 'Color picker in designer (GLB only)' },
                 { key: 'delete',    label: 'Deletable',        hint: 'Remove button shown when selected' },
+                { key: 'move',      label: 'Movable',          hint: 'Nudge ◀▶▲▼ position on the cake' },
+                { key: 'tilt',      label: 'Tiltable',         hint: 'Lean / rotate slightly in the designer' },
               ].map(({ key, label, hint }) => (
                 <label key={key} style={{ ...s.checkRow, alignItems: 'flex-start', cursor: 'pointer' }}>
                   <input

@@ -37,7 +37,7 @@ const SHAPE_3D_PRESETS = {
   fauxball3d: { color: '#D4A843', roughness: 0.12, metalness: 0.96 },
 };
 
-const ZONES = ['top_surface', 'side', 'middle_tier', 'board'];
+import { ZONE_LIST as ZONES } from '../lib/constants.js';
 
 // ── 2D drawing ───────────────────────────────────────────────────────────────
 
@@ -337,7 +337,7 @@ export default function GenerateShape() {
   const [name, setName]                     = useState('Faux Ball');
   const [zones, setZones]                   = useState(['top_surface', 'side', 'middle_tier']);
   const [placementConfig, setPlacementConfig] = useState({});
-  const [capabilities, setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true });
+  const [capabilities, setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
   const [saving, setSaving]                 = useState(false);
   const [msg, setMsg]                       = useState(null);
 
@@ -686,6 +686,8 @@ export default function GenerateShape() {
                 { key: 'duplicate', label: 'Duplicatable',     hint: 'Copy button creates another instance with same size and color' },
                 { key: 'color',     label: 'Color changeable', hint: 'Color picker in designer (3D only)' },
                 { key: 'delete',    label: 'Deletable',        hint: 'Remove button shown when selected' },
+                { key: 'move',      label: 'Movable',          hint: 'Nudge ◀▶▲▼ position on the cake' },
+                { key: 'tilt',      label: 'Tiltable',         hint: 'Lean / rotate slightly in the designer' },
               ].map(({ key, label, hint }) => (
                 <label key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
                   <input

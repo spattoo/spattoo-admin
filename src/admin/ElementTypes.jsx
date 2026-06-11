@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchAdminElementTypes, createElementType, updateElementType } from '../lib/api.js';
 
-const ZONES = ['top_surface', 'side', 'middle_tier', 'board'];
+import { ZONE_LIST as ZONES } from '../lib/constants.js';
 const MODES = ['hug', 'stand'];
 
 function slugify(str) {

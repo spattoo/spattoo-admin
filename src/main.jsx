@@ -13,6 +13,8 @@ const OnboardBaker     = lazy(() => import('./admin/OnboardBaker.jsx'));
 const ManageTemplates  = lazy(() => import('./admin/ManageTemplates.jsx'));
 const DesignTemplate   = lazy(() => import('./admin/DesignTemplate.jsx'));
 const GenerateShape    = lazy(() => import('./admin/GenerateShape.jsx'));
+const GenerateModel    = lazy(() => import('./admin/GenerateModel.jsx'));
+const GlbStudio        = lazy(() => import('./admin/GlbStudio.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
 const ManageFlavours        = lazy(() => import('./admin/ManageFlavours.jsx'));
@@ -31,6 +33,8 @@ const ROUTES = {
   '/elements/add':        AddElement,
   '/elements/manage':     ManageElements,
   '/elements/generate':   GenerateShape,
+  '/elements/generate-model': GenerateModel,
+  '/glb-studio':          GlbStudio,
   '/elements/types':      ElementTypes,
   '/elements/tags':       ManageTags,
   '/elements/nozzles':    ManageNozzles,
@@ -196,6 +200,8 @@ function Router({ session }) {
             { href: '/elements/add',      label: 'Add Element' },
             { href: '/elements/manage',   label: 'Manage Elements' },
             { href: '/elements/generate', label: 'Generate Shape' },
+            { href: '/elements/generate-model', label: '🧊 Generate 3D Model' },
+            { href: '/glb-studio', label: '🧩 GLB Studio' },
             { href: '/elements/types',    label: 'Element Types' },
             { href: '/elements/nozzles',  label: '🔧 Nozzle Catalog' },
             { href: '/bakers/onboard',        label: 'Onboard Baker' },
