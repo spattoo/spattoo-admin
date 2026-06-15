@@ -15,6 +15,7 @@ const DesignTemplate   = lazy(() => import('./admin/DesignTemplate.jsx'));
 const GenerateShape    = lazy(() => import('./admin/GenerateShape.jsx'));
 const GenerateModel    = lazy(() => import('./admin/GenerateModel.jsx'));
 const GlbStudio        = lazy(() => import('./admin/GlbStudio.jsx'));
+const GlbRecompose     = lazy(() => import('./admin/GlbRecompose.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
 const ManageFlavours        = lazy(() => import('./admin/ManageFlavours.jsx'));
@@ -35,6 +36,7 @@ const ROUTES = {
   '/elements/generate':   GenerateShape,
   '/elements/generate-model': GenerateModel,
   '/glb-studio':          GlbStudio,
+  '/glb-recompose':       GlbRecompose,
   '/elements/types':      ElementTypes,
   '/elements/tags':       ManageTags,
   '/elements/nozzles':    ManageNozzles,
@@ -142,7 +144,7 @@ function AppHeader({ session }) {
                     display: 'flex', alignItems: 'center', gap: 8,
                   }}
                 >
-                  <span>↪</span> Sign Out
+                  Sign Out
                 </button>
               </div>
             </>
@@ -200,18 +202,19 @@ function Router({ session }) {
             { href: '/elements/add',      label: 'Add Element' },
             { href: '/elements/manage',   label: 'Manage Elements' },
             { href: '/elements/generate', label: 'Generate Shape' },
-            { href: '/elements/generate-model', label: '🧊 Generate 3D Model' },
-            { href: '/glb-studio', label: '🧩 GLB Studio' },
+            { href: '/elements/generate-model', label: 'Generate 3D Model' },
+            { href: '/glb-studio', label: 'GLB Studio' },
+            { href: '/glb-recompose', label: 'GLB Recompose' },
             { href: '/elements/types',    label: 'Element Types' },
-            { href: '/elements/nozzles',  label: '🔧 Nozzle Catalog' },
+            { href: '/elements/nozzles',  label: 'Nozzle Catalog' },
             { href: '/bakers/onboard',        label: 'Onboard Baker' },
             { href: '/bakers/subscriptions',  label: 'Baker Subscriptions' },
             { href: '/plans',                 label: 'Subscription Plans' },
             { href: '/flavours',              label: 'Cake Flavours' },
             { href: '/pattern-builder',       label: 'Pattern Builder' },
             { href: '/elements/piping-calibrator', label: 'Calibrator' },
-            { href: '/elements/cream-pen',         label: '🖊️ Cream Pen' },
-            { href: '/elements/freehand-pen',      label: '✍️ Freehand Pen' },
+            { href: '/elements/cream-pen',         label: 'Cream Pen' },
+            { href: '/elements/freehand-pen',      label: 'Freehand Pen' },
           ].map(({ href, label }) => (
             <li key={href}>
               <a href={href} style={{ display: 'block', padding: '14px 20px', background: '#fff', borderRadius: 12, border: '1.5px solid #C5D4C8', color: '#2C4433', fontWeight: 700, textDecoration: 'none', fontSize: 14 }}>
