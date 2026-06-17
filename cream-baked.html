@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8" /><title>Baked cream normal on cylinder</title>
+<style>html,body{margin:0;background:#eef0ec;overflow:hidden}</style></head>
+<body>
+  <canvas id="c" width="760" height="640"></canvas>
+  <script type="module">
+    import * as THREE from 'three';
+    const q = new URLSearchParams(location.search);
+    const n = (k,d)=> q.has(k)?+q.get(k):d;
+    const depth = n('depth', 1.0), yaw = n('yaw', 0);
+
+    const canvas=document.getElementById('c');
+    const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+    renderer.setSize(760,640,false);
+    const scene=new THREE.Scene();
+    const camera=new THREE.PerspectiveCamera(40,760/640,0.1,100);
+    camera.position.set(0,0.1,3.4); camera.lookAt(0,0,0);
+    scene.add(new THREE.AmbientLight(0xffffff,0.45));
+    const key=new THREE.DirectionalLight(0xffffff,2.4); key.position.set(4,6,4); scene.add(key);
+    const fill=new THREE.DirectionalLight(0xffffff,1.0); fill.position.set(-3,2,-2); scene.add(fill);
+
+    new THREE.TextureLoader().load('/cream_normal.png', (tex)=>{
+      tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.colorSpace=THREE.NoColorSpace;
+      const geo=new THREE.CylinderGeometry(0.92,0.92,1.44,256,1);
+      const side=new THREE.MeshStandardMaterial({color:0xf7f1e8,roughness:0.9,metalness:0,normalMap:tex,normalScale:new THREE.Vector2(depth,depth)});
+      const cap=new THREE.MeshStandardMaterial({color:0xf7f1e8,roughness:0.9,metalness:0});
+      const mesh=new THREE.Mesh(geo,[side,cap,cap]); mesh.rotation.y=yaw; scene.add(mesh);
+      renderer.render(scene,camera);
+      requestAnimationFrame(()=>{renderer.render(scene,camera);window.__ready=true;});
+    });
+  </script>
+</body>
+</html>

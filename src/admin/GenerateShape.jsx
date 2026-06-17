@@ -1,9 +1,16 @@
 import { useState, useRef, useEffect, useMemo, Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useLoader, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
+import { displaceCreamWaveCylinder, getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
+
+// Cream-wave finish: a tangent-space normal map baked from the Meshy reference cake (its wavy
+// combing lives in geometry, so we baked it to a map and apply it to a SMOOTH cylinder — the
+// silhouette/extents stay clean for the designer's collision/placement clamps).
+const CREAM_NORMAL_URL = '/cream_normal.png';
 
 // ── 2D canvas constants ──────────────────────────────────────────────────────
 
@@ -30,12 +37,22 @@ const SHAPES_3D = [
   { id: 'cone',      label: 'Cone' },
   { id: 'torus',     label: 'Ring / Torus' },
   { id: 'cube',      label: 'Cube' },
+  { id: 'creamcake', label: 'Cream Cake' },
+  { id: 'creamwaveproc', label: 'Cream Wave (Proc)' },
 ];
 
 // Per-shape material presets applied when the shape is selected
 const SHAPE_3D_PRESETS = {
-  fauxball3d: { color: '#D4A843', roughness: 0.12, metalness: 0.96 },
+  fauxball3d:    { color: '#D4A843', roughness: 0.12, metalness: 0.96 },
+  creamcake:     { color: '#f7f1e8', roughness: 0.62, metalness: 0.00 },
+  creamwaveproc: { color: '#f7f1e8', roughness: 0.62, metalness: 0.00 },
 };
+
+// Default cream-wave tuning. With the baked normal map, only relief depth (normalScale) applies.
+const CREAM_DEFAULTS = { depth: 1.0 };
+
+// Procedural cream-wave defaults (the tunable engine — density/depth/falloff/wave are continuous).
+const PROC_DEFAULTS = { density: 6, lobes: 2, wave: 0.35, interleave: 0.9, lineWidth: 0.05, relief: 0.03, falloff: 0.4 };
 
 import { ZONE_LIST as ZONES } from '../lib/constants.js';
 
@@ -237,6 +254,8 @@ function make3DGeometry(shapeId) {
     case 'cone':     return new THREE.ConeGeometry(1, 2, 48);
     case 'torus':    return new THREE.TorusGeometry(0.75, 0.32, 24, 120);
     case 'cube':     return new THREE.BoxGeometry(1.6, 1.6, 1.6);
+    case 'creamcake':
+    case 'creamwaveproc': return new THREE.CylinderGeometry(1, 1, 1.7, 220, 1);
     default:         return new THREE.SphereGeometry(1, 48, 48);
   }
 }
@@ -265,8 +284,75 @@ async function buildAndExportGLB(shapeId, color, roughness, metalness) {
 
 // ── 3D preview component ─────────────────────────────────────────────────────
 
-function ShapeMesh({ shapeId, color, roughness, metalness }) {
-  const geometry = useMemo(() => shapeId === 'fauxball3d' ? null : make3DGeometry(shapeId), [shapeId]);
+// Combed-buttercream cylinder: the baked cream-wave normal map on the SIDE, plain caps
+// (CylinderGeometry material groups: 0 = side, 1 = top, 2 = bottom). `depth` (normalScale) is the
+// only live knob — it scales the relief without touching geometry.
+function CreamCakeMesh({ color, roughness, cream }) {
+  const geometry = useMemo(() => new THREE.CylinderGeometry(1, 1, 1.7, 256, 1), []);
+  const normalMap = useLoader(THREE.TextureLoader, CREAM_NORMAL_URL);
+  useMemo(() => {
+    normalMap.wrapS = normalMap.wrapT = THREE.RepeatWrapping;
+    normalMap.colorSpace = THREE.NoColorSpace;   // a normal map is data, not colour
+    normalMap.needsUpdate = true;
+  }, [normalMap]);
+  return (
+    <mesh geometry={geometry}>
+      <meshPhysicalMaterial attach="material-0" color={color} roughness={roughness} metalness={0}
+        clearcoat={0.08} clearcoatRoughness={0.6} sheen={0.3} sheenRoughness={0.6}
+        sheenColor={'#fff6e8'} envMapIntensity={0.5}
+        normalMap={normalMap} normalScale={[cream.depth, cream.depth]} />
+      <meshPhysicalMaterial attach="material-1" color={color} roughness={roughness} metalness={0}
+        clearcoat={0.08} clearcoatRoughness={0.6} sheen={0.3} sheenRoughness={0.6} sheenColor={'#fff6e8'} envMapIntensity={0.5} />
+      <meshPhysicalMaterial attach="material-2" color={color} roughness={roughness} metalness={0}
+        clearcoat={0.08} clearcoatRoughness={0.6} sheen={0.3} sheenRoughness={0.6} sheenColor={'#fff6e8'} envMapIntensity={0.5} />
+    </mesh>
+  );
+}
+
+// PROCEDURAL cream-wave cylinder — REAL displaced geometry (the ribs project and break the
+// silhouette, like the Meshy reference; a normal map can't). The side wall is pushed out by the
+// shared wave field; thin `lineWidth` (ribbonW) leaves a smooth wall with thin proud lines, and
+// `relief` is the world-space depth. `interleave` (0..1) maps to bandPhase 0..π: 0 = parallel
+// corduroy, 0.9 = the braided, out-of-phase ripple. Geometry rebuilds only when a field param moves.
+function ProcCreamMesh({ color, roughness, proc }) {
+  const geometry = useMemo(() => {
+    const g = new THREE.CylinderGeometry(1, 1, 1.7, 420, 380);   // dense enough to resolve thin incised lines
+    displaceCreamWaveCylinder(g, {
+      relief: proc.relief, ridges: proc.density, lobes: proc.lobes, waveAmp: proc.wave,
+      ribbonW: proc.lineWidth, bandPhase: proc.interleave * Math.PI, falloff: proc.falloff,
+    });
+    return g;
+  }, [proc.relief, proc.density, proc.lobes, proc.wave, proc.lineWidth, proc.interleave, proc.falloff]);
+  // Fine sugar-paste micro-grain tiled small over the wall — makes it read as cream, not plastic.
+  const grain = useMemo(() => {
+    const g = getCreamGrainNormalMap().clone();
+    g.wrapS = g.wrapT = THREE.RepeatWrapping; g.repeat.set(10, 18); g.needsUpdate = true;
+    return g;
+  }, []);
+  // Buttercream material: MATTE-satin (high roughness, only a whisper of clearcoat/sheen — not glossy
+  // plastic) + the grain. Needs the scene env (StudioEnv) for its soft reflections. Same on all three
+  // groups (side + caps).
+  const mat = (key) => (
+    <meshPhysicalMaterial attach={key} color={color} metalness={0} roughness={roughness}
+      clearcoat={0.08} clearcoatRoughness={0.6} sheen={0.3} sheenRoughness={0.6}
+      sheenColor={'#fff6e8'} envMapIntensity={0.5}
+      normalMap={grain} normalScale={[0.18, 0.18]} />
+  );
+  return (
+    <mesh geometry={geometry}>
+      {mat('material-0')}{mat('material-1')}{mat('material-2')}
+    </mesh>
+  );
+}
+
+function ShapeMesh({ shapeId, color, roughness, metalness, cream, proc }) {
+  const geometry = useMemo(() => (shapeId === 'fauxball3d' || shapeId === 'creamcake' || shapeId === 'creamwaveproc') ? null : make3DGeometry(shapeId), [shapeId]);
+  if (shapeId === 'creamcake') {
+    return <CreamCakeMesh color={color} roughness={roughness} cream={cream} />;
+  }
+  if (shapeId === 'creamwaveproc') {
+    return <ProcCreamMesh color={color} roughness={roughness} proc={proc} />;
+  }
   if (shapeId === 'fauxball3d') {
     return (
       <group>
@@ -288,19 +374,37 @@ function ShapeMesh({ shapeId, color, roughness, metalness }) {
   );
 }
 
-function Preview3D({ shapeId, color, roughness, metalness, containerRef, ambientInt, keyInt, fillInt, envPreset }) {
+// Local image-based lighting from three's RoomEnvironment (a soft studio) — no CDN fetch, unlike
+// drei's preset HDRs. The gentle reflections are what make cream read as cream; without an env map
+// the sheen/clearcoat have nothing to reflect and the surface looks matte.
+function StudioEnv() {
+  const { gl, scene } = useThree();
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = tex;
+    return () => { tex.dispose(); pmrem.dispose(); scene.environment = null; };
+  }, [gl, scene]);
+  return null;
+}
+
+function Preview3D({ shapeId, color, roughness, metalness, cream, proc, containerRef, ambientInt, keyInt, fillInt, envPreset }) {
   return (
     <div
       ref={containerRef}
       style={{ height: 260, borderRadius: 12, overflow: 'hidden', background: '#E8EDE9' }}
     >
-      <Canvas gl={{ preserveDrawingBuffer: true, alpha: true }} camera={{ position: [0, 1, 3.5], fov: 40 }}>
+      <Canvas
+        gl={{ preserveDrawingBuffer: true, alpha: true }}
+        camera={{ position: [0, 1, 3.5], fov: 40 }}
+        onCreated={({ gl }) => { gl.toneMapping = THREE.ACESFilmicToneMapping; gl.toneMappingExposure = 0.85; }}
+      >
         <ambientLight intensity={ambientInt} />
         <directionalLight position={[4, 6, 4]} intensity={keyInt} />
         <directionalLight position={[-3, 2, -2]} intensity={fillInt} />
-        {envPreset !== 'none' && <Environment preset={envPreset} />}
+        {envPreset === 'none' ? <StudioEnv /> : <Environment preset={envPreset} />}
         <Suspense fallback={null}>
-          <ShapeMesh shapeId={shapeId} color={color} roughness={roughness} metalness={metalness} />
+          <ShapeMesh shapeId={shapeId} color={color} roughness={roughness} metalness={metalness} cream={cream} proc={proc} />
         </Suspense>
         <OrbitControls enablePan={false} />
       </Canvas>
@@ -325,10 +429,16 @@ export default function GenerateShape() {
   const [roughness, setRoughness]     = useState(SHAPE_3D_PRESETS.fauxball3d.roughness);
   const [metalness, setMetalness]     = useState(SHAPE_3D_PRESETS.fauxball3d.metalness);
 
-  // Lighting
-  const [ambientInt, setAmbientInt]   = useState(0.4);
-  const [keyInt, setKeyInt]           = useState(2.5);
-  const [fillInt, setFillInt]         = useState(1.0);
+  // Cream-wave finish tuning (only used by the 'creamcake' preview shape).
+  const [cream, setCream]             = useState(CREAM_DEFAULTS);
+  // Procedural cream-wave tuning (only used by the 'creamwaveproc' preview shape).
+  const [proc, setProc]               = useState(PROC_DEFAULTS);
+
+  // Lighting — defaults tuned for the local studio IBL (StudioEnv); the env carries most of the
+  // light so the directional lights are gentle (bright directionals + env washes colour to white).
+  const [ambientInt, setAmbientInt]   = useState(0.25);
+  const [keyInt, setKeyInt]           = useState(1.4);
+  const [fillInt, setFillInt]         = useState(0.5);
   const [envPreset, setEnvPreset]     = useState('none');
 
   // Shared
@@ -618,6 +728,7 @@ export default function GenerateShape() {
                       <span style={s.sliderVal}>{metalness.toFixed(2)}</span>
                     </div>
                   </div>
+
                 </div>
               </div>
             )}
@@ -750,11 +861,67 @@ export default function GenerateShape() {
               </div>
             ) : (
               <div style={{ marginBottom: 20 }}>
+                {/* Cream-wave finish controls live here, directly above the preview, so tuning the
+                    surface needs no scrolling between the sliders and the rendered result. */}
+                {shape3d === 'creamcake' && (
+                  <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={s.sectionTitle}>Cream Wave (baked normal map)</div>
+                    {[
+                      { key: 'depth',  label: 'Depth',      min: 0,  max: 3,  step: 0.05, fmt: v => v.toFixed(2) },
+                    ].map(({ key, label, min, max, step, fmt }) => (
+                      <div key={key}>
+                        <label style={s.label}>{label}</label>
+                        <div style={s.sliderRow}>
+                          <input type="range" min={min} max={max} step={step} value={cream[key]}
+                            onChange={e => setCream(c => ({ ...c, [key]: +e.target.value }))} style={s.slider} />
+                          <span style={s.sliderVal}>{fmt(cream[key])}</span>
+                        </div>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => setCream(CREAM_DEFAULTS)}
+                      style={{ alignSelf: 'flex-start', padding: '6px 12px', borderRadius: 6, border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', fontFamily: 'Quicksand, sans-serif', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                      Reset
+                    </button>
+                  </div>
+                )}
+
+                {shape3d === 'creamwaveproc' && (
+                  <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={s.sectionTitle}>Cream Wave (procedural)</div>
+                    {[
+                      { key: 'density',    label: 'Density (bands)',  min: 2,    max: 24,   step: 1,     fmt: v => v },
+                      { key: 'lobes',      label: 'Waves around',     min: 1,    max: 6,    step: 1,     fmt: v => v },
+                      { key: 'wave',       label: 'Wave amount',      min: 0,    max: 1,    step: 0.05,  fmt: v => v.toFixed(2) },
+                      { key: 'interleave', label: 'Interleave',       min: 0,    max: 1,    step: 0.05,  fmt: v => v.toFixed(2) },
+                      { key: 'lineWidth',  label: 'Line width',       min: 0.04, max: 0.6,  step: 0.01,  fmt: v => v.toFixed(2) },
+                      { key: 'relief',     label: 'Relief (depth)',   min: 0,    max: 0.15, step: 0.005, fmt: v => v.toFixed(3) },
+                      { key: 'falloff',    label: 'Top falloff',      min: 0,    max: 1,    step: 0.05,  fmt: v => v.toFixed(2) },
+                    ].map(({ key, label, min, max, step, fmt }) => (
+                      <div key={key}>
+                        <label style={s.label}>{label}</label>
+                        <div style={s.sliderRow}>
+                          <input type="range" min={min} max={max} step={step} value={proc[key]}
+                            onChange={e => setProc(p => ({ ...p, [key]: +e.target.value }))} style={s.slider} />
+                          <span style={s.sliderVal}>{fmt(proc[key])}</span>
+                        </div>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => setProc(PROC_DEFAULTS)}
+                      style={{ alignSelf: 'flex-start', padding: '6px 12px', borderRadius: 6, border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', fontFamily: 'Quicksand, sans-serif', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                      Reset
+                    </button>
+                  </div>
+                )}
+
                 <Preview3D
                   shapeId={shape3d}
                   color={color3d}
                   roughness={roughness}
                   metalness={metalness}
+                  cream={cream}
+                  proc={proc}
                   containerRef={preview3dRef}
                   ambientInt={ambientInt}
                   keyInt={keyInt}

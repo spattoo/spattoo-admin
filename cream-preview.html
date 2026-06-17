@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Cream Wave Preview (dev harness)</title>
+  <style>html,body{margin:0;background:#eef0ec;overflow:hidden}</style>
+</head>
+<body>
+  <canvas id="c" width="760" height="640"></canvas>
+  <script type="module">
+    // Standalone, auth-free harness for tuning the procedural cream-wave normal map.
+    // Params via query string, e.g. /cream-preview.html?ridges=22&lobes=3&wave=0.7&depth=0.8&ribbon=0.62&yaw=0
+    import * as THREE from 'three';
+    import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+    import { getCreamWaveNormalMap, displaceCreamWaveCylinder, getCreamGrainNormalMap } from '/src/lib/creamWaveTexture.js';
+
+    const q = new URLSearchParams(location.search);
+    const n = (k, d) => (q.has(k) ? +q.get(k) : d);
+
+    const opts = {
+      ridges:   n('ridges', 6),
+      lobes:    n('lobes', 2),
+      waveAmp:  n('wave', 0.35),
+      noiseAmt: n('noise', 0.12),
+      reliefNM: n('reliefnm', 1.0),    // normal-map relief (only the non-geo path)
+      ribbonW:  n('ribbon', 0.05),
+      driftAmt: n('drift', 0.08),
+      falloff:  n('falloff', 0.4),
+      bandPhase: n('band', 0.9 * Math.PI),
+    };
+    const depth = n('depth', 0.6);
+    const yaw   = n('yaw', 0);
+    const nsx   = n('nsx', 1);   // normalScale X sign (diagnostic)
+    const nsy   = n('nsy', 1);   // normalScale Y sign — flip to test proud-vs-recessed inversion
+
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.78;
+    renderer.setPixelRatio(1);
+    renderer.setSize(760, 640, false);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(40, 760 / 640, 0.1, 100);
+    camera.position.set(0, 0.5, 3.6);
+    camera.lookAt(0, 0, 0);
+
+    const key = new THREE.DirectionalLight(0xfff4e2, 1.1); key.position.set(4, 6, 4); scene.add(key);     // warm key
+    const fill = new THREE.DirectionalLight(0xeaf0ff, 0.35); fill.position.set(-3, 2, -2); scene.add(fill); // cool fill
+    // Image-based lighting — soft studio reflections are what make a surface read as CREAM (satin
+    // sheen + gentle specular) rather than flat matte clay. Without an env map the sheen has nothing
+    // to reflect.
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+    const col = q.has('col') ? parseInt(q.get('col'), 16) : 0xf6e7c8;   // ?col=f6e7c8 (buttercream)
+
+    // Buttercream material: MATTE-satin (high roughness, only a whisper of clearcoat/sheen so it is
+    // not glossy plastic) + a fine micro-GRAIN normal map tiled small over the wall so it reads as
+    // sugar-paste cream. envMapIntensity ties it to the IBL. Tunable: ?rough= ?clear= ?sheen= ?grain=
+    const grain = getCreamGrainNormalMap();
+    const grainScale = n('grain', 0.18);
+    const mkGrain = () => { const g = grain.clone(); g.wrapS = g.wrapT = THREE.RepeatWrapping; g.repeat.set(10, 18); g.needsUpdate = true; return g; };
+    const creamMat = (extra = {}) => new THREE.MeshPhysicalMaterial({
+      color: col, metalness: 0,
+      roughness: n('rough', 0.62),
+      clearcoat: n('clear', 0.08), clearcoatRoughness: 0.6,
+      sheen: n('sheen', 0.3), sheenRoughness: 0.6, sheenColor: new THREE.Color(0xfff6e8),
+      envMapIntensity: n('env', 0.5),
+      normalMap: mkGrain(), normalScale: new THREE.Vector2(grainScale, grainScale),
+      ...extra,
+    });
+
+    // ?geo=1 → REAL displaced geometry (ribs project, silhouette breaks). Otherwise the normal-map
+    // illusion on a smooth cylinder (flat silhouette) for side-by-side comparison.
+    const geoMode = q.has('geo');
+    let geo, side;
+    if (geoMode) {
+      geo = new THREE.CylinderGeometry(1, 1, 1.7, 480, 440);
+      displaceCreamWaveCylinder(geo, { relief: n('relief', 0.03), ...opts });
+      side = creamMat();
+    } else {
+      geo = new THREE.CylinderGeometry(1, 1, 1.7, 240, 1);
+      const nm = getCreamWaveNormalMap(opts);
+      side = creamMat({ normalMap: nm, normalScale: new THREE.Vector2(depth * nsx, depth * nsy) });
+    }
+    const cap = creamMat();
+    const mesh = new THREE.Mesh(geo, [side, cap, cap]);
+    mesh.rotation.y = yaw;
+    scene.add(mesh);
+
+    renderer.render(scene, camera);
+    // signal readiness for the screenshot driver
+    requestAnimationFrame(() => { renderer.render(scene, camera); window.__ready = true; });
+  </script>
+</body>
+</html>
