@@ -127,6 +127,15 @@ export async function getMeshyGeneration(id) {
   return get(`/api/admin/meshy/${id}`);
 }
 
+// Build from Inspiration: validate + analyse a cake photo → tier-wise reconstruction spec.
+// Sends the image as base64 (no upload). Returns { ok:true, analysis } or { ok:false, reason }.
+export async function analyzeInspiration(imageBlob) {
+  const bytes = new Uint8Array(await imageBlob.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return post('/api/admin/inspiration/analyze', { imageBase64: btoa(binary), mimeType: imageBlob.type || 'image/jpeg' });
+}
+
 export async function updateGlobalElement(id, payload) {
   const res = await fetch(`${BASE_URL}/api/admin/elements/${id}`, {
     method: 'PATCH',
