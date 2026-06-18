@@ -377,6 +377,22 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
     ensureFaceData();
     applyClustering(clusterConnected(faceData.current, clusterK));
   }
+  // Wipe the segmentation back to a single part WITHOUT re-simplifying the mesh — keeps the
+  // generated 3D, the cached faceData and the locked detail. Re-clustering with a new K then
+  // reuses the same geometry (no image→3D / detail rebuild). Distinct from resetDetail().
+  function clearParts() {
+    if (!faceParts.current) return;
+    faceParts.current.fill(0);
+    partSeq.current = 0;
+    const id = `p${partSeq.current++}`;
+    const single = [{ id, label: 'Part 1', color: '#cccccc', finish: 'matte', group: '', editable: false }];
+    partsRef.current = single;
+    setParts(single);
+    setSelectedId(id); selectedRef.current = id;
+    setSoloId(null); soloRef.current = null;
+    setGroupsDone(false); setEditableGroups({});
+    setTimeout(() => { retint(); recount(); computeOutline(); }, 0);
+  }
 
   // assign a list of faces to the selected part, then tint. Editing implies the
   // part view — flip to it (and full-retint) on the first edit from 'original'.
@@ -646,16 +662,19 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
               )}
 
               <div style={S.section}>
-                <div style={S.sectionTitle}>Auto pre-fill</div>
+                <div style={S.sectionTitle}>Generate parts (K)</div>
                 <label style={S.elLabel}>Colour clusters (K = {clusterK})</label>
                 <input type="range" min={2} max={24} value={clusterK} onChange={e => setClusterK(+e.target.value)} style={{ width: '100%' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
                   <button style={S.addBtn} onClick={autoCluster} disabled={busy}>Cluster by colour</button>
                   <button style={S.addBtn} onClick={autoClusterRegions} disabled={busy}>Cluster + split regions</button>
+                  <button style={S.addBtn} onClick={clearParts} disabled={busy || parts.length <= 1}>Clear parts</button>
                 </div>
                 <div style={S.hint}>
-                  Cluster by colour: K colour groups (same colour anywhere = one part).
+                  <b>Tweak K and click a Cluster button again to regenerate</b> — it reuses the same 3D (no new generation), replacing the current parts. So dial K in iteratively.
+                  <br />Cluster by colour: K colour groups (same colour anywhere = one part).
                   Cluster + split regions: also separates same-coloured but disconnected regions (eyes vs shoes) into their own parts.
+                  <br /><b>Clear parts</b> resets the segmentation to one part (keeps the 3D) for a fresh start.
                 </div>
               </div>
             </>
