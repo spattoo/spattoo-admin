@@ -16,6 +16,7 @@ const GenerateShape    = lazy(() => import('./admin/GenerateShape.jsx'));
 const GenerateModel    = lazy(() => import('./admin/GenerateModel.jsx'));
 const GlbStudio        = lazy(() => import('./admin/GlbStudio.jsx'));
 const GlbRecompose     = lazy(() => import('./admin/GlbRecompose.jsx'));
+const ImageTo3DWizard  = lazy(() => import('./admin/ImageTo3DWizard.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
 const ManageFlavours        = lazy(() => import('./admin/ManageFlavours.jsx'));
@@ -39,6 +40,7 @@ const ROUTES = {
   '/elements/generate-model': GenerateModel,
   '/glb-studio':          GlbStudio,
   '/glb-recompose':       GlbRecompose,
+  '/elements/image-to-3d': ImageTo3DWizard,
   '/elements/types':      ElementTypes,
   '/elements/tags':       ManageTags,
   '/elements/nozzles':    ManageNozzles,
@@ -72,6 +74,7 @@ const NAV_GROUPS = [
     { href: '/elements/types',  label: 'Element Types' },
   ] },
   { title: 'Editors', items: [
+    { href: '/elements/image-to-3d',    label: 'Image → 3D Cake' },
     { href: '/elements/generate',       label: 'Generate Shape' },
     { href: '/elements/generate-model', label: 'Generate 3D Model' },
     { href: '/glb-studio',              label: 'GLB Studio' },

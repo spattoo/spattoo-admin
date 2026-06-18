@@ -113,6 +113,20 @@ export async function createGlobalElement(payload) {
   return post('/api/admin/elements', payload);
 }
 
+// ── Image → 3D wizard (Meshy.ai) ──────────────────────────────────────────────
+// Run the validation gate + kick off a Meshy image-to-3D task for an already-uploaded
+// source image (R2 key under meshy/source/). A gate rejection comes back as { ok:false,
+// reason, category } (HTTP 200, no credits spent); success is { ok:true, id, status, ... }.
+export async function startMeshyGeneration(sourceImageKey, force = false) {
+  return post('/api/admin/meshy/generate', { sourceImageKey, force });
+}
+
+// Poll a generation row. While non-terminal the API live-polls Meshy and updates the row,
+// so this returns fresh { status, progress, glb_url, thumbnail_url, error }.
+export async function getMeshyGeneration(id) {
+  return get(`/api/admin/meshy/${id}`);
+}
+
 export async function updateGlobalElement(id, payload) {
   const res = await fetch(`${BASE_URL}/api/admin/elements/${id}`, {
     method: 'PATCH',
