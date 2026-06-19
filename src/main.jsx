@@ -30,6 +30,7 @@ const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'))
 const PerchCalibrator       = lazy(() => import('./admin/PerchCalibrator.jsx'));
 const CreamPenStudio        = lazy(() => import('./admin/CreamPenStudio.jsx'));
 const ButterflyStudio       = lazy(() => import('./admin/ButterflyStudio.jsx'));
+const RecolorTester         = lazy(() => import('./admin/RecolorTester.jsx'));
 const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx'));
 const RolesCapabilities     = lazy(() => import('./admin/RolesCapabilities.jsx'));
 const TextureCalibrator     = lazy(() => import('./admin/TextureCalibrator.jsx'));
@@ -58,6 +59,7 @@ const ROUTES = {
   '/elements/perch-calibrator':  PerchCalibrator,
   '/elements/cream-pen':         CreamPenStudio,
   '/elements/folded-sticker':    ButterflyStudio,
+  '/elements/recolor-tester':    RecolorTester,
   '/elements/freehand-pen':      FreehandPenStudio,
   '/admin/roles':                RolesCapabilities,
 };
@@ -92,6 +94,7 @@ const NAV_GROUPS = [
     { href: '/elements/cream-pen',      label: 'Cream Pen' },
     { href: '/elements/freehand-pen',   label: 'Freehand Pen' },
     { href: '/elements/folded-sticker', label: 'Folded Butterfly' },
+    { href: '/elements/recolor-tester', label: 'Recolour Tester' },
     { href: '/pattern-builder',         label: 'Pattern Builder' },
   ] },
   { title: 'Baker', items: [

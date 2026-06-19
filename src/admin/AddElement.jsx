@@ -286,8 +286,9 @@ export default function AddElement() {
   const [foldAngle,  setFoldAngle]  = useState('');   // placement_config.fold (deg, blank = default 30)
   const [spineSplit, setSpineSplit] = useState('');   // placement_config.spine (0–1, blank = default 0.5)
   // Pixel-recolour region for a colour-changeable 2D image (companion to allowed_actions.color).
-  const [recolorMethod, setRecolorMethod] = useState('opaque');   // 'opaque' | 'blue_gt_green'
+  const [recolorMethod, setRecolorMethod] = useState('opaque');   // 'opaque' | 'saturated' | 'blue_gt_green'
   const [recolorGuard,  setRecolorGuard]  = useState('12');       // blue_gt_green margin
+  const [recolorSat,    setRecolorSat]    = useState('0.25');     // saturated threshold
   const [capabilities, setCapabilities]       = useState({ resize: true, duplicate: true, color: false, gradient: false, delete: true, move: false, tilt: false });
   const [glbRotation, setGlbRotation]         = useState([0, 0, 0]);
   const [frontConfirmed, setFrontConfirmed]   = useState(false);
@@ -575,8 +576,9 @@ export default function AddElement() {
         // capability: it tells the designer WHICH pixels the colour picker recolours. GLB recolour
         // tints the material instead (no descriptor needed). Never element-type aware.
         if (assetType === '2D' && capabilities.color) {
-          builtPlacementConfig.recolor = recolorMethod === 'blue_gt_green'
-            ? { method: 'blue_gt_green', guard: recolorGuard !== '' ? parseInt(recolorGuard, 10) : 12 }
+          builtPlacementConfig.recolor =
+            recolorMethod === 'blue_gt_green' ? { method: 'blue_gt_green', guard: recolorGuard !== '' ? parseInt(recolorGuard, 10) : 12 }
+            : recolorMethod === 'saturated'   ? { method: 'saturated', sat: recolorSat !== '' ? parseFloat(recolorSat) : 0.25 }
             : { method: 'opaque' };
         }
         // Facing offset is authored in DEGREES (cameraToModelRotation → toDeg). Tag the unit so
@@ -658,6 +660,7 @@ export default function AddElement() {
       setSpineSplit('');
       setRecolorMethod('opaque');
       setRecolorGuard('12');
+      setRecolorSat('0.25');
       setCapabilities({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
       setPipingBottomFlip(true);
       setCraftRecs([]);
@@ -1114,12 +1117,19 @@ export default function AddElement() {
                 <label style={{ ...s.label, marginBottom: 4 }}>Recolourable area</label>
                 <select style={s.select} value={recolorMethod} onChange={e => setRecolorMethod(e.target.value)}>
                   <option value="opaque">Whole image — recolour every pixel (solid stickers)</option>
-                  <option value="blue_gt_green">Coloured fill, keep gold/white outline (outlined decals)</option>
+                  <option value="saturated">Coloured fill, keep black/white lines (any colour + outline)</option>
+                  <option value="blue_gt_green">Coloured fill, keep gold/white outline (blue-dominant fill)</option>
                 </select>
                 {recolorMethod === 'blue_gt_green' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Edge protect</span>
                     <input type="number" min="0" max="50" step="1" style={{ ...s.input, flex: 1 }} value={recolorGuard} placeholder="12 — raise if colour bleeds into the outline" onChange={e => setRecolorGuard(e.target.value)} />
+                  </div>
+                )}
+                {recolorMethod === 'saturated' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Saturation min</span>
+                    <input type="number" min="0" max="0.8" step="0.01" style={{ ...s.input, flex: 1 }} value={recolorSat} placeholder="0.25 — lower catches more, higher protects lines" onChange={e => setRecolorSat(e.target.value)} />
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>

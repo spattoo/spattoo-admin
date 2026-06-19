@@ -469,6 +469,7 @@ export default function ManageElements() {
   const [spineSplit,    setSpineSplit]    = useState('');
   const [recolorMethod, setRecolorMethod] = useState('opaque');
   const [recolorGuard,  setRecolorGuard]  = useState('12');
+  const [recolorSat,    setRecolorSat]    = useState('0.25');
   const [patternOnly,        setPatternOnly]        = useState(false);
   const [description,      setDescription]      = useState('');
   const [glbRotation,        setGlbRotation]        = useState([0, 0, 0]);
@@ -546,6 +547,7 @@ export default function ManageElements() {
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
     setRecolorGuard(pc.recolor?.guard != null ? String(pc.recolor.guard) : '12');
+    setRecolorSat(pc.recolor?.sat != null ? String(pc.recolor.sat) : '0.25');
     setPatternOnly(pc.pattern_only === true);
     setGlbEnvPreset('none');
     setGlbRotation(rotationToDegrees(pc));   // degrees for the UI; converts legacy radians rows
@@ -623,6 +625,7 @@ export default function ManageElements() {
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
     setRecolorGuard(pc.recolor?.guard != null ? String(pc.recolor.guard) : '12');
+    setRecolorSat(pc.recolor?.sat != null ? String(pc.recolor.sat) : '0.25');
     setPatternOnly(pc.pattern_only === true);
     // Keep glbRotation in lockstep with the JSON. handleSave rewrites rotation from glbRotation,
     // so without this an edit to `rotation` in the textarea is silently reverted on save. UI unit
@@ -634,6 +637,12 @@ export default function ManageElements() {
     try { syncStructuredFromPc(JSON.parse(text)); } catch { /* invalid mid-type: leave controls */ }
   }
   const numPatch = v => (v === '' || isNaN(parseFloat(v))) ? '' : parseFloat(v);
+  // The recolour descriptor for the current method + its param (override any field for live edits,
+  // since setState is async). Mirrors the AddElement build + spattoo-core matcher methods.
+  const recolorDesc = (m = recolorMethod, g = recolorGuard, sv = recolorSat) =>
+    m === 'blue_gt_green' ? { method: 'blue_gt_green', guard: g !== '' ? parseInt(g, 10) : 12 }
+    : m === 'saturated'   ? { method: 'saturated', sat: sv !== '' ? parseFloat(sv) : 0.25 }
+    : { method: 'opaque' };
   // Build the placement_config.scale patch from the min/max inputs: an object with only the set
   // keys, or '' so patchPc removes `scale` entirely when all are blank. The sibling fields' current
   // strings are passed through so editing one (min/max/step) keeps the others.
@@ -1445,11 +1454,7 @@ export default function ManageElements() {
                             // A colour-changeable 2D image needs a recolour region descriptor (which
                             // pixels). Write the default on enable, remove it on disable.
                             if (key === 'color' && selectedEl?.image_url && !isGlb) {
-                              patchPc({ recolor: checked
-                                ? (recolorMethod === 'blue_gt_green'
-                                    ? { method: 'blue_gt_green', guard: recolorGuard !== '' ? parseInt(recolorGuard, 10) : 12 }
-                                    : { method: 'opaque' })
-                                : '' });
+                              patchPc({ recolor: checked ? recolorDesc() : '' });
                             }
                           }} />
                         <div>
@@ -1464,18 +1469,25 @@ export default function ManageElements() {
                     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed #C5D4C8' }}>
                       <label style={{ ...s.label, marginBottom: 4 }}>Recolourable area</label>
                       <select style={s.select} value={recolorMethod}
-                        onChange={e => { const m = e.target.value; setRecolorMethod(m);
-                          patchPc({ recolor: m === 'blue_gt_green' ? { method: 'blue_gt_green', guard: recolorGuard !== '' ? parseInt(recolorGuard, 10) : 12 } : { method: 'opaque' } }); }}>
+                        onChange={e => { const m = e.target.value; setRecolorMethod(m); patchPc({ recolor: recolorDesc(m) }); }}>
                         <option value="opaque">Whole image — recolour every pixel (solid stickers)</option>
-                        <option value="blue_gt_green">Coloured fill, keep gold/white outline (outlined decals)</option>
+                        <option value="saturated">Coloured fill, keep black/white lines (any colour + outline)</option>
+                        <option value="blue_gt_green">Coloured fill, keep gold/white outline (blue-dominant fill)</option>
                       </select>
                       {recolorMethod === 'blue_gt_green' && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
                           <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Edge protect</span>
                           <input type="number" min="0" max="50" step="1" style={{ ...s.input, flex: 1 }} value={recolorGuard}
                             placeholder="12 — raise if colour bleeds into the outline"
-                            onChange={e => { const g = e.target.value; setRecolorGuard(g);
-                              patchPc({ recolor: { method: 'blue_gt_green', guard: g !== '' ? parseInt(g, 10) : 12 } }); }} />
+                            onChange={e => { const g = e.target.value; setRecolorGuard(g); patchPc({ recolor: recolorDesc('blue_gt_green', g) }); }} />
+                        </div>
+                      )}
+                      {recolorMethod === 'saturated' && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Saturation min</span>
+                          <input type="number" min="0" max="0.8" step="0.01" style={{ ...s.input, flex: 1 }} value={recolorSat}
+                            placeholder="0.25 — lower catches more, higher protects lines"
+                            onChange={e => { const sv = e.target.value; setRecolorSat(sv); patchPc({ recolor: recolorDesc('saturated', recolorGuard, sv) }); }} />
                         </div>
                       )}
                       <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>
