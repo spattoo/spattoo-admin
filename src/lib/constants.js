@@ -19,9 +19,10 @@ export const ZONES = Object.freeze({
 export const ZONE_LIST = [ZONES.TOP_SURFACE, ZONES.SIDE, ZONES.MIDDLE_TIER, ZONES.BOARD];
 
 export const PLACEMENT_MODES = Object.freeze({
-  STAND:            'stand',
-  HUG:              'hug',
-  FAUX_BALL_SINGLE: 'faux_ball_single',
+  STAND: 'stand',
+  HUG:   'hug',
+  PERCH: 'perch',
+  VERGE: 'verge',
 });
 
 // Element-type slugs with bespoke handling in the designer — reference by name.

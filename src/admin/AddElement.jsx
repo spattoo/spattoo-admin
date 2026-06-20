@@ -9,7 +9,6 @@ import CraftGuideFields, { RANKS } from './CraftGuideFields.jsx';
 const ASSET_TYPES = [
   { value: '2D',      label: '2D Image',       folder: 'elements/files/2D' },
   { value: '3D',      label: '3D Model (GLB)', folder: 'elements/files/3D' },
-  { value: '3D_GEOM', label: '3D Geometry',    folder: null },
 ];
 
 const CAKE_ZONES = [
@@ -25,7 +24,6 @@ const PLACEMENT_MODES = [
   { value: 'stand',           label: 'stand' },
   { value: 'perch',           label: 'perch (sit on edge)' },  // figure seated on the rim, legs over
   { value: 'verge',           label: 'verge (lean over edge)' }, // rests on the rim lip, reclines outward
-  { value: 'faux_ball_single',label: 'faux ball single' },
 ];
 
 const s = {
@@ -116,25 +114,6 @@ function FileDropZone({ label, accept, file, onChange }) {
         <span style={{ fontSize: 12, color: '#6B8C74' }}>Click to choose file</span>
         {file && <span style={s.fileName}>{file.name}</span>}
       </label>
-    </div>
-  );
-}
-
-function GeomSpherePreview({ color, roughness, metalness, envPreset, canvasRef, onCapture }) {
-  return (
-    <div style={s.previewBox} ref={canvasRef}>
-      <Canvas flat gl={{ preserveDrawingBuffer: true }} camera={{ position: [0, 0, 2.5], fov: 45 }}
-        onCreated={() => setTimeout(onCapture, 600)}>
-        <ambientLight intensity={envPreset === 'none' ? 1.2 : 0.3} />
-        <directionalLight position={[3, 3, 3]} intensity={envPreset === 'none' ? 1 : 0.3} />
-        <directionalLight position={[-2, 1, -2]} intensity={0.4} />
-        <mesh>
-          <sphereGeometry args={[0.85, 64, 64]} />
-          <meshStandardMaterial color={color} roughness={roughness} metalness={metalness} />
-        </mesh>
-        {envPreset !== 'none' && <Environment preset={envPreset} />}
-        <OrbitControls enablePan={false} />
-      </Canvas>
     </div>
   );
 }
@@ -473,7 +452,7 @@ export default function AddElement() {
   }
 
   async function handleSave() {
-    const needsFile = assetType !== '3D_GEOM' && !isPatternType;
+    const needsFile = !isPatternType;
     if (!name.trim() || !elementTypeId || (needsFile && !assetFile)) {
       setMsg({ ok: false, text: 'Name, element type and asset file are required.' });
       return;
@@ -540,15 +519,14 @@ export default function AddElement() {
       await uploadToR2(thumbUrl, thumbnailBlob);
 
       let builtPlacementConfig = {};
-      if (assetType === '3D_GEOM') {
-        // A file-less procedural element (image_url null). The designer's ONLY file-less render
-        // mode is `faux_balls` (a sculpted gold-ball cluster), so that's the mode for each zone the
-        // admin actually selected — written per applicableZone so placement_config stays in sync
-        // with allowed_zones (no blanket top+side hardcode that ignored the chosen zones). For
-        // scattered shapes that aren't a clump, create a "3D Model (GLB)" element with scatter.
-        builtPlacementConfig = { roughness: glbRoughness, metalness: glbMetalness };
-        for (const zone of applicableZones) builtPlacementConfig[zone] = 'faux_balls';
-      } else {
+      {
+        // GLB material finish (placement_config.roughness/metalness): persist so the designer can read
+        // it as matte (high roughness / 0 metalness) or metallic (low roughness / high metalness) —
+        // config-driven, applied on the one art render path. GLB only.
+        if (assetType === '3D') {
+          builtPlacementConfig.roughness = glbRoughness;
+          builtPlacementConfig.metalness = glbMetalness;
+        }
         // Write the chosen mode for EVERY applicable zone explicitly (default 'hug') — no more
         // "absent means hug"; the config states each zone's mode so the designer never guesses.
         for (const zone of applicableZones) {
@@ -636,9 +614,7 @@ export default function AddElement() {
         allowed_zones:    applicableZones,
         placement_config: builtPlacementConfig,
         allowed_actions:  capabilities,
-        default_color:    assetType === '3D_GEOM'
-          ? elementColor
-          : (assetType === '3D' && userPickedColor ? elementColor : null),
+        default_color:    (assetType === '3D' && userPickedColor) ? elementColor : null,
         sort_order:       0,
       });
 
@@ -723,66 +699,12 @@ export default function AddElement() {
             </div>
           </div>
 
-          {assetType !== '3D_GEOM' && (
-            <FileDropZone
-              label={assetType === '3D' ? 'GLB File' : 'Image File'}
-              accept={assetType === '3D' ? '.glb,.gltf' : 'image/*'}
-              file={assetFile}
-              onChange={f => { setAssetFile(f); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setGlbRotation([0,0,0]); setFrontConfirmed(false); }}
-            />
-          )}
-
-          {/* 3D Geometry preview + controls */}
-          {assetType === '3D_GEOM' && (
-            <>
-              <div style={{ ...s.field, background: '#F2F7F3', border: '1px solid #C5D4C8', borderRadius: 8, padding: '10px 12px' }}>
-                <div style={{ fontSize: 12, color: '#2C4433', fontWeight: 700, marginBottom: 3 }}>Places as a faux-ball cluster</div>
-                <div style={{ fontSize: 11, color: '#6B8C74', lineHeight: 1.4 }}>
-                  3D Geometry is file-less, so the designer renders it as a sculpted gold-ball cluster (mode <code>faux_balls</code>) on each selected zone — not free-scattered shapes. For scattered sprinkles/pearls, upload a small ball as a <strong>3D Model (GLB)</strong> and tick <strong>Can scatter</strong> instead.
-                </div>
-              </div>
-              <div style={s.field}>
-                <label style={s.label}>Default Color</label>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <input type="color" value={elementColor} onChange={e => setElementColor(e.target.value)}
-                    style={{ width: 40, height: 32, border: '1.5px solid #C5D4C8', borderRadius: 6, cursor: 'pointer', padding: 2 }} />
-                  <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600 }}>{elementColor}</span>
-                </div>
-              </div>
-              <div style={s.field}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Roughness</label>
-                    <input type="range" min="0" max="1" step="0.01" value={glbRoughness} onChange={e => setGlbRoughness(parseFloat(e.target.value))} style={{ flex: 1, accentColor: '#3D5A44' }} />
-                    <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600, minWidth: 30 }}>{glbRoughness.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Metalness</label>
-                    <input type="range" min="0" max="1" step="0.01" value={glbMetalness} onChange={e => setGlbMetalness(parseFloat(e.target.value))} style={{ flex: 1, accentColor: '#3D5A44' }} />
-                    <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600, minWidth: 30 }}>{glbMetalness.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Environment</label>
-                    <select value={glbEnvPreset} onChange={e => setGlbEnvPreset(e.target.value)} style={{ ...s.select, flex: 1 }}>
-                      {['none','studio','city','sunset','dawn','warehouse','forest','park','lobby'].map(p => (
-                        <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <label style={s.label}>Preview</label>
-                <GeomSpherePreview
-                  color={elementColor}
-                  roughness={glbRoughness}
-                  metalness={glbMetalness}
-                  envPreset={glbEnvPreset}
-                  canvasRef={canvasRef}
-                  onCapture={captureThumbnail}
-                />
-                <button style={s.smallBtn} onClick={captureThumbnail}>Re-capture Thumbnail</button>
-              </div>
-            </>
-          )}
+          <FileDropZone
+            label={assetType === '3D' ? 'GLB File' : 'Image File'}
+            accept={assetType === '3D' ? '.glb,.gltf' : 'image/*'}
+            file={assetFile}
+            onChange={f => { setAssetFile(f); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setGlbRotation([0,0,0]); setFrontConfirmed(false); }}
+          />
 
           {/* 3D preview + auto-capture */}
           {assetType === '3D' && assetFile && (
@@ -998,7 +920,7 @@ export default function AddElement() {
             </div>
           </div>
 
-          {assetType !== '3D_GEOM' && applicableZones.length > 0 && (
+          {applicableZones.length > 0 && (
             <div style={s.field}>
               <label style={s.label}>Placement Config</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

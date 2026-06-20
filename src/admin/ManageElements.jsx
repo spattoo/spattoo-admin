@@ -24,8 +24,6 @@ const PLACEMENT_MODES = [
   { value: 'stand',            label: 'stand' },
   { value: 'perch',            label: 'perch (sit on edge)' },  // figure seated on the rim, legs over
   { value: 'verge',            label: 'verge (lean over edge)' }, // rests on the rim lip, reclines outward
-  { value: 'faux_ball_single', label: 'faux ball single' },
-  { value: 'faux_balls',       label: 'faux balls' },
 ];
 
 // Default placement_config for cream_piping elements. When an element has no
@@ -249,26 +247,6 @@ const s = {
     height: 300, color: '#9BB5A2', fontSize: 14, fontWeight: 600,
   },
 };
-
-// ── Geometry sphere preview (same as AddElement) ─────────────────────────────
-function GeomSpherePreview({ color, roughness, metalness, envPreset, canvasRef, onCapture }) {
-  return (
-    <div style={s.previewBox} ref={canvasRef}>
-      <Canvas flat gl={{ preserveDrawingBuffer: true }} camera={{ position: [0, 0, 2.5], fov: 45 }}
-        onCreated={() => setTimeout(onCapture, 600)}>
-        <ambientLight intensity={envPreset === 'none' ? 1.2 : 0.3} />
-        <directionalLight position={[3, 3, 3]} intensity={envPreset === 'none' ? 1 : 0.3} />
-        <directionalLight position={[-2, 1, -2]} intensity={0.4} />
-        <mesh>
-          <sphereGeometry args={[0.85, 64, 64]} />
-          <meshStandardMaterial color={color} roughness={roughness} metalness={metalness} />
-        </mesh>
-        {envPreset !== 'none' && <Environment preset={envPreset} />}
-        <OrbitControls enablePan={false} />
-      </Canvas>
-    </div>
-  );
-}
 
 // ── GLB components (same as AddElement) ──────────────────────────────────────
 function CameraCapture({ camRef }) {
@@ -834,8 +812,6 @@ export default function ManageElements() {
     /\.(glb|gltf)(\?|$)/i.test(selectedEl.image_url ?? '') ||
     /\/3D\//i.test(selectedEl.image_url ?? '')
   );
-  const isGeom = selectedEl && !selectedEl.image_url &&
-    selectedEl.placement_config?.top_surface === 'faux_balls';
   const selectedSlug = elementTypes.find(t => t.id === elementTypeId)?.slug;
   // cream_piping = a building-block GLB; piping_pattern = a fileless element referencing
   // blocks via placement_config.parts. Block-only tooling (GLB upload, orientation, alt
@@ -1536,62 +1512,8 @@ export default function ManageElements() {
                   </div>
                 </div>
 
-                {/* ── 3D Geometry (faux ball) preview ── */}
-                {isGeom && (
-                  <div style={s.field}>
-                    <label style={s.label}>Sphere Preview</label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Roughness</label>
-                        <input type="range" min="0" max="1" step="0.01" value={glbRoughness}
-                          onChange={e => {
-                            const v = parseFloat(e.target.value);
-                            setGlbRoughness(v);
-                            try {
-                              const pc = JSON.parse(placementConfig);
-                              setPlacementConfig(JSON.stringify({ ...pc, roughness: v }, null, 2));
-                            } catch {}
-                          }}
-                          style={{ flex: 1, accentColor: '#3D5A44' }} />
-                        <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600, minWidth: 30 }}>{glbRoughness.toFixed(2)}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Metalness</label>
-                        <input type="range" min="0" max="1" step="0.01" value={glbMetalness}
-                          onChange={e => {
-                            const v = parseFloat(e.target.value);
-                            setGlbMetalness(v);
-                            try {
-                              const pc = JSON.parse(placementConfig);
-                              setPlacementConfig(JSON.stringify({ ...pc, metalness: v }, null, 2));
-                            } catch {}
-                          }}
-                          style={{ flex: 1, accentColor: '#3D5A44' }} />
-                        <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600, minWidth: 30 }}>{glbMetalness.toFixed(2)}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <label style={{ ...s.label, marginBottom: 0, minWidth: 80 }}>Environment</label>
-                        <select value={glbEnvPreset} onChange={e => setGlbEnvPreset(e.target.value)} style={{ ...s.select, flex: 1 }}>
-                          {['none','studio','city','sunset','dawn','warehouse','forest','park','lobby'].map(p => (
-                            <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <GeomSpherePreview
-                      color={defaultColor}
-                      roughness={glbRoughness}
-                      metalness={glbMetalness}
-                      envPreset={glbEnvPreset}
-                      canvasRef={canvasRef}
-                      onCapture={captureThumbnail}
-                    />
-                    <button style={s.smallBtn} onClick={captureThumbnail}>Re-capture Thumbnail</button>
-                  </div>
-                )}
-
                 {/* ── Placement Config ── */}
-                {!isGeom && applicableZones.length > 0 && (
+                {applicableZones.length > 0 && (
                   <div style={s.field}>
                     <label style={s.label}>Placement Config</label>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
