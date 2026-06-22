@@ -4,11 +4,6 @@ import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { CREAM_STYLES, STYLE_ORDER, buildStyledWall, getRusticNormalMap, loadStrokeMaps, displaceByHeightField } from '@spattoo/designer';
 import { fetchAdminTextures, createTexture, updateTexture } from '../lib/api.js';
-import { buildRibbedWall, RIBBED_STYLE } from './ribbedWall.js';
-
-// PROTOTYPE styles authored locally in admin before porting to core (so the calibrator can tune them
-// without a core lib rebuild). Keyed like CREAM_STYLES; resolved by seedFor/PreviewMesh below.
-const LOCAL_STYLES = { ribbed: RIBBED_STYLE };
 
 // Surface-map generators (normal-map finishes like rustic) — keyed like the designer's registry.
 const SURFACE_MAPS = { rustic: getRusticNormalMap };
@@ -23,13 +18,12 @@ const LOCAL_REF_URL = '/rustic-ref.png';
 // analog for the cake base). The algorithm (displacement strategy) stays in code; this tunes its params.
 
 const R = 1, H = 1.4;
-// textures with a displacement strategy — core styles + local prototypes (deduped)
-const ALGORITHMS = [...new Set([...STYLE_ORDER, ...Object.keys(LOCAL_STYLES)])].filter(k => k !== 'smooth');
+const ALGORITHMS = STYLE_ORDER.filter(k => k !== 'smooth');   // textures with a displacement strategy
 
 // A fresh working copy seeded from the in-code registry for a style. A style is EITHER a geometry
-// `wall` (wave/swirl/ribbed) or a normal-map `surfaceMap` (rustic). Local prototypes override core.
+// `wall` (wave/swirl/ribbed) or a normal-map `surfaceMap` (rustic).
 function seedFor(styleKey) {
-  const def = LOCAL_STYLES[styleKey] ?? CREAM_STYLES[styleKey] ?? {};
+  const def = CREAM_STYLES[styleKey] ?? {};
   return {
     id: null,
     key: styleKey,
@@ -92,8 +86,6 @@ function PreviewMesh({ work, overrideMaps }) {
     const d = (defaults.scale ?? 9) / 9;
     const rx = Math.max(1, Math.round(7 * d)), ry = Math.max(1, Math.round(5 * d));
     if (work.surfaceMap && SURFACE_MAPS[work.surfaceMap]) return { nrm: tile(SURFACE_MAPS[work.surfaceMap](), rx, ry) };
-    // Local prototype walls (not yet in core's buildStyledWall) build here; core walls go through core.
-    if (work.wall === 'ribbed') return { geo: buildRibbedWall(R, H, defaults) };
     return { geo: buildStyledWall(work.wall, R, H, defaults) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);

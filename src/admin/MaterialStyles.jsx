@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { CREAM_STYLES, STYLE_ORDER } from '@spattoo/designer';
-import { RIBBED_STYLE } from './ribbedWall.js';
 import { fetchAdminTextures, fetchAdminMaterials, updateMaterial } from '../lib/api.js';
 
 // ── Material → Styles editor (admin master-data) ───────────────────────────────
@@ -39,7 +38,6 @@ export default function MaterialStyles() {
     const byKey = new Map();
     for (const k of STYLE_ORDER) if (k !== 'smooth') byKey.set(k, CREAM_STYLES[k]?.label ?? k);
     for (const r of dbTextures) if (r.key && r.key !== 'smooth') byKey.set(r.key, r.label ?? r.key);
-    byKey.set(RIBBED_STYLE.wall, RIBBED_STYLE.label);   // local ribbed prototype (until ported to core)
     return byKey;
   }, [dbTextures]);
   const labelFor = (key) => catalog.get(key) ?? key;
