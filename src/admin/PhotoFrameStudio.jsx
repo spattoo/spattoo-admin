@@ -2,14 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement } from '../lib/api.js';
 
 // ── Photo Frame Studio ─────────────────────────────────────────────────────────
-// Authors a "photo cake" frame as ONE cake_elements row. The SHAPE MASK is the core asset (the
-// window/outline — heart, circle, square…): it clips the customer's photo AND drives a procedural
-// border (a colour ring of adjustable width, 0 = none). An optional decorative overlay PNG (glitter,
-// piped cream) can supply fancy border art instead. Data model:
-//   image_url                       = the mask (shape)
-//   placement_config.photo.mask     = the mask (same key)
-//   placement_config.photo.overlay  = optional decorative border art
-//   placement_config.photo.border   = { width }  (default thin; customer adjusts/recolours in designer)
+// Authors a "photo cake" frame as ONE cake_elements row. The SHAPE MASK is the only required asset
+// (the window/outline — heart, circle, square…): it clips the customer's photo AND drives the
+// procedural border (a colour ring whose width + colour the customer controls in the designer; 0 =
+// none). An optional image can be supplied purely as the picker THUMBNAIL. Data model:
+//   image_url                    = the mask (shape)
+//   placement_config.photo.mask  = the mask (same key)
+//   placement_config.photo.border= { width }   (default thin; customer adjusts/recolours in designer)
+//   thumbnail_url                = the optional uploaded thumbnail, else an auto-composite
 // Reuses createGlobalElement + the upload helpers — not a parallel element-creation path.
 
 const FRAME_PLACEMENT = { top_surface: 'hug', side: 'hug' };
@@ -62,17 +62,16 @@ function clippedPhoto(photoImg, maskImg, S) {
   return c;
 }
 
-// Mirrors the designer render: border (procedural ring or decorative overlay) + photo clipped to mask.
-function composite(S, photoImg, maskImg, overlayImg, borderColor, borderW) {
+// Mirrors the designer's cake render: procedural border (shape ring) + photo clipped to the mask.
+function composite(S, photoImg, maskImg, borderColor, borderW) {
   const c = document.createElement('canvas'); c.width = S; c.height = S;
   const ctx = c.getContext('2d');
-  if (maskImg && !overlayImg && borderW > 0) {
+  if (maskImg && borderW > 0) {
     const bc = tintedMask(maskImg, S, borderColor);
     const sw = S * (1 + borderW), off = (S - sw) / 2;
     ctx.drawImage(bc, off, off, sw, sw);     // colour ring, scaled up, behind the photo
   }
   if (maskImg) ctx.drawImage(clippedPhoto(photoImg, maskImg, S), 0, 0);
-  if (overlayImg) ctx.drawImage(overlayImg, 0, 0, S, S);
   return c;
 }
 
@@ -92,20 +91,18 @@ export default function PhotoFrameStudio() {
   const [name, setName]                 = useState('');
   const [elementTypeId, setTypeId]      = useState('');
   const [maskFile, setMaskFile]         = useState(null);   // shape (required)
-  const [overlayFile, setOverlayFile]   = useState(null);   // decorative border art (optional)
-  const [sampleFile, setSampleFile]     = useState(null);   // sample photo for the thumbnail (optional)
+  const [thumbFile, setThumbFile]       = useState(null);   // optional picker thumbnail (the "overlay")
+  const [sampleFile, setSampleFile]     = useState(null);   // optional sample photo (preview + auto-thumbnail)
   const [borderColor, setBorderColor]   = useState('#ffffff');
   const [maskImg, setMaskImg]           = useState(null);
-  const [overlayImg, setOverlayImg]     = useState(null);
   const [sampleImg, setSampleImg]       = useState(null);
   const [saving, setSaving]             = useState(false);
   const [msg, setMsg]                   = useState(null);
   const previewRef = useRef(null);
 
   useEffect(() => { fetchElementTypes().then(setElementTypes).catch(() => setElementTypes([])); }, []);
-  useEffect(() => { if (maskFile)    loadImage(maskFile).then(setMaskImg).catch(() => setMaskImg(null));       else setMaskImg(null); }, [maskFile]);
-  useEffect(() => { if (overlayFile) loadImage(overlayFile).then(setOverlayImg).catch(() => setOverlayImg(null)); else setOverlayImg(null); }, [overlayFile]);
-  useEffect(() => { if (sampleFile)  loadImage(sampleFile).then(setSampleImg).catch(() => setSampleImg(null)); else setSampleImg(null); }, [sampleFile]);
+  useEffect(() => { if (maskFile)   loadImage(maskFile).then(setMaskImg).catch(() => setMaskImg(null));     else setMaskImg(null); }, [maskFile]);
+  useEffect(() => { if (sampleFile) loadImage(sampleFile).then(setSampleImg).catch(() => setSampleImg(null)); else setSampleImg(null); }, [sampleFile]);
 
   useEffect(() => {
     const cv = previewRef.current;
@@ -117,8 +114,8 @@ export default function PhotoFrameStudio() {
       ctx.fillStyle = ((x / t + y / t) % 2 === 0) ? '#eceff1' : '#dfe4e7';
       ctx.fillRect(x, y, t, t);
     }
-    if (maskImg) ctx.drawImage(composite(S, sampleImg, maskImg, overlayImg, borderColor, DEFAULT_BORDER_WIDTH), 0, 0);
-  }, [maskImg, overlayImg, sampleImg, borderColor]);
+    if (maskImg) ctx.drawImage(composite(S, sampleImg, maskImg, borderColor, DEFAULT_BORDER_WIDTH), 0, 0);
+  }, [maskImg, sampleImg, borderColor]);
 
   async function uploadOne(folder, file, contentType) {
     const ext = (file.name?.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
@@ -135,13 +132,14 @@ export default function PhotoFrameStudio() {
     setSaving(true); setMsg(null);
     try {
       const maskKey = await uploadOne('elements/files/2D', maskFile, maskFile.type || 'image/png');
-      const overlayKey = overlayFile ? await uploadOne('elements/files/2D', overlayFile, overlayFile.type || 'image/png') : null;
-      // Thumbnail = the composited frame (border + photo + optional overlay) so the tile reads right.
-      const thumbBlob = await new Promise(res => composite(512, sampleImg, maskImg, overlayImg, borderColor, DEFAULT_BORDER_WIDTH).toBlob(res, 'image/png'));
-      const thumbKey  = await uploadOne('elements/thumbnails', new File([thumbBlob], 'thumb.png', { type: 'image/png' }), 'image/png');
-
-      const photo = { mask: maskKey, border: { width: DEFAULT_BORDER_WIDTH } };
-      if (overlayKey) photo.overlay = overlayKey;
+      // Thumbnail: the uploaded image if given, else an auto-composite (border + photo).
+      let thumbKey;
+      if (thumbFile) {
+        thumbKey = await uploadOne('elements/thumbnails', thumbFile, thumbFile.type || 'image/png');
+      } else {
+        const blob = await new Promise(res => composite(512, sampleImg, maskImg, borderColor, DEFAULT_BORDER_WIDTH).toBlob(res, 'image/png'));
+        thumbKey = await uploadOne('elements/thumbnails', new File([blob], 'thumb.png', { type: 'image/png' }), 'image/png');
+      }
 
       await createGlobalElement({
         name:             name.trim(),
@@ -152,14 +150,14 @@ export default function PhotoFrameStudio() {
         thumbnail_url:    thumbKey,
         file_size:        maskFile.size ?? null,
         allowed_zones:    FRAME_ZONES,
-        placement_config: { ...FRAME_PLACEMENT, photo },
+        placement_config: { ...FRAME_PLACEMENT, photo: { mask: maskKey, border: { width: DEFAULT_BORDER_WIDTH } } },
         allowed_actions:  FRAME_ACTIONS,
         default_color:    borderColor,                   // default border colour (customer can recolour)
         sort_order:       0,
       });
 
       setMsg({ ok: true, text: 'Photo frame element saved!' });
-      setName(''); setMaskFile(null); setOverlayFile(null); setSampleFile(null);
+      setName(''); setMaskFile(null); setThumbFile(null); setSampleFile(null);
     } catch (err) {
       setMsg({ ok: false, text: err.message || 'Save failed.' });
     } finally {
@@ -173,8 +171,8 @@ export default function PhotoFrameStudio() {
       <p style={s.sub}>
         Author a "photo cake" frame in one element. Upload the <b>frame shape</b> (a white window
         silhouette on transparent — heart, circle, square…). The customer's photo is clipped to it,
-        and a <b>border</b> is drawn around it (adjustable width &amp; colour in the designer; 0 = none).
-        Optionally add a <b>decorative border overlay</b> for fancy art (glitter, piped cream).
+        and a <b>border</b> is drawn around it — the customer adjusts its <b>width</b> and <b>colour</b>
+        in the designer (width 0 = no border).
       </p>
 
       <div style={s.grid}>
@@ -189,8 +187,8 @@ export default function PhotoFrameStudio() {
           </select>
 
           <Drop label="Frame shape — window mask (PNG: white window on transparent)" hint="Required. The photo's shape + the border's shape. → image_url / placement_config.photo.mask" accept="image/png" file={maskFile} onChange={setMaskFile} />
-          <Drop label="Decorative border overlay (PNG, optional)" hint="Fancy border art (glitter, piping) drawn on top. If set, it replaces the procedural border. → placement_config.photo.overlay" accept="image/*" file={overlayFile} onChange={setOverlayFile} />
-          <Drop label="Sample photo (optional — for the thumbnail)" hint="Shown behind the frame in the preview/tile. A placeholder is used if omitted." accept="image/*" file={sampleFile} onChange={setSampleFile} />
+          <Drop label="Thumbnail image (optional)" hint="Used as the picker tile. If omitted, a thumbnail is auto-generated from the shape + border." accept="image/*" file={thumbFile} onChange={setThumbFile} />
+          <Drop label="Sample photo (optional)" hint="Only to preview the look here / fill the auto-thumbnail. Not stored on the element." accept="image/*" file={sampleFile} onChange={setSampleFile} />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433' }}>Default border colour</span>
@@ -210,11 +208,11 @@ export default function PhotoFrameStudio() {
         </div>
 
         <div style={s.col}>
-          <label style={s.label}>Live preview</label>
+          <label style={s.label}>Live preview (cake look)</label>
           <canvas ref={previewRef} width={420} height={420} style={s.canvas} />
           <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6 }}>
-            Photo clipped to the shape, with the default border around it (overlay on top if provided).
-            The checkerboard is transparent area (the cake shows there).
+            Photo clipped to the shape, with the default border around it. The checkerboard is
+            transparent area (the cake shows there). Border width/colour are adjustable per-cake.
           </div>
         </div>
       </div>
