@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { CakePreview } from '@spattoo/designer';
 import { analyzeInspiration, matchInspiration } from '../lib/api.js';
+import { inspirationToDesign } from './inspirationToDesign.js';
 
 // Build from Inspiration. Upload a cake photo → GPT-4o validates + reads it into a tier-wise
 // reconstruction spec → match each decoration to a library element (placement-aware), shown with
@@ -150,6 +152,9 @@ export default function BuildFromInspiration() {
 
   const cake = analysis?.cake;
   const cov = matchResult ? liveCoverage() : null;
+  // Tier-wise 3D reconstruction from the read spec (count + order + per-tier colour + shape) plus
+  // cream piping from the matched library elements (and any swaps the user made).
+  const design = useMemo(() => inspirationToDesign(analysis, matchResult, overrides), [analysis, matchResult, overrides]);
 
   return (
     <div style={S.page}>
@@ -180,11 +185,24 @@ export default function BuildFromInspiration() {
           <div style={S.hint}>We validate it's a single cake before reading. The photo stays as inspiration — nothing is uploaded.</div>
         </div>
 
-        {/* RIGHT — results */}
+        {/* RIGHT — 3D preview */}
         <div style={S.colCard}>
-          {!analysis && <div style={{ ...S.hint, textAlign: 'center', padding: '40px 0' }}>The cake breakdown + matched elements will appear here.</div>}
-          {analysis && (
-            <>
+          <div style={S.sectionTitle}>3D preview</div>
+          {design ? (
+            <div style={S.previewStage}><CakePreview design={design} /></div>
+          ) : (
+            <div style={{ ...S.previewStage, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ ...S.hint, marginTop: 0, textAlign: 'center', padding: '0 24px' }}>Your 3D cake builds here from the read tiers &amp; colours.</span>
+            </div>
+          )}
+          {design && <div style={S.hint}>Reconstructed from the read tiers, colours &amp; shape. Decorations come next.</div>}
+        </div>
+      </div>
+
+      {/* results — full width, below the image + preview */}
+      {analysis && (
+        <div style={S.resultsCard}>
+          <>
               {/* coverage / matching status */}
               {matching && <div style={{ ...S.hint, marginTop: 0 }}>Matching elements from your library…</div>}
               {matchError && <div style={S.err}>Match failed: {matchError}</div>}
@@ -270,10 +288,9 @@ export default function BuildFromInspiration() {
                 </div>
                 <pre style={S.json}>{JSON.stringify(analysis, null, 2)}</pre>
               </div>
-            </>
-          )}
+          </>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -284,6 +301,8 @@ const S = {
   sub: { fontSize: 13, color: '#6B8C74', fontWeight: 600, marginBottom: 24, maxWidth: 760 },
   layout: { display: 'grid', gridTemplateColumns: '360px minmax(0, 1fr)', gap: 20, maxWidth: 1200, margin: '0 auto', alignItems: 'start' },
   colCard: { background: '#fff', borderRadius: 18, border: '1.5px solid #C5D4C8', padding: 22 },
+  previewStage: { width: '100%', height: 360, borderRadius: 14, border: '1.5px solid #E2E8E4', background: 'linear-gradient(180deg, #F7FAF8 0%, #EEF4EF 100%)', overflow: 'hidden' },
+  resultsCard: { background: '#fff', borderRadius: 18, border: '1.5px solid #C5D4C8', padding: 22, maxWidth: 1200, margin: '20px auto 0' },
   section: { marginBottom: 22 },
   sectionTitle: { fontSize: 11, fontWeight: 700, color: '#6B8C74', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 },
   drop: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 220, borderRadius: 14, border: '2px dashed #C5D4C8', background: '#F4F8F5', cursor: 'pointer', overflow: 'hidden' },
