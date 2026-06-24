@@ -40,9 +40,11 @@ const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx')
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
 const RolesCapabilities     = lazy(() => import('./admin/RolesCapabilities.jsx'));
 const TextureCalibrator     = lazy(() => import('./admin/TextureCalibrator.jsx'));
+const LusterDustStudio      = lazy(() => import('./admin/LusterDustStudio.jsx'));
 const MaterialStyles        = lazy(() => import('./admin/MaterialStyles.jsx'));
 const ROUTES = {
   '/elements/texture-calibrator': TextureCalibrator,
+  '/elements/luster-dust':        LusterDustStudio,
   '/elements/material-styles':    MaterialStyles,
   '/templates/create':    CreateTemplate,
   '/templates/design':    DesignTemplate,
@@ -102,6 +104,7 @@ const NAV_GROUPS = [
     { href: '/elements/piping-calibrator', label: 'Piping Calibrator' },
     { href: '/elements/perch-calibrator',  label: 'Perch Calibrator' },
     { href: '/elements/texture-calibrator', label: 'Texture Calibrator' },
+    { href: '/elements/luster-dust',    label: 'Luster Dust' },
     { href: '/elements/cream-pen',      label: 'Cream Pen' },
     { href: '/elements/freehand-pen',   label: 'Freehand Pen' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
