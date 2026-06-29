@@ -5,6 +5,8 @@ import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { fetchElementTypes, fetchParentElements, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
 import { normalizeThumbnail } from '../lib/thumbnail.js';
+import { fmtSize, CAPS, toStatColumns } from '../lib/glb.js';
+import GlbStudio from './GlbStudio.jsx';
 import CraftGuideFields, { RANKS } from './CraftGuideFields.jsx';
 
 const ASSET_TYPES = [
@@ -256,6 +258,11 @@ export default function AddElement() {
   const [glbEnvPreset, setGlbEnvPreset]   = useState('none');
   const [glbHasTexture, setGlbHasTexture] = useState(null);
   const [assetFile, setAssetFile]         = useState(null);
+  // 3D GLBs must pass through GLB Studio (measure + optimize) before creation. `glbStudioFile` is the
+  // file currently open in the embedded Studio; `optimizedStats` holds the measured cost returned —
+  // its presence is the gate that a GLB has been reviewed.
+  const [glbStudioFile, setGlbStudioFile] = useState(null);
+  const [optimizedStats, setOptimizedStats] = useState(null);
   const [thumbnailBlob, setThumbnailBlob] = useState(null);
   const [placementConfig, setPlacementConfig] = useState({});
   const [placementScale, setPlacementScale]   = useState('');
@@ -414,6 +421,18 @@ export default function AddElement() {
     }
   }
 
+  // GLB Studio returns the optimized model — swap it in as the working file so the existing 3D
+  // preview / rotation / thumbnail flow continues on the optimized geometry, and record the stats
+  // (their presence is the save gate). Geometry changed, so the front view must be re-confirmed.
+  function handleOptimized({ blob, stats }) {
+    const baseName = (assetFile?.name || 'model').replace(/\.(glb|gltf)$/i, '');
+    setAssetFile(new File([blob], `${baseName}.glb`, { type: 'model/gltf-binary' }));
+    setOptimizedStats(stats);
+    setGlbStudioFile(null);
+    setFrontConfirmed(false);
+    setGlbRotation([0, 0, 0]);
+  }
+
   async function handleSave() {
     const needsFile = !isPatternType;
     if (!name.trim() || !elementTypeId || (needsFile && !assetFile)) {
@@ -424,6 +443,12 @@ export default function AddElement() {
     // If a thumbnail has already been provided (uploaded or captured), it's no longer required.
     if (assetType === '3D' && !isPatternType && !frontConfirmed && !thumbnailBlob) {
       setMsg({ ok: false, text: 'Set the front view before saving — drag the model and click "This is the front", or upload a thumbnail.' });
+      return;
+    }
+    // Every GLB passes through GLB Studio first so its cost is known (and optimizable) before it
+    // enters the library. Over-cap is allowed — it's flagged, not blocked — but the review is required.
+    if (assetType === '3D' && !isPatternType && !optimizedStats) {
+      setMsg({ ok: false, text: 'Review the GLB in GLB Studio first — open it, check the size, optimize if needed.' });
       return;
     }
     if (applicableZones.length === 0) {
@@ -614,6 +639,8 @@ export default function AddElement() {
         allowed_actions:  capabilities,
         default_color:    (assetType === '3D' && userPickedColor) ? elementColor : null,
         sort_order:       0,
+        // GLB cost stats from the Studio review (§3) — flagged, not gated.
+        ...toStatColumns(optimizedStats),
       });
 
       // Step 2 — save the craft guide to the sidecar table now the element id exists.
@@ -698,7 +725,7 @@ export default function AddElement() {
             <label style={s.label}>Asset Type</label>
             <div style={s.radioRow}>
               {ASSET_TYPES.map(a => (
-                <button key={a.value} style={s.radioBtn(assetType === a.value)} onClick={() => { setAssetType(a.value); setAssetFile(null); setThumbnailBlob(null); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); }}>
+                <button key={a.value} style={s.radioBtn(assetType === a.value)} onClick={() => { setAssetType(a.value); setAssetFile(null); setThumbnailBlob(null); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setOptimizedStats(null); }}>
                   {a.label}
                 </button>
               ))}
@@ -709,7 +736,7 @@ export default function AddElement() {
             label={assetType === '3D' ? 'GLB File' : 'Image File'}
             accept={assetType === '3D' ? '.glb,.gltf' : 'image/*'}
             file={assetFile}
-            onChange={f => { setAssetFile(f); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setGlbRotation([0,0,0]); setFrontConfirmed(false); }}
+            onChange={f => { setAssetFile(f); setOptimizedStats(null); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setGlbRotation([0,0,0]); setFrontConfirmed(false); }}
           />
 
           {assetType === '2D' && (
@@ -728,6 +755,36 @@ export default function AddElement() {
           {/* 3D preview + auto-capture */}
           {assetType === '3D' && assetFile && (
             <div style={s.field}>
+              {/* Mandatory GLB Studio review — shows the real cost; over-cap is flagged, not blocked. */}
+              <div style={{ marginBottom: 14, padding: '12px 14px', borderRadius: 10,
+                border: `1.5px solid ${optimizedStats ? (optimizedStats.overCap ? '#E0B341' : '#9BCBA5') : '#C5D4C8'}`,
+                background: optimizedStats ? (optimizedStats.overCap ? '#FFF6E5' : '#F0F8F1') : '#F4F8F5' }}>
+                {!optimizedStats ? (
+                  <>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#2C4433', marginBottom: 6 }}>Review the GLB before saving</div>
+                    <div style={{ fontSize: 11.5, color: '#6B8C74', fontWeight: 600, marginBottom: 10 }}>See its real cost on phones and optimize if needed — required for 3D elements.</div>
+                    <button onClick={() => setGlbStudioFile(assetFile)}
+                      style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#3D5A44', color: '#fff', fontFamily: "'Quicksand',sans-serif", fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                      Review & optimize in GLB Studio →
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: optimizedStats.overCap ? '#8a6d1a' : '#2E7D32' }}>
+                        {optimizedStats.overCap ? '⚠ Over budget (allowed)' : '✓ Within budget'}
+                      </span>
+                      <button onClick={() => setGlbStudioFile(assetFile)} style={{ background: 'none', border: 'none', color: '#3D5A44', fontWeight: 700, fontSize: 11, cursor: 'pointer', padding: 0 }}>re-open studio</button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, fontWeight: 700, color: '#3D5A44' }}>
+                      <span>{fmtSize(optimizedStats.sizeKB)}</span><span style={{ color: '#C5D4C8' }}>·</span>
+                      <span>{optimizedStats.tris.toLocaleString()} tris</span><span style={{ color: '#C5D4C8' }}>·</span>
+                      <span>{fmtSize(optimizedStats.decodedMemKB)} GPU</span><span style={{ color: '#C5D4C8' }}>·</span>
+                      <span>{CAPS[optimizedStats.assetClass]?.label}</span>
+                    </div>
+                  </>
+                )}
+              </div>
               <label style={s.label}>3D Preview</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1193,6 +1250,17 @@ export default function AddElement() {
           {msg && <div style={s.msg(msg.ok)}>{msg.text}</div>}
         </div>
       </div>
+
+      {/* Embedded GLB Studio — mandatory measure+optimize step; returns the optimized GLB via onUse. */}
+      {glbStudioFile && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,30,24,0.45)', overflow: 'auto' }}>
+          <button onClick={() => setGlbStudioFile(null)}
+            style={{ position: 'fixed', top: 16, right: 20, zIndex: 1001, padding: '8px 14px', borderRadius: 8, border: 'none', background: '#2C4433', color: '#fff', fontFamily: "'Quicksand',sans-serif", fontWeight: 700, cursor: 'pointer' }}>
+            ✕ Close
+          </button>
+          <GlbStudio initialFile={glbStudioFile} onUse={handleOptimized} />
+        </div>
+      )}
     </>
   );
 }

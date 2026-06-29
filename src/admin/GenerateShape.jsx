@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { measureGlbBuffer, toStatColumns, deriveAssetClass } from '../lib/glb.js';
 import { displaceCreamWaveCylinder, getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 
 // Cream-wave finish: a tangent-space normal map baked from the Meshy reference cake (its wavy
@@ -573,7 +574,12 @@ export default function GenerateShape() {
 
         const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
-        await createGlobalElement({ name: name.trim(), element_type_id: elementTypeId, parent_id: null, image_url: fk, thumbnail_url: tk, allowed_zones: zones, placement_config: finalPlacementConfig, allowed_actions: capabilities, default_color: color3d, sort_order: 0 });
+        // Record the GLB cost (§3) — measured from the exported buffer. Best-effort; never blocks save.
+        let statCols = {};
+        try { statCols = toStatColumns(await measureGlbBuffer(glbBuffer, Math.round(glbBuffer.byteLength / 1024), deriveAssetClass({ placementConfig: finalPlacementConfig, zones }))); }
+        catch (e) { console.warn('GLB measure failed:', e.message); }
+
+        await createGlobalElement({ name: name.trim(), element_type_id: elementTypeId, parent_id: null, image_url: fk, thumbnail_url: tk, allowed_zones: zones, placement_config: finalPlacementConfig, allowed_actions: capabilities, default_color: color3d, sort_order: 0, ...statCols });
       }
 
       setMsg({ ok: true, text: 'Element saved!' });

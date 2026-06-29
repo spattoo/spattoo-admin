@@ -8,6 +8,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { toCreasedNormals, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { measureGlbRoot, evaluateCaps, deriveAssetClass, measureForSave, toStatColumns, fmtSize, ASSET_CLASSES, CAPS } from '../lib/glb.js';
 
 // GLB Studio — import one or more GLBs as "pieces", position them with a gizmo,
 // group their meshes into named recolorable PARTS, optimize, and export/save a
@@ -459,7 +460,12 @@ function CameraRelay({ onReady }) {
   return null;
 }
 
-export default function GlbStudio() {
+// Standalone (route) it creates elements directly. Embedded — opened with `initialFile` + an `onUse`
+// callback — it acts as the mandatory measure+optimize step for another ingest flow (e.g. AddElement):
+// it loads the file, shows the size picture, lets the admin optimize, and returns the optimized GLB
+// blob + measured stats via onUse instead of creating the element itself.
+export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
+  const embedded = typeof onUse === 'function';
   const [root, setRoot]     = useState(null);   // live THREE container (pieces are children)
   const [pieces, setPieces] = useState([]);     // [{id,name,meshKeys}]
   const [meshes, setMeshes] = useState([]);     // [{key,name,tris,hasTexture,origColor,piece}]
@@ -476,6 +482,12 @@ export default function GlbStudio() {
   const [opt, setOpt]       = useState({ targetTris: 20000 });
   const [optScope, setOptScope] = useState('all'); // 'all' | 'selected'
   const [optMsg, setOptMsg] = useState(null);
+
+  // Measured cost (the "real picture"): raw stats are re-measured on explicit actions (import,
+  // optimize, manual re-measure); the cap evaluation is derived reactively so changing zones/class
+  // re-badges without rebuilding the GLB. sizeKB needs the exported buffer, so it's measured lazily.
+  const [measured, setMeasured] = useState(null); // { tris, textureMaxDim, decodedMemKB, sizeKB }
+  const [assetClassOverride, setAssetClassOverride] = useState(null);
 
   // Save-as-element form
   const [elementTypes, setElementTypes]   = useState([]);
@@ -627,12 +639,16 @@ export default function GlbStudio() {
       setName(n => n || base);
 
       applyGeometry(container, flat, smooth);
+      measure(container);
     } catch (e) {
       setError(`Couldn't load GLB: ${e.message}. If it's Draco-compressed, re-export uncompressed.`);
     } finally {
       setBusy(false);
     }
   }
+
+  // Embedded handoff: load the file we were opened with as the first (and usually only) piece.
+  useEffect(() => { if (initialFile) addPiece(initialFile); /* eslint-disable-next-line */ }, []);
 
   function removePiece(id) {
     const container = sceneRef.current;
@@ -651,13 +667,14 @@ export default function GlbStudio() {
 
     const remaining = container.children.filter(c => c.userData._piece);
     if (remaining.length === 0) clearAll();
-    else applyGeometry(container, flat, smooth);
+    else { applyGeometry(container, flat, smooth); measure(container); }
   }
 
   function clearAll() {
     sceneRef.current = null;
     setRoot(null); setPieces([]); setMeshes([]); setParts([]); setAssign({});
     setSelectedPiece(null); setSelectedKey(null); setOptMsg(null);
+    setMeasured(null); setAssetClassOverride(null);
     partSeq.current = 0;
   }
 
@@ -677,14 +694,14 @@ export default function GlbStudio() {
   function assignMesh(meshKey, partId) { setAssign(prev => ({ ...prev, [meshKey]: partId })); }
   function meshCountFor(partId) { return Object.values(assign).filter(p => p === partId).length; }
 
-  async function buildGLBBuffer() {
-    applyMaterials(root, assign, parts, null, keepOriginal);
-    root.userData.parts = parts
+  async function buildGLBBuffer(target = root) {
+    applyMaterials(target, assign, parts, null, keepOriginal);
+    target.userData.parts = parts
       .filter(p => meshCountFor(p.id) > 0)
       .map(p => ({ id: p.id, label: p.label, default: p.color, finish: p.finish }));
     const restore = [];
     const udSaved = [];
-    root.traverse(o => {
+    target.traverse(o => {
       if (o.isMesh) { restore.push([o, o.geometry]); try { o.geometry = mergeVertices(o.geometry); } catch { /* leave as-is */ } }
       // strip our heavy internal userData (_origGeo is a whole geometry clone!)
       // so GLTFExporter doesn't serialize it into the glTF JSON `extras`.
@@ -696,15 +713,27 @@ export default function GlbStudio() {
         if (Object.keys(saved).length) udSaved.push([o, saved]);
       }
     });
-    forceJpegTextures(root);
+    forceJpegTextures(target);
     try {
       return await new Promise((res, rej) =>
-        new GLTFExporter().parse(root, res, rej, { binary: true, includeCustomExtensions: true }));
+        new GLTFExporter().parse(target, res, rej, { binary: true, includeCustomExtensions: true }));
     } finally {
       udSaved.forEach(([o, saved]) => Object.assign(o.userData, saved));
       restore.forEach(([o, g]) => { if (o.geometry !== g) o.geometry.dispose?.(); o.geometry = g; });
-      applyMaterials(root, assign, parts, selectedKey, keepOriginal);
+      applyMaterials(target, assign, parts, selectedKey, keepOriginal);
     }
+  }
+
+  // Re-measure the live model — the "real picture" the admin acts on. Cheap stats (tris / textures /
+  // decoded-GPU mem) come from a scene walk; the GLB byte size needs a real export (the same buffer
+  // Save/Use uploads), so it's built here too. Takes an explicit root so it can run right after import
+  // before `root` state has flushed.
+  async function measure(targetRoot = root) {
+    if (!targetRoot) { setMeasured(null); return; }
+    const base = measureGlbRoot(targetRoot);
+    let sizeKB = null;
+    try { const buf = await buildGLBBuffer(targetRoot); sizeKB = Math.round(buf.byteLength / 1024); } catch { /* size best-effort */ }
+    setMeasured({ ...base, sizeKB });
   }
 
   async function exportGLB() {
@@ -795,6 +824,7 @@ export default function GlbStudio() {
       setMeshes(ms => ms.map(m => ({ ...m, tris: Math.round(counts[m.key] ?? m.tris) })));
       applyGeometry(root, flat, smooth, new Set(pieces.filter(p => p.flatten !== false).map(p => p.id)));
       setOptMsg({ ok: true, text: `${Math.round(before).toLocaleString()} → ${Math.round(after).toLocaleString()} tris${baked ? ' · color baked to vertices' : ''}${pieceId ? ' · this piece' : ''}` });
+      measure();
     } catch (e) {
       setOptMsg({ ok: false, text: `Optimize failed: ${e.message}` });
     } finally {
@@ -834,6 +864,8 @@ export default function GlbStudio() {
       await uploadToR2(fu, glbBlob);
       const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
+      // Record the GLB cost of what we just built/optimized (§3) — flagged, not gated.
+      const stats = measureForSave(root, Math.round(buffer.byteLength / 1024), assetClass);
       const partsMeta = parts.filter(p => meshCountFor(p.id) > 0).map(p => ({ id: p.id, label: p.label, default: p.color, finish: p.finish }));
       await createGlobalElement({
         name: name.trim(),
@@ -846,6 +878,7 @@ export default function GlbStudio() {
         allowed_actions: capabilities,
         default_color: keepOriginal ? null : (parts[0]?.color ?? null),
         sort_order: 0,
+        ...toStatColumns(stats),
       });
       setSaveMsg({ ok: true, text: 'Saved as element!' });
     } catch (e) {
@@ -858,6 +891,32 @@ export default function GlbStudio() {
   const activeParts = parts.filter(p => meshCountFor(p.id) > 0);
   const totalTris = meshes.reduce((a, m) => a + m.tris, 0);
   const selectedObj = findPieceObj(root, selectedPiece);
+
+  // Asset class is suggested from placement/usage (§3) but the admin can override; the cap evaluation
+  // re-derives reactively so the badges update without re-measuring the GLB.
+  const suggestedClass = useMemo(() => deriveAssetClass({ placementConfig, zones }), [placementConfig, zones]);
+  const assetClass = assetClassOverride ?? suggestedClass;
+  const capEval = useMemo(() => (measured ? evaluateCaps(measured, assetClass) : null), [measured, assetClass]);
+
+  // Embedded handoff: return the optimized GLB blob + measured stats to the opener (AddElement) and
+  // let it finish element creation with its own richer form. Never creates the element itself.
+  async function handleUse() {
+    if (!root) return;
+    setBusy(true); setError(null);
+    try {
+      const buffer = await buildGLBBuffer();
+      const blob = new Blob([buffer], { type: 'model/gltf-binary' });
+      const sizeKB = Math.round(buffer.byteLength / 1024);
+      const base = measureGlbRoot(root);
+      const stats = { ...base, sizeKB, assetClass, overCap: evaluateCaps({ ...base, sizeKB }, assetClass).anyOver };
+      setMeasured({ ...base, sizeKB });
+      onUse({ blob, stats, parts: parts.filter(p => meshCountFor(p.id) > 0).map(p => ({ id: p.id, label: p.label, default: p.color, finish: p.finish })) });
+    } catch (e) {
+      setError(`Couldn't prepare GLB: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Cake placement: scale the topper to the chosen tier, place it on top (stand)
   // or bent around the tier wall (side, hug). Recomputes when geometry changes.
@@ -1104,6 +1163,45 @@ export default function GlbStudio() {
           <div style={s.colCard}>
             {root && (
               <div style={s.section}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={s.sectionTitle}>Size & budget</div>
+                  <button onClick={() => measure()} disabled={busy} style={{ background: 'none', border: 'none', color: '#3D5A44', fontWeight: 700, fontSize: 11, cursor: 'pointer', padding: 0 }}>re-measure</button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#6B8C74' }}>Class</span>
+                  <select value={assetClass} onChange={e => setAssetClassOverride(e.target.value)} style={s.miniSelect}>
+                    {ASSET_CLASSES.map(c => <option key={c} value={c}>{CAPS[c].label}{c === suggestedClass ? ' (suggested)' : ''}</option>)}
+                  </select>
+                </div>
+                {capEval ? (
+                  <>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {capEval.rows.map(r => {
+                        const show = (v) => r.unit === 'KB' ? fmtSize(v) : r.unit === 'px' ? `${v}px` : v.toLocaleString();
+                        return (
+                          <div key={r.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: r.over ? '#FFF0F0' : '#F4F8F5', borderRadius: 8, padding: '7px 10px' }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433' }}>{r.label}</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: r.over ? '#C0392B' : '#3D5A44' }}>
+                              {show(r.value)} <span style={{ color: '#9BB5A2', fontWeight: 600 }}>/ {show(r.cap)}{r.over ? ' ⚠' : ''}</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 11.5, fontWeight: 700,
+                      background: capEval.anyOver ? '#FFF6E5' : '#E8F5E9', color: capEval.anyOver ? '#8a6d1a' : '#2E7D32' }}>
+                      {capEval.anyOver
+                        ? `Over the ${capEval.capLabel} budget on phones. Optimize below, or keep it if this piece truly needs the detail — it's allowed, just flagged.`
+                        : `Within the ${capEval.capLabel} budget. Good to go.`}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 11, color: '#9BB5A2', fontWeight: 600 }}>Measuring…</div>
+                )}
+              </div>
+            )}
+            {root && (
+              <div style={s.section}>
                 <div style={s.sectionTitle}>Optimize (reduce size)</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#6B8C74', width: 56 }}>Target</span>
@@ -1184,7 +1282,16 @@ export default function GlbStudio() {
               </div>
             </div>
 
-            {root && (
+            {root && embedded && (
+              <div style={{ ...s.section, marginBottom: 0 }}>
+                <div style={s.sectionTitle}>Use this GLB</div>
+                <div style={s.hint}>Returns the optimized model to the element form. You'll set name, type, zones and the rest there.</div>
+                <button style={s.exportBtn(busy)} onClick={handleUse} disabled={busy}>{busy ? 'Preparing…' : 'Use this GLB →'}</button>
+                {error && <div style={s.err}>{error}</div>}
+              </div>
+            )}
+
+            {root && !embedded && (
               <div style={{ ...s.section, marginBottom: 0 }}>
                 <div style={s.sectionTitle}>Save as Element</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

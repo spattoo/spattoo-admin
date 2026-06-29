@@ -4,6 +4,7 @@ import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { measureForSave, toStatColumns, deriveAssetClass } from '../lib/glb.js';
 
 import { ZONE_LIST as ZONES } from '../lib/constants.js';
 
@@ -406,6 +407,11 @@ export default function GenerateModel() {
       const partsMeta = parts.map(p => ({ id: p.id, label: p.label, default: colors[p.id] ?? p.default }));
       const placement = { ...placementConfig, _model: { script, parts: partsMeta } };
 
+      // Record the GLB cost (§3) — measured from the export root. Best-effort; never blocks save.
+      let statCols = {};
+      try { statCols = toStatColumns(measureForSave(exportRoot, Math.round(glbBuffer.byteLength / 1024), deriveAssetClass({ placementConfig, zones }))); }
+      catch (e) { console.warn('GLB measure failed:', e.message); }
+
       await createGlobalElement({
         name: name.trim(),
         element_type_id: elementTypeId,
@@ -417,6 +423,7 @@ export default function GenerateModel() {
         allowed_actions: capabilities,
         default_color: parts[0] ? (colors[parts[0].id] ?? parts[0].default) : null,
         sort_order: 0,
+        ...statCols,
       });
 
       setMsg({ ok: true, text: 'Model saved as element!' });
