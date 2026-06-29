@@ -3,7 +3,8 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { fetchElementTypes, fetchParentElements, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
+import { fetchElementTypes, fetchParentElements, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
+import { normalizeThumbnail } from '../lib/thumbnail.js';
 import CraftGuideFields, { RANKS } from './CraftGuideFields.jsx';
 
 const ASSET_TYPES = [
@@ -341,63 +342,6 @@ export default function AddElement() {
     setParentId('');
   }
 
-  // Normalize a transparent PNG so the content fills ~80% of a 512×512 square.
-  // Works by finding the non-transparent bounding box, then centering it with 10% padding.
-  function normalizeThumbnail(blob) {
-    return new Promise(resolve => {
-      const img = new Image();
-      img.onload = () => {
-        const src = document.createElement('canvas');
-        src.width  = img.width;
-        src.height = img.height;
-        const sCtx = src.getContext('2d');
-        sCtx.drawImage(img, 0, 0);
-
-        // Find non-transparent bounding box
-        const { data } = sCtx.getImageData(0, 0, src.width, src.height);
-        let minX = src.width, minY = src.height, maxX = 0, maxY = 0;
-        for (let y = 0; y < src.height; y++) {
-          for (let x = 0; x < src.width; x++) {
-            if (data[(y * src.width + x) * 4 + 3] > 10) {
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
-            }
-          }
-        }
-
-        const OUT  = 512;
-        const FILL = 0.8; // content occupies 80% of the output square
-        const out  = document.createElement('canvas');
-        out.width  = OUT;
-        out.height = OUT;
-        const oCtx = out.getContext('2d');
-
-        if (maxX >= minX && maxY >= minY) {
-          const cw    = maxX - minX + 1;
-          const ch    = maxY - minY + 1;
-          const scale = (OUT * FILL) / Math.max(cw, ch);
-          const dw    = cw * scale;
-          const dh    = ch * scale;
-          const dx    = (OUT - dw) / 2;
-          const dy    = (OUT - dh) / 2;
-          oCtx.drawImage(src, minX, minY, cw, ch, dx, dy, dw, dh);
-        } else {
-          // Fully transparent fallback — just scale to fit
-          const scale = (OUT * FILL) / Math.max(src.width, src.height);
-          const dw    = src.width  * scale;
-          const dh    = src.height * scale;
-          oCtx.drawImage(src, (OUT - dw) / 2, (OUT - dh) / 2, dw, dh);
-        }
-
-        out.toBlob(resolve, 'image/png');
-        URL.revokeObjectURL(img.src);
-      };
-      img.src = URL.createObjectURL(blob);
-    });
-  }
-
   async function processRemoveBg(blob) {
     setRemovingBg(true);
     setThumbnailBlob(null);
@@ -542,10 +486,8 @@ export default function AddElement() {
         assetSize = fileToUpload.size ?? null;
       }
 
-      // Thumbnail is always PNG (remove.bg output or manual upload)
-      const thumbFilename = `${crypto.randomUUID()}.png`;
-      const { url: thumbUrl, key: thumbKey } = await getSignedUploadUrl('elements/thumbnails', thumbFilename, 'image/png');
-      await uploadToR2(thumbUrl, thumbnailBlob);
+      // Thumbnail is a normalized WebP (master) — the server bakes a smaller picker WebP from it.
+      const thumbKey = await uploadThumbnail('elements/thumbnails', thumbnailBlob);
 
       // Photo-frame window mask (2D only) — a separate 2D asset alongside the overlay; its key goes
       // into placement_config.photo.mask below. Uploaded raw (no bg-removal — the alpha IS the mask).

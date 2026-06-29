@@ -112,8 +112,11 @@ export default function DesignTemplate() {
   async function handleSaveTemplate({ name, offering, tierCount, designJson, thumbnailBlob }) {
     let thumbnailKey = null;
     if (thumbnailBlob) {
-      const filename = `${crypto.randomUUID()}.png`;
-      const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, 'image/png');
+      // Extension + content type follow the captured blob (WebP, or PNG on browsers that
+      // can't encode WebP via canvas) so the R2 signed PUT signature stays consistent.
+      const ext = thumbnailBlob.type === 'image/webp' ? 'webp' : 'png';
+      const filename = `${crypto.randomUUID()}.${ext}`;
+      const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, thumbnailBlob.type);
       await uploadToR2(url, thumbnailBlob);
       thumbnailKey = key;
     }

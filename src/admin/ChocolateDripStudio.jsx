@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // designer (spattoo-core CakeTier) renders — never a divergent copy.
 import { buildDripGeometry, buildDripWeb, DRIP_DEFAULTS } from '@spattoo/designer';
 import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
-import { fetchElementTypes, createGlobalElement, getSignedUploadUrl, uploadToR2 } from '../lib/api.js';
+import { fetchElementTypes, createGlobalElement, uploadThumbnail } from '../lib/api.js';
 
 // Scene constants mirror the designer's bottom tier (see PerchCalibrator) so the drip is tuned at the
 // same scale customers see: radius 1.2, top at BOARD_H + BOTTOM_H.
@@ -151,10 +151,7 @@ export default function ChocolateDripStudio() {
     if (!cnv) return null;
     const blob = await new Promise(res => cnv.toBlob(res, 'image/png'));
     if (!blob) return null;
-    const filename = `${crypto.randomUUID()}.png`;
-    const { url, key } = await getSignedUploadUrl('elements/thumbnails', filename, 'image/png');
-    await uploadToR2(url, blob);
-    return key;
+    return uploadThumbnail('elements/thumbnails', blob);
   }
 
   // Author the drip as a file-less master-data element (cake_elements) under the "Drip" type, with the

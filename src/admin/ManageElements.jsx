@@ -5,7 +5,7 @@ import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
   fetchAdminElementTypes, fetchAllElements, fetchParentElements,
-  getSignedUploadUrl, uploadToR2, updateGlobalElement, createGlobalElement, removeBg, deleteR2Object,
+  getSignedUploadUrl, uploadToR2, uploadThumbnail, updateGlobalElement, createGlobalElement, removeBg, deleteR2Object,
 } from '../lib/api.js';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
@@ -780,10 +780,7 @@ export default function ManageElements() {
       fields.placement_config = parsedConfig;
     }
     if (newThumbBlob && (forceThumb || thumbManual)) {
-      const filename = `${crypto.randomUUID()}.png`;
-      const { url, key } = await getSignedUploadUrl('elements/thumbnails', filename, 'image/png');
-      await uploadToR2(url, newThumbBlob);
-      fields.thumbnail_url = key;
+      fields.thumbnail_url = await uploadThumbnail('elements/thumbnails', newThumbBlob);
     }
   }
 
@@ -974,9 +971,7 @@ export default function ManageElements() {
       const raw = await new Promise(r => canvas.toBlob(r, 'image/png'));
       if (!raw) throw new Error('Could not capture the pattern preview.');
       const thumb = await normalizeThumbnail(raw);
-      const filename = `${crypto.randomUUID()}.png`;
-      const { url, key } = await getSignedUploadUrl('elements/thumbnails', filename, 'image/png');
-      await uploadToR2(url, thumb);
+      const key = await uploadThumbnail('elements/thumbnails', thumb);
       const oldThumb = selectedEl.thumbnail_url;
       await updateGlobalElement(selectedEl.id, { thumbnail_url: key });
       if (oldThumb) deleteR2Object(oldThumb).catch(e => console.warn('Old thumbnail delete failed:', e));

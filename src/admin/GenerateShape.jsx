@@ -4,7 +4,7 @@ import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 import { displaceCreamWaveCylinder, getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 
 // Cream-wave finish: a tangent-space normal map baked from the Meshy reference cake (its wavy
@@ -552,8 +552,7 @@ export default function GenerateShape() {
         await uploadToR2(fu, rawBlob);
         let thumbBlob = rawBlob;
         try { thumbBlob = await removeBg(rawBlob); } catch (e) { console.warn('remove.bg failed:', e.message); }
-        const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-        await uploadToR2(tu, thumbBlob);
+        const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
         await createGlobalElement({ name: name.trim(), element_type_id: elementTypeId, parent_id: null, image_url: fk, thumbnail_url: tk, allowed_zones: zones, placement_config: finalPlacementConfig, allowed_actions: capabilities, default_color: null, sort_order: 0 });
 
       } else {
@@ -572,8 +571,7 @@ export default function GenerateShape() {
         const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', glbFilename, 'model/gltf-binary');
         await uploadToR2(fu, glbBlob);
 
-        const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-        await uploadToR2(tu, thumbBlob);
+        const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
         await createGlobalElement({ name: name.trim(), element_type_id: elementTypeId, parent_id: null, image_url: fk, thumbnail_url: tk, allowed_zones: zones, placement_config: finalPlacementConfig, allowed_actions: capabilities, default_color: color3d, sort_order: 0 });
       }

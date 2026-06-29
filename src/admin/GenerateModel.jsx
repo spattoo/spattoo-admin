@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 
 import { ZONE_LIST as ZONES } from '../lib/constants.js';
 
@@ -399,8 +399,7 @@ export default function GenerateModel() {
 
       const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', `${crypto.randomUUID()}.glb`, 'model/gltf-binary');
       await uploadToR2(fu, glbBlob);
-      const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-      await uploadToR2(tu, thumbBlob);
+      const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       // Stash the part-map + source script alongside placement (jsonb) so the
       // model stays re-editable and parts can drive per-part color later.

@@ -313,8 +313,9 @@ function Router({ session }) {
       extraProps.onSave = async ({ name, tierCount, designJson, thumbnailBlob }) => {
         let thumbnailKey = null;
         if (thumbnailBlob) {
-          const filename = `${crypto.randomUUID()}.png`;
-          const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, 'image/png');
+          const ext = thumbnailBlob.type === 'image/webp' ? 'webp' : 'png';
+          const filename = `${crypto.randomUUID()}.${ext}`;
+          const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, thumbnailBlob.type);
           await uploadToR2(url, thumbnailBlob);
           thumbnailKey = key;
         }

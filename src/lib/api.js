@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { encodeWebp } from './thumbnail.js';
 
 const BASE_URL = import.meta.env.VITE_API_URL;
 
@@ -115,6 +116,23 @@ export async function uploadToR2(signedUrl, file) {
     body: file,
   });
   if (!res.ok) throw new Error('Upload to R2 failed');
+}
+
+// Store an image blob as a WebP thumbnail in R2 under `folder` and return its key.
+// Normalizes the source to WebP (alpha preserved) so masters never land as PNG —
+// the source can be a direct canvas capture, a remove.bg PNG, or already-WebP; all
+// come out WebP (server then bakes the smaller picker variant). The R2 signed PUT
+// signs the content-type, so the extension, the type sent to sign-upload, and
+// uploadToR2's header must all agree — we derive all three from the encoded blob's
+// MIME, which also makes the PNG fallback (browsers that can't encode WebP via
+// canvas) self-consistent. The ONE place thumbnail uploads pick their format.
+const IMAGE_EXT = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png' };
+export async function uploadThumbnail(folder, blob, basename = crypto.randomUUID()) {
+  const webp = await encodeWebp(blob);
+  const ext = IMAGE_EXT[webp.type] ?? 'png';
+  const { url, key } = await getSignedUploadUrl(folder, `${basename}.${ext}`, webp.type);
+  await uploadToR2(url, webp);
+  return key;
 }
 
 export async function fetchAllElements() {

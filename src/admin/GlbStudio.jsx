@@ -7,7 +7,7 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { toCreasedNormals, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 
 // GLB Studio — import one or more GLBs as "pieces", position them with a gizmo,
 // group their meshes into named recolorable PARTS, optimize, and export/save a
@@ -832,8 +832,7 @@ export default function GlbStudio() {
       const glbBlob = new Blob([buffer], { type: 'model/gltf-binary' });
       const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', `${crypto.randomUUID()}.glb`, 'model/gltf-binary');
       await uploadToR2(fu, glbBlob);
-      const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-      await uploadToR2(tu, thumbBlob);
+      const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       const partsMeta = parts.filter(p => meshCountFor(p.id) > 0).map(p => ({ id: p.id, label: p.label, default: p.color, finish: p.finish }));
       await createGlobalElement({

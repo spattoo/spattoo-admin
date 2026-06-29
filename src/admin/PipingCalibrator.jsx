@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, RoundedBox } from '@react-three/drei';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import { fetchAllElements, fetchElementTypes, createGlobalElement, getSignedUploadUrl, uploadToR2 } from '../lib/api';
+import { fetchAllElements, fetchElementTypes, createGlobalElement, getSignedUploadUrl, uploadToR2, uploadThumbnail } from '../lib/api';
 import { normalizeThumbnail } from '../lib/thumbnail.js';
 
 const DEG = Math.PI / 180;
@@ -752,7 +752,7 @@ export default function PipingCalibrator() {
     const thumb = await normalizeThumbnail(raw);
     const a = document.createElement('a');
     a.href = URL.createObjectURL(thumb);
-    a.download = `calibrator-${target}-${Date.now()}.png`;
+    a.download = `calibrator-${target}-${Date.now()}.webp`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -793,9 +793,7 @@ export default function PipingCalibrator() {
       if (!canvas) throw new Error('Thumbnail preview not ready — try again.');
       const raw = await new Promise(r => canvas.toBlob(r, 'image/png'));
       const thumb = await normalizeThumbnail(raw);
-      const tfn = `${crypto.randomUUID()}.png`;
-      const { url, key: thumbKey } = await getSignedUploadUrl('elements/thumbnails', tfn, 'image/png');
-      await uploadToR2(url, thumb);
+      const thumbKey = await uploadThumbnail('elements/thumbnails', thumb);
 
       // MVP: both parts reference the SAME block (self-alternate). Two-file later just
       // points part B at a different element id — same shape, no structural change.

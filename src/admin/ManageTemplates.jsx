@@ -214,7 +214,7 @@ function TemplateForm({ onSaved, onCancel }) {
         canvas.toBlob(blob => {
           if (blob) setThumbBlob(blob);
           setCapturing(false);
-        }, 'image/png');
+        }, 'image/webp', 0.85);
       } else {
         setCapturing(false);
       }
@@ -225,7 +225,7 @@ function TemplateForm({ onSaved, onCancel }) {
   function captureThumb() {
     const canvas = canvasRef.current?.querySelector('canvas');
     if (!canvas) return;
-    canvas.toBlob(blob => { if (blob) setThumbBlob(blob); }, 'image/png');
+    canvas.toBlob(blob => { if (blob) setThumbBlob(blob); }, 'image/webp', 0.85);
   }
 
   async function handleSave() {
@@ -234,8 +234,9 @@ function TemplateForm({ onSaved, onCancel }) {
     try {
       let thumbnailKey = null;
       if (thumbBlob) {
-        const filename = `${crypto.randomUUID()}.png`;
-        const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, 'image/png');
+        const ext = thumbBlob.type === 'image/webp' ? 'webp' : 'png';
+        const filename = `${crypto.randomUUID()}.${ext}`;
+        const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, thumbBlob.type);
         await uploadToR2(url, thumbBlob);
         thumbnailKey = key;
       }

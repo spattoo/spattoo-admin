@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 import { ZONE_LIST as ZONES } from '../lib/constants.js';
 import { loader, parseGLB, bakeAndWeldGeo, simplifyWeldedGeo, deriveFaceData, kmeans, clusterConnected, floodFillFaces, brushFaces, boundaryEdges, buildTexturedScene } from './glbRecomposeCore.js';
 
@@ -559,8 +559,7 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
       const glbBlob = new Blob([buffer], { type: 'model/gltf-binary' });
       const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', `${crypto.randomUUID()}.glb`, 'model/gltf-binary');
       await uploadToR2(fu, glbBlob);
-      const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-      await uploadToR2(tu, thumbBlob);
+      const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       await createGlobalElement({
         name: name.trim(),
