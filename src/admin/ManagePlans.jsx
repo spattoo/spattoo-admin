@@ -117,13 +117,24 @@ function PlanCard({ plan, schema, onSave }) {
     price_yearly:  plan.price_yearly / 100,
     is_active:     plan.is_active,
     features:      initFeatures(plan.features, schema),
+    tagline:        plan.tagline ?? '',
+    feature_bullets: (plan.feature_bullets ?? []).join('\n'),   // one bullet per line in the editor
+    is_popular:     !!plan.is_popular,
+    has_storefront: plan.has_storefront !== false,
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState(null);
 
   function startEdit() {
-    // Re-materialise features against the (now-loaded) schema each time we open the editor.
-    setForm(f => ({ ...f, features: initFeatures(plan.features, schema) }));
+    // Re-materialise features + marketing fields from the plan each time we open the editor.
+    setForm(f => ({
+      ...f,
+      features: initFeatures(plan.features, schema),
+      tagline: plan.tagline ?? '',
+      feature_bullets: (plan.feature_bullets ?? []).join('\n'),
+      is_popular: !!plan.is_popular,
+      has_storefront: plan.has_storefront !== false,
+    }));
     setEditing(true);
   }
 
@@ -138,6 +149,10 @@ function PlanCard({ plan, schema, onSave }) {
         price_yearly:  Math.round(form.price_yearly  * 100),
         is_active:     form.is_active,
         features:      form.features,
+        tagline:        form.tagline.trim() || null,
+        feature_bullets: form.feature_bullets.split('\n').map(s => s.trim()).filter(Boolean),
+        is_popular:     form.is_popular,
+        has_storefront: form.has_storefront,
       });
       onSave();
       setEditing(false);
@@ -180,6 +195,17 @@ function PlanCard({ plan, schema, onSave }) {
               <label style={s.label}>Display Name</label>
               <input style={s.inp} value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} />
             </div>
+            <div>
+              <label style={s.label}>Tagline (short — shown collapsed)</label>
+              <input style={s.inp} value={form.tagline} onChange={e => setForm(f => ({ ...f, tagline: e.target.value }))} placeholder="e.g. Public storefront · unlimited orders" />
+            </div>
+            <div>
+              <label style={s.label}>Feature bullets (one per line — shown expanded)</label>
+              <textarea style={{ ...s.inp, minHeight: 96, resize: 'vertical', fontFamily: 'inherit' }}
+                value={form.feature_bullets}
+                onChange={e => setForm(f => ({ ...f, feature_bullets: e.target.value }))}
+                placeholder={"Everything in Spark\nPublic storefront\nUnlimited orders"} />
+            </div>
             <div style={{ display: 'flex', gap: 12 }}>
               <div style={{ flex: 1 }}>
                 <label style={s.label}>Monthly Price (₹)</label>
@@ -191,10 +217,22 @@ function PlanCard({ plan, schema, onSave }) {
               </div>
             </div>
             <FeatureFields schema={schema} values={form.features} onChange={setFeature} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" id={`active-${plan.id}`} checked={form.is_active}
-                onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} />
-              <label htmlFor={`active-${plan.id}`} style={{ fontSize: 13, fontWeight: 600, color: '#2C4433', cursor: 'pointer' }}>Active</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" id={`active-${plan.id}`} checked={form.is_active}
+                  onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} />
+                <label htmlFor={`active-${plan.id}`} style={{ fontSize: 13, fontWeight: 600, color: '#2C4433', cursor: 'pointer' }}>Active</label>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" id={`popular-${plan.id}`} checked={form.is_popular}
+                  onChange={e => setForm(f => ({ ...f, is_popular: e.target.checked }))} />
+                <label htmlFor={`popular-${plan.id}`} style={{ fontSize: 13, fontWeight: 600, color: '#2C4433', cursor: 'pointer' }}>Most popular</label>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" id={`storefront-${plan.id}`} checked={form.has_storefront}
+                  onChange={e => setForm(f => ({ ...f, has_storefront: e.target.checked }))} />
+                <label htmlFor={`storefront-${plan.id}`} style={{ fontSize: 13, fontWeight: 600, color: '#2C4433', cursor: 'pointer' }}>Includes storefront</label>
+              </div>
             </div>
             {error && <div style={{ fontSize: 12, color: '#DC2626', fontWeight: 600 }}>{error}</div>}
             <button onClick={handleSave} disabled={saving} style={{ ...s.btn, background: '#2C4433', color: '#fff' }}>
