@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { isValidPhoneNumber, getCountries, getCountryCallingCode } from 'libphonenumber-js';
+// FULL ("max") metadata — the default "min" bundle only length-checks and wrongly
+// accepts junk like "123123123" for IN. "max" enforces real per-country patterns.
+import { isValidPhoneNumber, getCountries, getCountryCallingCode } from 'libphonenumber-js/max';
 import { createBaker, getSignedUploadUrl, uploadToR2 } from '../lib/api.js';
 
 // Note: no subscription/tier picker here — every baker starts on the one-time Spark trial
