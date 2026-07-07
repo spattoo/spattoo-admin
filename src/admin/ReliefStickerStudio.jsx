@@ -337,7 +337,11 @@ export default function ReliefStickerStudio() {
                   <mesh geometry={place.geo} position={place.pos} rotation={place.rot} castShadow receiveShadow>
                     <meshPhysicalMaterial
                       map={albedoTex} normalMap={maps.normal} normalScale={nScale}
-                      displacementMap={maps.disp} displacementScale={lift}
+                      {/* lift is a FRACTION of the sticker size (× size), not an absolute world length —
+                          so the same authored value renders identically in the designer on ANY cake size
+                          (the designer applies lift × STICKER_SIZE). Never store an absolute lift tuned to
+                          this studio's fixed TIER_R — the cake is any size. */}
+                      displacementMap={maps.disp} displacementScale={lift * size}
                       alphaTest={0.5} alphaToCoverage roughness={roughness} metalness={0}
                       sheen={sheen} sheenColor={'#ffffff'} sheenRoughness={0.85}
                       envMapIntensity={envIntensity} toneMapped={toneMapped} side={THREE.DoubleSide}
@@ -375,7 +379,7 @@ export default function ReliefStickerStudio() {
             </div>
 
             <div style={S.section}>Elevation (real 3D)</div>
-            <Slider label="Lift off wall" value={lift} set={setLift} min={0} max={0.25} fmt={v => v.toFixed(3)} />
+            <Slider label="Relief height" value={lift} set={setLift} min={0} max={0.25} fmt={v => v.toFixed(3)} />
             <Slider label="Edge round" value={edgeRound} set={setEdgeRound} min={2} max={48} step={1} fmt={v => `${v}px`} />
             <Slider label="Dome ↔ slab" value={puff} set={setPuff} min={0} max={1} />
             <Slider label="Dome blur" value={blur} set={setBlur} min={2} max={80} step={1} fmt={v => `${v}px`} />
