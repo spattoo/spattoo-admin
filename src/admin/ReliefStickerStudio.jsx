@@ -263,6 +263,9 @@ export default function ReliefStickerStudio() {
   // material knobs + a `bake` block (the params the ingest step rebuilds the normal/displacement maps
   // from). Placement (zone/size/position) is set per-element in the designer, so it's not included.
   const reliefConfig = useMemo(() => ({
+    // Recolour enabled → mark the element multi-colour recolourable in the designer (also set
+    // allowed_actions.color:true on the element). The per-region colours are chosen per instance.
+    ...(recolor ? { recolor: { method: 'hue_regions', sat: +recolorGuard.toFixed(2) } } : {}),
     relief: {
       lift: +lift.toFixed(3),
       normalScale: +normalScale.toFixed(2),
@@ -280,7 +283,7 @@ export default function ReliefStickerStudio() {
         flipY,
       },
     },
-  }), [lift, normalScale, roughness, sheen, envIntensity, toneMapped, puff, blur, edgeRound, detail, grain, delit, flipY]);
+  }), [recolor, recolorGuard, lift, normalScale, roughness, sheen, envIntensity, toneMapped, puff, blur, edgeRound, detail, grain, delit, flipY]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
