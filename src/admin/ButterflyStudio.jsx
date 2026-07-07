@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import { HexColorPicker } from 'react-colorful';
 import * as THREE from 'three';
+import { recolorRegion } from './recolor.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Folded butterfly — ONE source image rendered as a two-plane "folded sticker".
@@ -50,74 +51,13 @@ function CakeScene({ cakeColor = STANDARD_CAKE_COLOR }) {
   );
 }
 
-// ── Colour helpers ──────────────────────────────────────────────────────────────
-function hexToRgb(hex) {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
-}
-function rgbToHsl(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  let h = 0, s = 0;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
-    else if (max === g) h = (b - r) / d + 2;
-    else h = (r - g) / d + 4;
-    h *= 60;
-  }
-  return [h, s, l];
-}
-function hslToRgb(h, s, l) {
-  h /= 360;
-  const hue2rgb = (p, q, t) => {
-    if (t < 0) t += 1; if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  if (s === 0) { const v = Math.round(l * 255); return [v, v, v]; }
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  return [hue2rgb(p, q, h + 1 / 3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1 / 3)].map(x => Math.round(x * 255));
-}
-
-// Recolour ONLY the violet wing fill → target hue, preserving each pixel's brightness
-// (so shading survives). Wing fill is identified by blue > green (lavender), which
-// STRUCTURALLY excludes gold edges (green > blue) and white highlights (blue ≈ green) —
-// far cleaner than a hue band at the anti-aliased gold/wing boundary. `guard` is the
-// blue-over-green margin: higher = protect the gold more (less bleed, less coverage).
-// This is a "tintable region" on the asset — what ports to core.
+// Recolour the violet wing fill → the picked hue (shading preserved). Butterfly's tintable region is
+// identified by blue > green (lavender), which STRUCTURALLY excludes gold edges (green > blue) and white
+// highlights (blue ≈ green) — cleaner than a hue band at the anti-aliased boundary. `guard` = the
+// blue-over-green margin (higher protects the gold more). The luminance-preserving algorithm + colour
+// helpers now live in ./recolor.js, shared with the relief-sticker studio.
 function recolorWings(canvas, targetHex, guard) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const { width: w, height: h } = canvas;
-  const id = ctx.getImageData(0, 0, w, h);
-  const d = id.data;
-  const [tH, tS, tL] = rgbToHsl(...hexToRgb(targetHex));
-  const isWing = i => d[i + 3] >= 8 && (d[i + 2] - d[i + 1]) >= guard;  // opaque & blue-dominant
-
-  // Pass 1 — the wing's average lightness, so we can re-centre tone on the target.
-  let sum = 0, n = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    if (!isWing(i)) continue;
-    sum += rgbToHsl(d[i], d[i + 1], d[i + 2])[2]; n++;
-  }
-  if (!n) { ctx.putImageData(id, 0, 0); return; }
-  const refL = sum / n;
-
-  // Pass 2 — take the target hue/sat/lightness; re-add each pixel's deviation from the
-  // wing average so highlights/shadows survive while the overall tone becomes the pick.
-  for (let i = 0; i < d.length; i += 4) {
-    if (!isWing(i)) continue;
-    const ll = rgbToHsl(d[i], d[i + 1], d[i + 2])[2];
-    const nl = Math.min(1, Math.max(0, tL + (ll - refL)));
-    const [r, g, b] = hslToRgb(tH, tS, nl);
-    d[i] = r; d[i + 1] = g; d[i + 2] = b;
-  }
-  ctx.putImageData(id, 0, 0);
+  recolorRegion(canvas, targetHex, (d, i) => d[i + 3] >= 8 && (d[i + 2] - d[i + 1]) >= guard);
 }
 
 function cloneCanvas(src) {

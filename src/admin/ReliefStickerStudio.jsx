@@ -2,6 +2,17 @@ import { useState, useMemo, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
+import { extractRegions, recolorRegions } from './recolor.js';
+
+// Draw an image onto a fresh canvas (capped at `max`px on the long edge) so the pixels can be recoloured.
+function imgToCanvas(img, max = 1024) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  const scale = Math.min(1, max / Math.max(iw, ih));
+  const w = Math.max(1, Math.round(iw * scale)), h = Math.max(1, Math.round(ih * scale));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  return c;
+}
 
 // ── Relief Sticker Studio (prototype) ───────────────────────────────────────────────────────────
 // Raise a flat 2D image into a clean fondant cut-out WITHOUT a GLB. The trick that avoids the ugly
@@ -205,6 +216,9 @@ export default function ReliefStickerStudio() {
   const [posA, setPosA] = useState(0);   // side: around the wall (−1..1 → ±180°) · top: X
   const [posB, setPosB] = useState(0);   // side: height · top: Z
   const [cakeColor, setCakeColor] = useState('#f7d9e3');
+  const [recolor, setRecolor] = useState(false);          // recolour the image's coloured regions
+  const [recolorGuard, setRecolorGuard] = useState(0.18); // min saturation to count as coloured (protects whites/blacks)
+  const [targets, setTargets] = useState([]);             // per-region target hex, parallel to `regions`
 
   function pickFile(f) {
     if (!f) return;
@@ -213,11 +227,26 @@ export default function ReliefStickerStudio() {
     img.src = URL.createObjectURL(f);
   }
 
+  // Distinct colour regions of the image (by hue), so each can be recoloured independently.
+  const regions = useMemo(() => (recolor && imgEl ? extractRegions(imgToCanvas(imgEl), { minSat: recolorGuard }) : []), [recolor, imgEl, recolorGuard]);
+  useEffect(() => { setTargets(regions.map(r => r.hex)); }, [regions]);
+
+  // Albedo (colour) — de-light then recolour, both on a canvas. The relief maps below are built from the
+  // ORIGINAL luminance, and recolour is luminance-preserving, so the 3D shape is unaffected either way.
   const albedoTex = useMemo(() => {
     if (!imgEl) return null;
-    const t = delit > 0 ? new THREE.CanvasTexture(buildDelitAlbedo(imgEl, delit)) : new THREE.Texture(imgEl);
+    let t;
+    if (delit > 0 || recolor) {
+      const canvas = delit > 0 ? buildDelitAlbedo(imgEl, delit) : imgToCanvas(imgEl);
+      if (recolor && regions.length && targets.length === regions.length) {
+        recolorRegions(canvas, regions.map(r => r.hue), targets, { minSat: recolorGuard });
+      }
+      t = new THREE.CanvasTexture(canvas);
+    } else {
+      t = new THREE.Texture(imgEl);
+    }
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; return t;
-  }, [imgEl, delit]);
+  }, [imgEl, delit, recolor, regions, targets, recolorGuard]);
 
   const maps = useMemo(() => {
     if (!imgEl) return null;
@@ -354,6 +383,24 @@ export default function ReliefStickerStudio() {
             <Slider label="Detail strength" value={normalScale} set={setNormalScale} min={0} max={3} />
             <div style={S.row}><span style={S.lbl}>Flip green</span>
               <input type="checkbox" checked={flipY} onChange={e => setFlipY(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
+
+            <div style={S.section}>Recolour</div>
+            <div style={S.row}><span style={S.lbl}>Recolour</span>
+              <input type="checkbox" checked={recolor} onChange={e => setRecolor(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
+            {recolor && (<>
+              <Slider label="Colour guard" value={recolorGuard} set={setRecolorGuard} min={0} max={0.5} step={0.01} />
+              {regions.length === 0 && <div style={{ fontSize: 11, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>No colour regions found — load a coloured cut-out.</div>}
+              {regions.map((r, i) => (
+                <div key={i} style={S.row}>
+                  <span style={{ width: 22, height: 22, borderRadius: 6, border: '1.5px solid #C5D4C8', background: r.hex, flexShrink: 0 }} title={`detected ${r.hex}`} />
+                  <span style={{ color: '#9BB5A2', fontWeight: 700 }}>→</span>
+                  <input type="color" value={targets[i] ?? r.hex} onChange={e => setTargets(t => t.map((c, j) => (j === i ? e.target.value : c)))}
+                    style={{ width: 40, height: 26, border: '1.5px solid #C5D4C8', borderRadius: 6, cursor: 'pointer', padding: 2, background: '#fff' }} />
+                  <span style={{ ...S.val, width: 'auto', color: '#9BB5A2', fontFamily: 'monospace' }}>{Math.round(r.share * 100)}%</span>
+                </div>
+              ))}
+              <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>Each detected colour recolours on its own; whites, blacks &amp; highlights stay, relief unchanged. (Clustered by hue — brown groups with orange.)</div>
+            </>)}
 
             <div style={S.section}>Albedo / material</div>
             <Slider label="De-light" value={delit} set={setDelit} min={0} max={1} />
