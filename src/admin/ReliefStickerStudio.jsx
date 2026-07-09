@@ -6,7 +6,7 @@ import { extractRegions, recolorRegions } from './recolor.js';
 import { prepareElementImage } from '../lib/elementImage.js';
 // Solid-slab geometry — the SAME builder the designer renders for placement_config.relief.solid, so the
 // studio preview is WYSIWYG (one builder in spattoo-core, no mirrored copy to drift).
-import { buildSolidReliefGeometry, dominantColor, getFondantNormalMap } from '@spattoo/designer';
+import { buildSolidReliefGeometry, dominantColor, buildSolidWallMaterial, SOLID_FINISHES, SOLID_FINISH_ORDER } from '@spattoo/designer';
 
 // Draw an image onto a fresh canvas (capped at `max`px on the long edge) so the pixels can be recoloured.
 function imgToCanvas(img, max = 1024) {
@@ -272,6 +272,7 @@ export default function ReliefStickerStudio() {
   const [flatTop, setFlatTop] = useState(0);   // blend toward a flat plaque (0 = sculpted / current, 1 = flat top)
   const [solid, setSolid] = useState(false);   // render as a real extruded SOLID slab (front+walls+back) vs a displaced shell
   const [solidEdge, setSolidEdge] = useState(0);   // 0..1 of depth → rounded fondant rim on the slab (0 = sharp edge)
+  const [solidFinish, setSolidFinish] = useState('fondant');   // side-wall surface finish (fondant/chocolate/…), relief.solidFinish
   // Authored FLAT MASK — the author brushes the exact parts that should lie flush on the wall (black), the
   // rest stays raised (white), independent of colour & shape. Source of truth = an offscreen grayscale
   // canvas at field resolution (`maskRef`), default all-white. `maskVersion` bumps on stroke-commit/clear to
@@ -480,7 +481,7 @@ export default function ReliefStickerStudio() {
       toneMapped,
       // Solid slab (extruded silhouette) vs the displaced shell. Only written when on, so an unchecked
       // element stays exactly as before (absent = false = displaced shell).
-      ...(solid ? { solid: true, ...(solidEdge > 0 ? { solidEdge: +solidEdge.toFixed(2) } : {}) } : {}),
+      ...(solid ? { solid: true, ...(solidEdge > 0 ? { solidEdge: +solidEdge.toFixed(2) } : {}), ...(solidFinish !== 'fondant' ? { solidFinish } : {}) } : {}),
       bake: {
         puff: +puff.toFixed(2),
         domeBlur: blur,
@@ -502,7 +503,7 @@ export default function ReliefStickerStudio() {
       emissive: +printEmissive.toFixed(2),
     },
     // roughness/sheen intentionally absent from the deps — they no longer affect the exported config.
-  }), [recolor, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
+  }), [recolor, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
@@ -545,22 +546,14 @@ export default function ReliefStickerStudio() {
         const c = document.createElement('canvas'); c.width = iw; c.height = ih;
         const ctx = c.getContext('2d', { willReadFrequently: true });
         ctx.drawImage(img, 0, 0);
-        wallHex = dominantColor(ctx.getImageData(0, 0, iw, ih).data, iw, ih, { mul: 0.88 }) || wallHex;
+        wallHex = dominantColor(ctx.getImageData(0, 0, iw, ih).data, iw, ih, { mul: 1.0 }) || wallHex;
       }
     } catch (_) { /* tainted → neutral */ }
-    // Fondant grain (same map the cake wall carries), cloned so `repeat` here can't mutate the shared
-    // texture; high roughness + low envMapIntensity kill the plastic sheen. Mirrors core CakeCanvas.
-    const wallNormal = getFondantNormalMap().clone();
-    wallNormal.wrapS = wallNormal.wrapT = THREE.RepeatWrapping;
-    wallNormal.repeat.set(3, 3);
-    wallNormal.needsUpdate = true;
-    const wall = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(wallHex),
-      normalMap: wallNormal, normalScale: new THREE.Vector2(0.6, 0.6),
-      roughness: 0.97, metalness: 0, envMapIntensity: 0.3, side: THREE.DoubleSide,
-    });
+    // Side/back walls: dominant colour + the author-chosen FINISH via the shared factory (identical to
+    // the designer). Its cloned grain normal (if any) is disposed in the cleanup below.
+    const wall = buildSolidWallMaterial(solidFinish, wallHex, printEmissive);
     return [front, wall];
-  }, [solid, albedoTex, maps, nScale, roughness, sheen, envIntensity, toneMapped, printEmissive]);
+  }, [solid, albedoTex, maps, nScale, roughness, sheen, envIntensity, toneMapped, printEmissive, solidFinish]);
   // Dispose the wall's CLONED fondant normal (index 1) — not the front's shared maps.normal.
   useEffect(() => () => { if (solidMats) { solidMats[1]?.normalMap?.dispose?.(); solidMats.forEach(m => m.dispose()); } }, [solidMats]);
   // Positioning group: side → orbit around the wall (Y rot) + slide vertically; top → slide across X/Z.
@@ -692,6 +685,16 @@ export default function ReliefStickerStudio() {
             {/* Edge radius (relief.solidEdge): 0..1 of the slab depth → a bevel that rounds the sharp
                 front/back rim into a soft fondant edge. Only affects the solid slab. */}
             {solid && <Slider label="Edge radius" value={solidEdge} set={setSolidEdge} min={0} max={1} step={0.01} fmt={v => (v === 0 ? 'sharp' : v.toFixed(2))} />}
+            {/* Wall finish (relief.solidFinish): the element's material feel on the side walls. Colour stays
+                the print's dominant hue; the finish only sets gloss/grain. Presets from the shared registry. */}
+            {solid && (
+              <div style={S.row}><span style={S.lbl}>Wall finish</span>
+                <select value={solidFinish} onChange={e => setSolidFinish(e.target.value)}
+                  style={{ background: '#fff', border: '1px solid #d8d8d8', borderRadius: 6, padding: '4px 6px', fontSize: 12, color: '#222' }}>
+                  {SOLID_FINISH_ORDER.map(k => <option key={k} value={k}>{SOLID_FINISHES[k].label}</option>)}
+                </select>
+              </div>
+            )}
             <Slider label="Relief height" value={lift} set={setLift} min={0} max={0.25} fmt={v => v.toFixed(3)} />
             <Slider label="Edge round" value={edgeRound} set={setEdgeRound} min={2} max={48} step={1} fmt={v => `${v}px`} />
             <Slider label="Dome ↔ slab" value={puff} set={setPuff} min={0} max={1} />
