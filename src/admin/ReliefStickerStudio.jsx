@@ -6,7 +6,7 @@ import { extractRegions, recolorRegions } from './recolor.js';
 import { prepareElementImage } from '../lib/elementImage.js';
 // Solid-slab geometry — the SAME builder the designer renders for placement_config.relief.solid, so the
 // studio preview is WYSIWYG (one builder in spattoo-core, no mirrored copy to drift).
-import { buildSolidReliefGeometry } from '@spattoo/designer';
+import { buildSolidReliefGeometry, dominantColor, getFondantNormalMap } from '@spattoo/designer';
 
 // Draw an image onto a fresh canvas (capped at `max`px on the long edge) so the pixels can be recoloured.
 function imgToCanvas(img, max = 1024) {
@@ -271,6 +271,7 @@ export default function ReliefStickerStudio() {
   const [flattenThin, setFlattenThin] = useState(0);   // erode thin protrusions (spikes) so they hug the wall (0 = off), colour-independent
   const [flatTop, setFlatTop] = useState(0);   // blend toward a flat plaque (0 = sculpted / current, 1 = flat top)
   const [solid, setSolid] = useState(false);   // render as a real extruded SOLID slab (front+walls+back) vs a displaced shell
+  const [solidEdge, setSolidEdge] = useState(0);   // 0..1 of depth → rounded fondant rim on the slab (0 = sharp edge)
   // Authored FLAT MASK — the author brushes the exact parts that should lie flush on the wall (black), the
   // rest stays raised (white), independent of colour & shape. Source of truth = an offscreen grayscale
   // canvas at field resolution (`maskRef`), default all-white. `maskVersion` bumps on stroke-commit/clear to
@@ -479,7 +480,7 @@ export default function ReliefStickerStudio() {
       toneMapped,
       // Solid slab (extruded silhouette) vs the displaced shell. Only written when on, so an unchecked
       // element stays exactly as before (absent = false = displaced shell).
-      ...(solid ? { solid: true } : {}),
+      ...(solid ? { solid: true, ...(solidEdge > 0 ? { solidEdge: +solidEdge.toFixed(2) } : {}) } : {}),
       bake: {
         puff: +puff.toFixed(2),
         domeBlur: blur,
@@ -501,7 +502,7 @@ export default function ReliefStickerStudio() {
       emissive: +printEmissive.toFixed(2),
     },
     // roughness/sheen intentionally absent from the deps — they no longer affect the exported config.
-  }), [recolor, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
+  }), [recolor, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
@@ -516,9 +517,9 @@ export default function ReliefStickerStudio() {
   const solidCurveR = useMemo(() => (zone === 'side' && mode === 'hug') ? TIER_R + 0.004 : null, [zone, mode]);
   const solidGeo = useMemo(() => {
     if (!solid || !imgEl) return null;
-    try { return buildSolidReliefGeometry(imgEl, { size, thickness: lift * TIER_R, curveRadius: solidCurveR, scale: 1 }); }
+    try { return buildSolidReliefGeometry(imgEl, { size, thickness: lift * TIER_R, curveRadius: solidCurveR, scale: 1, edgeRadius: solidEdge }); }
     catch (_) { return null; }
-  }, [solid, imgEl, size, lift, solidCurveR]);
+  }, [solid, imgEl, size, lift, solidCurveR, solidEdge]);
   useEffect(() => () => solidGeo?.dispose?.(), [solidGeo]);
   const nScale = useMemo(() => new THREE.Vector2(normalScale, normalScale), [normalScale]);
   // Solid-slab materials as an EXPLICIT array — NOT two `attach="material-N"` children: on a plain <mesh>
@@ -534,10 +535,34 @@ export default function ReliefStickerStudio() {
       envMapIntensity: envIntensity, toneMapped, side: THREE.DoubleSide,
       emissive: new THREE.Color('#ffffff'), emissiveMap: albedoTex, emissiveIntensity: printEmissive,
     });
-    const wall = new THREE.MeshStandardMaterial({ color: new THREE.Color('#efe6da'), roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+    // Side/back walls = the print's DOMINANT colour (a touch darker), so the cut-out reads as one solid
+    // fondant colour matching the front — not white. Read off the albedo canvas; greyscale → neutral fondant.
+    let wallHex = '#efe6da';
+    try {
+      const img = albedoTex.image;
+      const iw = img?.naturalWidth || img?.width, ih = img?.naturalHeight || img?.height;
+      if (iw && ih) {
+        const c = document.createElement('canvas'); c.width = iw; c.height = ih;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0);
+        wallHex = dominantColor(ctx.getImageData(0, 0, iw, ih).data, iw, ih, { mul: 0.88 }) || wallHex;
+      }
+    } catch (_) { /* tainted → neutral */ }
+    // Fondant grain (same map the cake wall carries), cloned so `repeat` here can't mutate the shared
+    // texture; high roughness + low envMapIntensity kill the plastic sheen. Mirrors core CakeCanvas.
+    const wallNormal = getFondantNormalMap().clone();
+    wallNormal.wrapS = wallNormal.wrapT = THREE.RepeatWrapping;
+    wallNormal.repeat.set(3, 3);
+    wallNormal.needsUpdate = true;
+    const wall = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(wallHex),
+      normalMap: wallNormal, normalScale: new THREE.Vector2(0.6, 0.6),
+      roughness: 0.97, metalness: 0, envMapIntensity: 0.3, side: THREE.DoubleSide,
+    });
     return [front, wall];
   }, [solid, albedoTex, maps, nScale, roughness, sheen, envIntensity, toneMapped, printEmissive]);
-  useEffect(() => () => solidMats?.forEach(m => m.dispose()), [solidMats]);
+  // Dispose the wall's CLONED fondant normal (index 1) — not the front's shared maps.normal.
+  useEffect(() => () => { if (solidMats) { solidMats[1]?.normalMap?.dispose?.(); solidMats.forEach(m => m.dispose()); } }, [solidMats]);
   // Positioning group: side → orbit around the wall (Y rot) + slide vertically; top → slide across X/Z.
   const grp = useMemo(() => zone === 'side'
     ? { rotation: [0, posA * Math.PI, 0], position: [0, posB * (TIER_H / 2 - size * 0.5), 0] }
@@ -664,6 +689,9 @@ export default function ReliefStickerStudio() {
                 solid slab; they still drive the normal-map shading on its front face. */}
             <div style={S.row}><span style={S.lbl}>Solid slab</span>
               <input type="checkbox" checked={solid} onChange={e => setSolid(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
+            {/* Edge radius (relief.solidEdge): 0..1 of the slab depth → a bevel that rounds the sharp
+                front/back rim into a soft fondant edge. Only affects the solid slab. */}
+            {solid && <Slider label="Edge radius" value={solidEdge} set={setSolidEdge} min={0} max={1} step={0.01} fmt={v => (v === 0 ? 'sharp' : v.toFixed(2))} />}
             <Slider label="Relief height" value={lift} set={setLift} min={0} max={0.25} fmt={v => v.toFixed(3)} />
             <Slider label="Edge round" value={edgeRound} set={setEdgeRound} min={2} max={48} step={1} fmt={v => `${v}px`} />
             <Slider label="Dome ↔ slab" value={puff} set={setPuff} min={0} max={1} />
