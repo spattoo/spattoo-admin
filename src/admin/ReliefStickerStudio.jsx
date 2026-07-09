@@ -1,8 +1,9 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { extractRegions, recolorRegions } from './recolor.js';
+import { prepareElementImage } from '../lib/elementImage.js';
 
 // Draw an image onto a fresh canvas (capped at `max`px on the long edge) so the pixels can be recoloured.
 function imgToCanvas(img, max = 1024) {
@@ -12,6 +13,22 @@ function imgToCanvas(img, max = 1024) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   c.getContext('2d').drawImage(img, 0, 0, w, h);
   return c;
+}
+
+// Push chroma away from per-pixel luma by `mul` (>1 = more saturated) — mirrors core CakeCanvas `saturateRGB`
+// so the studio's print_finish "Saturation" preview matches what the designer renders. In place; alpha kept.
+function saturateCanvas(canvas, mul) {
+  if (mul === 1) return canvas;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const id = ctx.getImageData(0, 0, canvas.width, canvas.height), d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2], y = 0.299 * r + 0.587 * g + 0.114 * b;
+    d[i]     = Math.max(0, Math.min(255, y + (r - y) * mul));
+    d[i + 1] = Math.max(0, Math.min(255, y + (g - y) * mul));
+    d[i + 2] = Math.max(0, Math.min(255, y + (b - y) * mul));
+  }
+  ctx.putImageData(id, 0, 0);
+  return canvas;
 }
 
 // ── Relief Sticker Studio (prototype) ───────────────────────────────────────────────────────────
@@ -47,10 +64,38 @@ function boxBlur(src, w, h, radius, passes = 1) {
   return a;
 }
 
-function imageToFields(img) {
+// The field grid the maps are computed on (image capped to WORK on the long edge). Shared by imageToFields
+// and the flat-mask canvas so the painted mask samples 1:1 onto the fields.
+function fieldSize(img) {
   const scale = Math.min(1, WORK / Math.max(img.naturalWidth, img.naturalHeight));
-  const w = Math.max(1, Math.round(img.naturalWidth * scale));
-  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  return { w: Math.max(1, Math.round(img.naturalWidth * scale)), h: Math.max(1, Math.round(img.naturalHeight * scale)) };
+}
+
+// Sample the author's grayscale flat-mask canvas onto the field grid → a Float array (0..1) where the RED
+// channel is the RAISED factor (white 1 = raised, black 0 = flush). null when nothing painted, so the bake
+// behaves exactly as before. Orientation matches imageToFields (no flip here; core flips both together).
+function sampleFlatMask(maskCanvas, w, h, painted) {
+  if (!maskCanvas || !painted) return null;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(maskCanvas, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const out = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) out[i] = d[i * 4] / 255;
+  return out;
+}
+
+// Downscale the mask to ~128px on the long edge and encode a PNG data-URI for placement_config.relief.flatMask.
+function maskToDataURL(maskCanvas) {
+  const scale = Math.min(1, 128 / Math.max(maskCanvas.width, maskCanvas.height));
+  const w = Math.max(1, Math.round(maskCanvas.width * scale)), h = Math.max(1, Math.round(maskCanvas.height * scale));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(maskCanvas, 0, 0, w, h);
+  return c.toDataURL('image/png');
+}
+
+function imageToFields(img) {
+  const { w, h } = fieldSize(img);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0, w, h);
@@ -68,12 +113,17 @@ function imageToFields(img) {
 // bevel, radius = edgeRound) → no vertical cliff → no sawtooth. dome is the normalized blurred
 // silhouette (gentle central bulge); `puff` blends slab↔dome. detail (luminance high-pass) adds the
 // spots/eye to the normal map only.
-function buildFields(f, { puff, detail, blur, edgeRound, flipY, grain }) {
+// flattenThin (0 = off) + flatMask (optional per-pixel 0..1) keep parts of the sticker FLUSH on the wall,
+// both COLOUR-INDEPENDENT — MUST match core reliefMaps.js buildFields exactly. flattenThin erodes the
+// silhouette so THIN protrusions (spikes) hug the wall; flatMask is an authored black=flush paint mask.
+function buildFields(f, { puff, detail, blur, edgeRound, flipY, grain, flattenThin = 0, flatMask = null }) {
   const { w, h, mask, lum } = f, N = w * h;
   const domeRaw = boxBlur(mask, w, h, Math.max(1, Math.round(blur)), 2);
   let dmx = 1e-4; for (let i = 0; i < N; i++) if (mask[i] > 0.5 && domeRaw[i] > dmx) dmx = domeRaw[i];
   const cov = boxBlur(mask, w, h, Math.max(1, Math.round(edgeRound)), 2);
   const lumBlur = boxBlur(lum, w, h, 2, 1);
+  const thinR = flattenThin > 0 ? Math.max(2, Math.round(flattenThin * 55)) : 0;
+  const thinCov = thinR ? boxBlur(mask, w, h, thinR, 2) : null;
   // Fondant micro-grain: fine deterministic hash noise, lightly smoothed → a powdery satin surface.
   // Added to the NORMAL height only (not displacement) so it shades like grain without moving geometry.
   let grainF = null;
@@ -86,7 +136,9 @@ function buildFields(f, { puff, detail, blur, edgeRound, flipY, grain }) {
   for (let i = 0; i < N; i++) {
     const coverage = smoothstep(0.30, 0.85, cov[i]);          // rounded shoulder 0..1
     const dome = clamp(domeRaw[i] / dmx, 0, 1);
-    const macro = coverage * ((1 - puff) + puff * dome);       // slab ↔ dome
+    const thin = thinCov ? smoothstep(0.50, 0.66, thinCov[i]) : 1;   // thin protrusion → 0 (flush on wall)
+    const authored = flatMask ? flatMask[i] : 1;                     // painted mask: 0 = flush, 1 = raised
+    const macro = coverage * ((1 - puff) + puff * dome) * thin * authored;
     H[i] = macro;
     let hn = macro + (lum[i] - lumBlur[i]) * detail * coverage;
     if (grainF) hn += grainF[i] * grain * 0.09 * coverage;
@@ -196,6 +248,8 @@ function Slider({ label, value, set, min, max, step = 0.01, fmt = v => v.toFixed
 
 export default function ReliefStickerStudio() {
   const [imgEl, setImgEl] = useState(null);
+  const [normalizing, setNormalizing] = useState(false);
+  const [normalizeError, setNormalizeError] = useState(null);
   const [aspect, setAspect] = useState(1);
   const [puff, setPuff] = useState(0.5);       // slab(0) ↔ dome(1)
   const [detail, setDetail] = useState(0.4);
@@ -204,12 +258,43 @@ export default function ReliefStickerStudio() {
   const [grain, setGrain] = useState(0.5);        // fondant micro-grain
   const [flipY, setFlipY] = useState(false);
   const [delit, setDelit] = useState(0);
+  const [flattenThin, setFlattenThin] = useState(0);   // erode thin protrusions (spikes) so they hug the wall (0 = off), colour-independent
+  // Authored FLAT MASK — the author brushes the exact parts that should lie flush on the wall (black), the
+  // rest stays raised (white), independent of colour & shape. Source of truth = an offscreen grayscale
+  // canvas at field resolution (`maskRef`), default all-white. `maskVersion` bumps on stroke-commit/clear to
+  // re-derive the 3D maps + export; `maskPainted` gates whether we export/apply it at all.
+  const maskRef = useRef(null);            // offscreen field-res grayscale canvas (white = raised)
+  const paintCanvasRef = useRef(null);     // the on-screen paint view (faint image + red flush overlay)
+  const paintingRef = useRef(false);       // pointer-drag in progress
+  const [maskVersion, setMaskVersion] = useState(0);
+  const [maskPainted, setMaskPainted] = useState(false);
+  const [brushSize, setBrushSize] = useState(22);   // brush radius in on-screen paint-view px
+  const [maskErase, setMaskErase] = useState(false);
   const [lift, setLift] = useState(0.07);
   const [normalScale, setNormalScale] = useState(0.8);
-  const [roughness, setRoughness] = useState(0.7);
-  const [sheen, setSheen] = useState(0.12);
+  // MATTE and SHEENLESS, matching the designer's decal materials (spattoo-core CakeCanvas — both the flat
+  // and the relief path). Fondant is matte. Both roughness and sheen add WHITE on top of the albedo, and
+  // additive white desaturates a print. Measured in the designer on a real decal (texture saturation 0.907):
+  //   roughness 0.7 + sheen 0.12 → 0.345   |   sheen 0 → 0.397   |   roughness 0.95 → 0.479
+  //   neither → 0.607, which is what a plain flat decal renders at.
+  // It is NOT the HDRI (envMapIntensity 0 changes nothing) — it is direct specular from the key lights.
+  //
+  // These sliders are the source of the values baked into placement_config, so their DEFAULTS decide what
+  // the whole element library looks like. The old 0.7 / 0.12 are why every element authored here carries
+  // an explicit roughness:0.7 and sheen:0.12 that override the designer's defaults — those need re-authoring.
+  //
+  // CAUTION: this studio previews the decal ~2x larger than the designer draws it. A specular that reads as
+  // a highlight here reads as a grey film there. Author conservatively, and check on the real cake.
+  const [roughness, setRoughness] = useState(0.95);
+  const [sheen, setSheen] = useState(0);
   const [envIntensity, setEnvIntensity] = useState(0.4);
   const [toneMapped, setToneMapped] = useState(false);
+  // PRINT FINISH — top-level placement_config.print_finish { saturation, emissive }, NOT nested under relief:
+  // it applies to BOTH the flat and the relief 2D-sticker material paths in the designer. `emissive` is the
+  // decal's self-illumination (brightens + re-saturates without touching the cake); `saturation` is an albedo
+  // chroma pre-boost so the print survives the lit-render wash. Absent → the renderer's defaults (1.12 / 0.22).
+  const [printEmissive, setPrintEmissive] = useState(0.22);
+  const [printSaturation, setPrintSaturation] = useState(1.12);
   const [zone, setZone] = useState('side');
   const [mode, setMode] = useState('hug');
   const [size, setSize] = useState(0.95);
@@ -220,12 +305,57 @@ export default function ReliefStickerStudio() {
   const [recolorGuard, setRecolorGuard] = useState(0.18); // min saturation to count as coloured (protects whites/blacks)
   const [targets, setTargets] = useState([]);             // per-region target hex, parallel to `regions`
 
-  function pickFile(f) {
+  // Bake against the image the DESIGNER will actually load, never the raw file.
+  //
+  // `prepareElementImage` is the ONE 2D-image pipeline (AddElement + ManageElements both call it): it trims
+  // to the alpha bbox, rescales the subject to 80% of a 1024 square, and encodes WebP. Its output IS the
+  // element's `image_url`. Authoring against the raw file meant every pixel-denominated bake param —
+  // `domeBlur`, `edgeRound`, and the normal map's per-texel slope — was measured in a frame the renderer
+  // never sees. Same function here, so what you tune is what ships.
+  //
+  // removeBgEnabled:false — the studio takes an already-transparent PNG, and remove.bg costs credits. The
+  // upload path runs bg-removal FIRST and then this same normalize, so the framing is identical either way.
+  //
+  // (Lesson: the raw Dinosaur PNG has its subject at 41% of the frame — 429px tall at bake resolution. The
+  // normalized master puts it at 80% — 819px, 1.93x bigger. `domeBlur: 34px` is therefore 8.03% of the
+  // subject in the raw frame and 4.15% in the real one: the dome collapsed from a puffy bevel into a flat
+  // slab with a hard shoulder. Measured: the height field's flat plateau grew from 42.7% to 65.5%.)
+  async function pickFile(f) {
     if (!f) return;
-    const img = new Image();
-    img.onload = () => { setImgEl(img); setAspect((img.naturalWidth || 1) / (img.naturalHeight || 1)); };
-    img.src = URL.createObjectURL(f);
+    setNormalizing(true);
+    setImgEl(null);
+    try {
+      const normalized = await prepareElementImage(f, { removeBgEnabled: false });
+      const img = new Image();
+      img.onload = () => {
+        setImgEl(img);
+        setAspect((img.naturalWidth || 1) / (img.naturalHeight || 1));
+        setNormalizing(false);
+      };
+      img.onerror = () => setNormalizing(false);
+      img.src = URL.createObjectURL(normalized);
+    } catch (e) {
+      // Never silently fall back to the raw file — that is the bug this function exists to prevent.
+      console.error('[relief-studio] normalize failed; NOT falling back to the raw image', e);
+      setNormalizeError(String(e?.message ?? e));
+      setNormalizing(false);
+    }
   }
+
+
+  // The subject's pixel extent in the baked image. `domeBlur`/`edgeRound` are ABSOLUTE pixel radii, so this
+  // is the frame they are measured against — show it, or the numbers are meaningless.
+  const subjectPx = useMemo(() => {
+    if (!imgEl) return null;
+    const c = imgToCanvas(imgEl);
+    const { width: w, height: h } = c;
+    const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (d[(y * w + x) * 4 + 3] > 127) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+    return x1 < 0 ? null : { w: x1 - x0 + 1, h: y1 - y0 + 1, img: `${w}x${h}` };
+  }, [imgEl]);
 
   // Distinct colour regions of the image (by hue), so each can be recoloured independently.
   const regions = useMemo(() => (recolor && imgEl ? extractRegions(imgToCanvas(imgEl), { minSat: recolorGuard }) : []), [recolor, imgEl, recolorGuard]);
@@ -235,28 +365,80 @@ export default function ReliefStickerStudio() {
   // ORIGINAL luminance, and recolour is luminance-preserving, so the 3D shape is unaffected either way.
   const albedoTex = useMemo(() => {
     if (!imgEl) return null;
-    let t;
-    if (delit > 0 || recolor) {
-      const canvas = delit > 0 ? buildDelitAlbedo(imgEl, delit) : imgToCanvas(imgEl);
-      if (recolor && regions.length && targets.length === regions.length) {
-        recolorRegions(canvas, regions.map(r => r.hue), targets, { minSat: recolorGuard });
-      }
-      t = new THREE.CanvasTexture(canvas);
-    } else {
-      t = new THREE.Texture(imgEl);
+    // Always build on a canvas so the print_finish "Saturation" boost (matching core) can be previewed.
+    const canvas = delit > 0 ? buildDelitAlbedo(imgEl, delit) : imgToCanvas(imgEl);
+    if (recolor && regions.length && targets.length === regions.length) {
+      recolorRegions(canvas, regions.map(r => r.hue), targets, { minSat: recolorGuard });
     }
+    saturateCanvas(canvas, printSaturation);
+    const t = new THREE.CanvasTexture(canvas);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; return t;
-  }, [imgEl, delit, recolor, regions, targets, recolorGuard]);
+  }, [imgEl, delit, recolor, regions, targets, recolorGuard, printSaturation]);
+
+  // (Re)create a fresh all-white (fully-raised) mask canvas at field resolution whenever a new image loads.
+  useEffect(() => {
+    if (!imgEl) { maskRef.current = null; return; }
+    const { w, h } = fieldSize(imgEl);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+    maskRef.current = c;
+    setMaskPainted(false);
+    setMaskVersion(v => v + 1);
+  }, [imgEl]);
+
+  // Repaint the on-screen view: the source image faintly, then a red tint over the FLUSH (black) regions.
+  // Called imperatively during a drag (cheap) — the expensive 3D rebuild only fires on stroke-commit.
+  function redrawPaintView() {
+    const cv = paintCanvasRef.current, mask = maskRef.current;
+    if (!cv || !mask || !imgEl) return;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.globalAlpha = 0.4; ctx.drawImage(imgEl, 0, 0, cv.width, cv.height); ctx.globalAlpha = 1;
+    const mc = document.createElement('canvas'); mc.width = cv.width; mc.height = cv.height;
+    const mctx = mc.getContext('2d', { willReadFrequently: true });
+    mctx.drawImage(mask, 0, 0, cv.width, cv.height);
+    const id = mctx.getImageData(0, 0, cv.width, cv.height), d = id.data;
+    for (let i = 0; i < d.length; i += 4) { const flush = 255 - d[i]; d[i] = 224; d[i + 1] = 64; d[i + 2] = 96; d[i + 3] = Math.round(flush * 0.55); }
+    mctx.putImageData(id, 0, 0);
+    ctx.drawImage(mc, 0, 0);
+  }
+  // Keep the view in sync with the canvas size / a committed stroke / a new image.
+  useEffect(() => { redrawPaintView(); }, [imgEl, maskVersion, aspect]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Paint (or erase) a brush dab onto the field-res mask at the pointer, then refresh the view live.
+  function paintAt(clientX, clientY) {
+    const cv = paintCanvasRef.current, mask = maskRef.current;
+    if (!cv || !mask) return;
+    const rect = cv.getBoundingClientRect();
+    const x = (clientX - rect.left) / rect.width * mask.width;
+    const y = (clientY - rect.top) / rect.height * mask.height;
+    const r = Math.max(1, brushSize * (mask.width / rect.width));
+    const ctx = mask.getContext('2d');
+    ctx.fillStyle = maskErase ? '#fff' : '#000';   // black = flush, white = raised
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    redrawPaintView();
+  }
+  function onMaskDown(e) { e.currentTarget.setPointerCapture?.(e.pointerId); paintingRef.current = true; setMaskPainted(true); paintAt(e.clientX, e.clientY); }
+  function onMaskMove(e) { if (paintingRef.current) paintAt(e.clientX, e.clientY); }
+  function onMaskUp() { if (paintingRef.current) { paintingRef.current = false; setMaskVersion(v => v + 1); } }
+  function clearMask() {
+    const mask = maskRef.current; if (!mask) return;
+    const ctx = mask.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, mask.width, mask.height);
+    setMaskPainted(false); setMaskVersion(v => v + 1);
+  }
 
   const maps = useMemo(() => {
     if (!imgEl) return null;
-    const flds = buildFields(imageToFields(imgEl), { puff, detail, blur, edgeRound, flipY, grain });
+    const flds0 = imageToFields(imgEl);
+    // Layer the authored flat-mask on top of flattenThin (null when unpainted → identical to before).
+    const flatMask = sampleFlatMask(maskRef.current, flds0.w, flds0.h, maskPainted);
+    const flds = buildFields(flds0, { puff, detail, blur, edgeRound, flipY, grain, flattenThin, flatMask });
     const normal = new THREE.CanvasTexture(normalCanvas(flds));
     normal.colorSpace = THREE.NoColorSpace; normal.anisotropy = 8; normal.needsUpdate = true;
     const disp = new THREE.CanvasTexture(dispCanvas(flds));
     disp.colorSpace = THREE.NoColorSpace; disp.needsUpdate = true;
     return { normal, disp };
-  }, [imgEl, puff, detail, blur, edgeRound, flipY, grain]);
+  }, [imgEl, puff, detail, blur, edgeRound, flipY, grain, flattenThin, maskVersion, maskPainted]);
 
   const [copied, setCopied] = useState(false);
   // The relief recipe to drop into the element's placement_config (see core bake plan): runtime
@@ -269,8 +451,18 @@ export default function ReliefStickerStudio() {
     relief: {
       lift: +lift.toFixed(3),
       normalScale: +normalScale.toFixed(2),
-      roughness: +roughness.toFixed(2),
-      sheen: +sheen.toFixed(2),
+      // `roughness` and `sheen` are DELIBERATELY NOT EXPORTED. They are not a per-element artistic choice —
+      // they are the shared "what does fondant look like" contract, and the flat decal and the relief decal
+      // must agree on it. The designer owns the values (matte 0.95 / sheen 0, spattoo-core CakeCanvas); an
+      // absent key inherits that default, so a future retune reaches every element instead of being frozen
+      // in a thousand rows of JSON.
+      //
+      // They USED to be exported, which is how every element ended up carrying roughness:0.7 + sheen:0.12 —
+      // this studio's old slider defaults, authored while previewing the decal ~2x larger than the designer
+      // draws it. Both add WHITE over the albedo, and additive white desaturates a print: measured on a real
+      // decal (texture saturation 0.907), 0.7 + 0.12 rendered at 0.345 — 62% of the colour gone. With neither,
+      // 0.607, which is exactly what a plain flat decal renders at. The sliders below still drive THIS
+      // preview so you can see what they do; they no longer leak into the element.
       envIntensity: +envIntensity.toFixed(2),
       toneMapped,
       bake: {
@@ -281,9 +473,19 @@ export default function ReliefStickerStudio() {
         grain: +grain.toFixed(2),
         delit: +delit.toFixed(2),
         flipY,
+        flattenThin: +flattenThin.toFixed(2),   // 0 = off; erodes thin protrusions so they stay flush on the wall
       },
+      // Authored flat-mask — RELIEF-level sibling of `bake` (NOT inside it). Only written if the author
+      // actually painted: a downscaled ~128px grayscale PNG data-URI, black = flush. Absent = fully raised.
+      ...(maskPainted && maskRef.current ? { flatMask: maskToDataURL(maskRef.current) } : {}),
     },
-  }), [recolor, recolorGuard, lift, normalScale, roughness, sheen, envIntensity, toneMapped, puff, blur, edgeRound, detail, grain, delit, flipY]);
+    // Per-element print finish — TOP-LEVEL (applies to flat AND relief 2D stickers), not under `relief`.
+    print_finish: {
+      saturation: +printSaturation.toFixed(2),
+      emissive: +printEmissive.toFixed(2),
+    },
+    // roughness/sheen intentionally absent from the deps — they no longer affect the exported config.
+  }), [recolor, recolorGuard, lift, normalScale, envIntensity, toneMapped, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, maskVersion, maskPainted, printSaturation, printEmissive]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
@@ -335,16 +537,20 @@ export default function ReliefStickerStudio() {
                 {albedoTex && maps && (
                   <group rotation={grp.rotation} position={grp.position}>
                   <mesh geometry={place.geo} position={place.pos} rotation={place.rot} castShadow receiveShadow>
+                    {/* lift is a FRACTION of the wall radius (× TIER_R here), not an absolute world length —
+                        so the same authored value renders identically in the designer on ANY cake size and
+                        at ANY sticker scale (the designer applies lift × its live wall radius). Scaling off
+                        the wall radius — not the sticker size — is what keeps a large sticker from poking
+                        off the wall. Never store an absolute lift tuned to this fixed TIER_R. */}
                     <meshPhysicalMaterial
                       map={albedoTex} normalMap={maps.normal} normalScale={nScale}
-                      {/* lift is a FRACTION of the sticker size (× size), not an absolute world length —
-                          so the same authored value renders identically in the designer on ANY cake size
-                          (the designer applies lift × STICKER_SIZE). Never store an absolute lift tuned to
-                          this studio's fixed TIER_R — the cake is any size. */}
-                      displacementMap={maps.disp} displacementScale={lift * size}
+                      displacementMap={maps.disp} displacementScale={lift * TIER_R}
                       alphaTest={0.5} alphaToCoverage roughness={roughness} metalness={0}
                       sheen={sheen} sheenColor={'#ffffff'} sheenRoughness={0.85}
                       envMapIntensity={envIntensity} toneMapped={toneMapped} side={THREE.DoubleSide}
+                      // Preview the print_finish "Brightness" slider so authoring is WYSIWYG — same emissive
+                      // lift core applies (emissiveMap = the albedo). Saturation is previewed in albedoTex.
+                      emissive={'#ffffff'} emissiveMap={albedoTex} emissiveIntensity={printEmissive}
                     />
                   </mesh>
                   </group>
@@ -358,6 +564,24 @@ export default function ReliefStickerStudio() {
             <label style={S.pick}>＋ Load 2D image (transparent PNG)
               <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => pickFile(e.target.files[0])} />
             </label>
+
+            {normalizing && (
+              <div style={{ fontSize: 11, color: '#3D5A44', padding: '6px 0' }}>Normalizing (trim → 80% of 1024 → WebP)…</div>
+            )}
+            {normalizeError && (
+              <div style={{ fontSize: 11, lineHeight: 1.4, color: '#a11', background: '#fff0f0', border: '1px solid #f3b1b1',
+                            borderRadius: 6, padding: '6px 8px', margin: '4px 0' }}>
+                Normalize failed — <b>nothing loaded</b>. Fix the image rather than tuning against the raw file:
+                the designer only ever renders the normalized master. <span style={{ opacity: 0.7 }}>{normalizeError}</span>
+              </div>
+            )}
+            {subjectPx && (
+              <div style={{ fontSize: 11, lineHeight: 1.5, color: '#33502f', background: '#f2f8f3', border: '1px solid #cfe3d3',
+                            borderRadius: 6, padding: '6px 8px', margin: '4px 0', fontFamily: 'ui-monospace, monospace' }}>
+                Baking the <b>normalized master</b> ({subjectPx.img}) — the exact image the designer loads.<br />
+                subject <b>{subjectPx.w}×{subjectPx.h}px</b> · Edge round / Dome blur are pixel radii measured against this.
+              </div>
+            )}
 
             <div style={S.section}>Placement</div>
             <div style={{ ...S.row, gap: 6 }}>
@@ -383,6 +607,35 @@ export default function ReliefStickerStudio() {
             <Slider label="Edge round" value={edgeRound} set={setEdgeRound} min={2} max={48} step={1} fmt={v => `${v}px`} />
             <Slider label="Dome ↔ slab" value={puff} set={setPuff} min={0} max={1} />
             <Slider label="Dome blur" value={blur} set={setBlur} min={2} max={80} step={1} fmt={v => `${v}px`} />
+            {/* Flatten artwork darker than this luma (0 = off) so dark ridges/spikes hug the wall instead of
+                poking at a grazing angle — bakes into bake.flattenThin, read by core reliefMaps.js. Colour-
+                INDEPENDENT: it erodes by SHAPE (feature width), never brightness. */}
+            <Slider label="Flatten thin" value={flattenThin} set={setFlattenThin} min={0} max={1} step={0.01} fmt={v => (v === 0 ? 'off' : v.toFixed(2))} />
+
+            {/* AUTHORED FLAT MASK — brush the exact parts that should lie flat on the cake (independent of
+                colour & shape). Exported as placement_config.relief.flatMask (a ~128px black=flush data-URI),
+                layered on top of bake.flattenThin. Only written if something is painted. */}
+            {imgEl && (<>
+              <div style={S.section}>Flat mask</div>
+              <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 8 }}>
+                Paint the parts that should lie flat on the cake (e.g. a dino&rsquo;s back spikes). Red = flush; unpainted stays raised.
+              </div>
+              <canvas
+                ref={paintCanvasRef}
+                width={288} height={Math.max(1, Math.round(288 / (aspect || 1)))}
+                onPointerDown={onMaskDown} onPointerMove={onMaskMove} onPointerUp={onMaskUp} onPointerLeave={onMaskUp}
+                style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 10, border: '1.5px solid #C5D4C8', background: '#F4F8F5', cursor: 'crosshair', touchAction: 'none', marginBottom: 8 }}
+              />
+              <div style={{ ...S.row, gap: 6 }}>
+                <button style={S.seg(!maskErase)} onClick={() => setMaskErase(false)}>Paint</button>
+                <button style={S.seg(maskErase)} onClick={() => setMaskErase(true)}>Erase</button>
+                <button onClick={clearMask}
+                  style={{ padding: '6px 12px', borderRadius: 8, border: '1.5px solid #C5D4C8', cursor: 'pointer', fontFamily: 'Quicksand, sans-serif', fontSize: 12, fontWeight: 700, background: '#fff', color: '#6B8C74' }}>
+                  Clear
+                </button>
+              </div>
+              <Slider label="Brush size" value={brushSize} set={setBrushSize} min={4} max={80} step={1} fmt={v => `${v}px`} />
+            </>)}
 
             <div style={S.section}>Surface</div>
             <Slider label="Fondant grain" value={grain} set={setGrain} min={0} max={1} />
@@ -413,9 +666,26 @@ export default function ReliefStickerStudio() {
             <Slider label="De-light" value={delit} set={setDelit} min={0} max={1} />
             <Slider label="Roughness" value={roughness} set={setRoughness} min={0} max={1} />
             <Slider label="Sheen (satin)" value={sheen} set={setSheen} min={0} max={1} />
+            {/* The two sliders above drive this preview ONLY. They are not written into the element config —
+                the designer owns the fondant material (matte 0.95 / sheen 0) so the flat and relief decals
+                agree. Say so out loud: a control that silently fails to persist is exactly the class of bug
+                that put 0.7/0.12 into every element in the first place. */}
+            {(roughness !== 0.95 || sheen !== 0) && (
+              <div style={{ ...S.row, display: 'block', fontSize: 11, lineHeight: 1.4, color: '#9a6a00', background: '#fff8e1',
+                            border: '1px solid #ffe08a', borderRadius: 6, padding: '6px 8px', margin: '4px 0' }}>
+                Preview only — <b>Roughness</b> and <b>Sheen</b> are not exported. The designer renders every
+                fondant decal at <b>roughness 0.95 / sheen 0</b>. Reset to those to see the real cake.
+              </div>
+            )}
             <Slider label="Env intensity" value={envIntensity} set={setEnvIntensity} min={0} max={2} />
             <div style={S.row}><span style={S.lbl}>Tone-mapped</span>
               <input type="checkbox" checked={toneMapped} onChange={e => setToneMapped(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
+
+            {/* PRINT FINISH — exported as top-level placement_config.print_finish (flat AND relief 2D stickers). */}
+            <div style={S.section}>Print finish</div>
+            <Slider label="Brightness" value={printEmissive} set={setPrintEmissive} min={0} max={0.5} step={0.01} />
+            <Slider label="Saturation" value={printSaturation} set={setPrintSaturation} min={1} max={1.5} step={0.01} />
+            <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>Decal self-illumination + albedo chroma pre-boost so the print survives the cake&rsquo;s lit-render wash. Absent → designer defaults (1.12 / 0.22).</div>
 
             <div style={{ ...S.section, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>Element config</span>
