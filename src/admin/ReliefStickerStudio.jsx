@@ -4,6 +4,9 @@ import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { extractRegions, recolorRegions } from './recolor.js';
 import { prepareElementImage } from '../lib/elementImage.js';
+// Solid-slab geometry — the SAME builder the designer renders for placement_config.relief.solid, so the
+// studio preview is WYSIWYG (one builder in spattoo-core, no mirrored copy to drift).
+import { buildSolidReliefGeometry } from '@spattoo/designer';
 
 // Draw an image onto a fresh canvas (capped at `max`px on the long edge) so the pixels can be recoloured.
 function imgToCanvas(img, max = 1024) {
@@ -116,7 +119,7 @@ function imageToFields(img) {
 // flattenThin (0 = off) + flatMask (optional per-pixel 0..1) keep parts of the sticker FLUSH on the wall,
 // both COLOUR-INDEPENDENT — MUST match core reliefMaps.js buildFields exactly. flattenThin erodes the
 // silhouette so THIN protrusions (spikes) hug the wall; flatMask is an authored black=flush paint mask.
-function buildFields(f, { puff, detail, blur, edgeRound, flipY, grain, flattenThin = 0, flatMask = null }) {
+function buildFields(f, { puff, detail, blur, edgeRound, flipY, grain, flattenThin = 0, flatMask = null, flatTop = 0 }) {
   const { w, h, mask, lum } = f, N = w * h;
   const domeRaw = boxBlur(mask, w, h, Math.max(1, Math.round(blur)), 2);
   let dmx = 1e-4; for (let i = 0; i < N; i++) if (mask[i] > 0.5 && domeRaw[i] > dmx) dmx = domeRaw[i];
@@ -124,6 +127,9 @@ function buildFields(f, { puff, detail, blur, edgeRound, flipY, grain, flattenTh
   const lumBlur = boxBlur(lum, w, h, 2, 1);
   const thinR = flattenThin > 0 ? Math.max(2, Math.round(flattenThin * 55)) : 0;
   const thinCov = thinR ? boxBlur(mask, w, h, thinR, 2) : null;
+  // Flat-top plaque (bake.flatTop, 0 = off): blend the domed form toward a UNIFORM plateau (whole silhouette
+  // at one flat height, small rounded edge) — MUST match core reliefMaps.js buildFields exactly.
+  const plateauCov = flatTop > 0 ? boxBlur(mask, w, h, Math.max(2, Math.round(edgeRound * 0.35)), 2) : null;
   // Fondant micro-grain: fine deterministic hash noise, lightly smoothed → a powdery satin surface.
   // Added to the NORMAL height only (not displacement) so it shades like grain without moving geometry.
   let grainF = null;
@@ -136,11 +142,15 @@ function buildFields(f, { puff, detail, blur, edgeRound, flipY, grain, flattenTh
   for (let i = 0; i < N; i++) {
     const coverage = smoothstep(0.30, 0.85, cov[i]);          // rounded shoulder 0..1
     const dome = clamp(domeRaw[i] / dmx, 0, 1);
+    let form = coverage * ((1 - puff) + puff * dome);         // domed ↔ slab sculpted form
+    if (plateauCov) form = form * (1 - flatTop) + smoothstep(0.35, 0.65, plateauCov[i]) * flatTop;  // → flat plaque
     const thin = thinCov ? smoothstep(0.50, 0.66, thinCov[i]) : 1;   // thin protrusion → 0 (flush on wall)
     const authored = flatMask ? flatMask[i] : 1;                     // painted mask: 0 = flush, 1 = raised
-    const macro = coverage * ((1 - puff) + puff * dome) * thin * authored;
+    const macro = form * thin * authored;
     H[i] = macro;
-    let hn = macro + (lum[i] - lumBlur[i]) * detail * coverage;
+    // flatTop fades out the image-derived surface detail so a flat plaque reads truly flat (MUST match core).
+    const detailN = 1 - flatTop;
+    let hn = macro + (lum[i] - lumBlur[i]) * detail * coverage * detailN;
     if (grainF) hn += grainF[i] * grain * 0.09 * coverage;
     Hn[i] = clamp(hn, 0, 1.4);
   }
@@ -259,6 +269,8 @@ export default function ReliefStickerStudio() {
   const [flipY, setFlipY] = useState(false);
   const [delit, setDelit] = useState(0);
   const [flattenThin, setFlattenThin] = useState(0);   // erode thin protrusions (spikes) so they hug the wall (0 = off), colour-independent
+  const [flatTop, setFlatTop] = useState(0);   // blend toward a flat plaque (0 = sculpted / current, 1 = flat top)
+  const [solid, setSolid] = useState(false);   // render as a real extruded SOLID slab (front+walls+back) vs a displaced shell
   // Authored FLAT MASK — the author brushes the exact parts that should lie flush on the wall (black), the
   // rest stays raised (white), independent of colour & shape. Source of truth = an offscreen grayscale
   // canvas at field resolution (`maskRef`), default all-white. `maskVersion` bumps on stroke-commit/clear to
@@ -432,13 +444,13 @@ export default function ReliefStickerStudio() {
     const flds0 = imageToFields(imgEl);
     // Layer the authored flat-mask on top of flattenThin (null when unpainted → identical to before).
     const flatMask = sampleFlatMask(maskRef.current, flds0.w, flds0.h, maskPainted);
-    const flds = buildFields(flds0, { puff, detail, blur, edgeRound, flipY, grain, flattenThin, flatMask });
+    const flds = buildFields(flds0, { puff, detail, blur, edgeRound, flipY, grain, flattenThin, flatMask, flatTop });
     const normal = new THREE.CanvasTexture(normalCanvas(flds));
     normal.colorSpace = THREE.NoColorSpace; normal.anisotropy = 8; normal.needsUpdate = true;
     const disp = new THREE.CanvasTexture(dispCanvas(flds));
     disp.colorSpace = THREE.NoColorSpace; disp.needsUpdate = true;
     return { normal, disp };
-  }, [imgEl, puff, detail, blur, edgeRound, flipY, grain, flattenThin, maskVersion, maskPainted]);
+  }, [imgEl, puff, detail, blur, edgeRound, flipY, grain, flattenThin, flatTop, maskVersion, maskPainted]);
 
   const [copied, setCopied] = useState(false);
   // The relief recipe to drop into the element's placement_config (see core bake plan): runtime
@@ -465,6 +477,9 @@ export default function ReliefStickerStudio() {
       // preview so you can see what they do; they no longer leak into the element.
       envIntensity: +envIntensity.toFixed(2),
       toneMapped,
+      // Solid slab (extruded silhouette) vs the displaced shell. Only written when on, so an unchecked
+      // element stays exactly as before (absent = false = displaced shell).
+      ...(solid ? { solid: true } : {}),
       bake: {
         puff: +puff.toFixed(2),
         domeBlur: blur,
@@ -474,6 +489,7 @@ export default function ReliefStickerStudio() {
         delit: +delit.toFixed(2),
         flipY,
         flattenThin: +flattenThin.toFixed(2),   // 0 = off; erodes thin protrusions so they stay flush on the wall
+        flatTop: +flatTop.toFixed(2),   // 0 = sculpted; 1 = flat plaque (uniform raised height)
       },
       // Authored flat-mask — RELIEF-level sibling of `bake` (NOT inside it). Only written if the author
       // actually painted: a downscaled ~128px grayscale PNG data-URI, black = flush. Absent = fully raised.
@@ -485,12 +501,43 @@ export default function ReliefStickerStudio() {
       emissive: +printEmissive.toFixed(2),
     },
     // roughness/sheen intentionally absent from the deps — they no longer affect the exported config.
-  }), [recolor, recolorGuard, lift, normalScale, envIntensity, toneMapped, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, maskVersion, maskPainted, printSaturation, printEmissive]);
+  }), [recolor, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
   const place = useMemo(() => placement(zone, mode, size * aspect, size), [zone, mode, size, aspect]);
+  // SOLID slab (placement_config.relief.solid) — the extruded silhouette the designer builds, previewed
+  // at this tier so authoring is WYSIWYG. Only side+hug bends round the wall (mirrors `placement`); every
+  // other placement is a flat slab the mesh's rotation orients. thickness = lift × TIER_R (scale 1 here),
+  // the SAME world lift the displaced preview raises to — so toggling Solid never changes the height.
+  // Bend radius for the SOLID (side-hug only). The solid geometry is built at z≈0 (core's createCurvedPlane
+  // convention: axis behind it) — but the studio's `curvedPlaneGeometry` bakes the wall at z≈radius, so the
+  // solid mesh must be translated OUT by this radius (below) to sit on the wall instead of the cake's axis.
+  const solidCurveR = useMemo(() => (zone === 'side' && mode === 'hug') ? TIER_R + 0.004 : null, [zone, mode]);
+  const solidGeo = useMemo(() => {
+    if (!solid || !imgEl) return null;
+    try { return buildSolidReliefGeometry(imgEl, { size, thickness: lift * TIER_R, curveRadius: solidCurveR, scale: 1 }); }
+    catch (_) { return null; }
+  }, [solid, imgEl, size, lift, solidCurveR]);
+  useEffect(() => () => solidGeo?.dispose?.(), [solidGeo]);
   const nScale = useMemo(() => new THREE.Vector2(normalScale, normalScale), [normalScale]);
+  // Solid-slab materials as an EXPLICIT array — NOT two `attach="material-N"` children: on a plain <mesh>
+  // whose default `material` is a single Material, `attach="material-0"` writes index 0/1 onto that object
+  // instead of building an array, so the mesh keeps its default white material and the albedo never lands
+  // on the front cap. `material={[front, wall]}` sets the array directly (mirrors core CakeCanvas).
+  const solidMats = useMemo(() => {
+    if (!solid || !albedoTex || !maps) return null;
+    const front = new THREE.MeshPhysicalMaterial({
+      map: albedoTex, normalMap: maps.normal, normalScale: nScale,
+      roughness, metalness: 0,
+      sheen, sheenColor: new THREE.Color('#ffffff'), sheenRoughness: 0.85,
+      envMapIntensity: envIntensity, toneMapped, side: THREE.DoubleSide,
+      emissive: new THREE.Color('#ffffff'), emissiveMap: albedoTex, emissiveIntensity: printEmissive,
+    });
+    const wall = new THREE.MeshStandardMaterial({ color: new THREE.Color('#efe6da'), roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+    return [front, wall];
+  }, [solid, albedoTex, maps, nScale, roughness, sheen, envIntensity, toneMapped, printEmissive]);
+  useEffect(() => () => solidMats?.forEach(m => m.dispose()), [solidMats]);
   // Positioning group: side → orbit around the wall (Y rot) + slide vertically; top → slide across X/Z.
   const grp = useMemo(() => zone === 'side'
     ? { rotation: [0, posA * Math.PI, 0], position: [0, posB * (TIER_H / 2 - size * 0.5), 0] }
@@ -536,6 +583,12 @@ export default function ReliefStickerStudio() {
                 <Cake color={cakeColor} />
                 {albedoTex && maps && (
                   <group rotation={grp.rotation} position={grp.position}>
+                  {solid && solidGeo && solidMats ? (
+                    /* SOLID slab preview — the SAME extruded geometry + two-material array the designer
+                       renders: [0] printed albedo on the caps (no displacement — the geometry IS the lift),
+                       [1] a matte fondant tone on the side walls. Reads solid from a grazing angle. */
+                    <mesh geometry={solidGeo} material={solidMats} position={solidCurveR != null ? [place.pos[0], place.pos[1], place.pos[2] + solidCurveR] : place.pos} rotation={place.rot} castShadow receiveShadow />
+                  ) : (
                   <mesh geometry={place.geo} position={place.pos} rotation={place.rot} castShadow receiveShadow>
                     {/* lift is a FRACTION of the wall radius (× TIER_R here), not an absolute world length —
                         so the same authored value renders identically in the designer on ANY cake size and
@@ -553,6 +606,7 @@ export default function ReliefStickerStudio() {
                       emissive={'#ffffff'} emissiveMap={albedoTex} emissiveIntensity={printEmissive}
                     />
                   </mesh>
+                  )}
                   </group>
                 )}
                 <OrbitControls enablePan={false} target={[0, 0.8, 0]} />
@@ -603,9 +657,19 @@ export default function ReliefStickerStudio() {
             </div>
 
             <div style={S.section}>Elevation (real 3D)</div>
+            {/* Solid slab (placement_config.relief.solid): render as a REAL extruded solid (flat printed
+                front + side walls + flat back, bent round the wall) instead of a single displaced shell, so
+                it reads solid from a grazing angle. Thickness = Relief height. v1: outer silhouette only
+                (interior holes not cut). Surface-detail sliders (dome/blur/flatten/flat-top) don't shape a
+                solid slab; they still drive the normal-map shading on its front face. */}
+            <div style={S.row}><span style={S.lbl}>Solid slab</span>
+              <input type="checkbox" checked={solid} onChange={e => setSolid(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
             <Slider label="Relief height" value={lift} set={setLift} min={0} max={0.25} fmt={v => v.toFixed(3)} />
             <Slider label="Edge round" value={edgeRound} set={setEdgeRound} min={2} max={48} step={1} fmt={v => `${v}px`} />
             <Slider label="Dome ↔ slab" value={puff} set={setPuff} min={0} max={1} />
+            {/* Flat top (bake.flatTop): 0 = sculpted per-pixel form; 1 = the whole silhouette lifts to ONE
+                uniform flat height (a plaque), thin parts included — just a small rounded outer edge. */}
+            <Slider label="Flat top" value={flatTop} set={setFlatTop} min={0} max={1} step={0.01} fmt={v => (v === 0 ? 'off' : v.toFixed(2))} />
             <Slider label="Dome blur" value={blur} set={setBlur} min={2} max={80} step={1} fmt={v => `${v}px`} />
             {/* Flatten artwork darker than this luma (0 = off) so dark ridges/spikes hug the wall instead of
                 poking at a grazing angle — bakes into bake.flattenThin, read by core reliefMaps.js. Colour-
