@@ -280,6 +280,10 @@ export default function ReliefStickerStudio() {
   // repaints the print and the walls must follow that hue, so the designer ignores an authored colour there
   // (see CakeCanvas solidMats). Exported only when set, so existing configs stay byte-identical.
   const [solidColor, setSolidColor] = useState(null);
+  // Side-wall colour SOURCE (relief.solidWallColor). 'dominant' = one flat hue (the default; every element
+  // authored before this existed keeps its look). 'print' = sample the print at each point of the silhouette,
+  // so a tree's trunk edge is brown and its leaf edges green. An explicit solidColor overrides either.
+  const [solidWallColor, setSolidWallColor] = useState('dominant');
   // Authored FLAT MASK — the author brushes the exact parts that should lie flush on the wall (black), the
   // rest stays raised (white), independent of colour & shape. Source of truth = an offscreen grayscale
   // canvas at field resolution (`maskRef`), default all-white. `maskVersion` bumps on stroke-commit/clear to
@@ -404,6 +408,7 @@ export default function ReliefStickerStudio() {
     set(r.solid, setSolid);
     set(r.solidEdge, setSolidEdge);
     set(r.solidFinish, setSolidFinish);
+    set(r.solidWallColor, setSolidWallColor);
     set(r.solidColor, setSolidColor);
     set(b.puff, setPuff);
     set(b.domeBlur, setBlur);
@@ -597,7 +602,7 @@ export default function ReliefStickerStudio() {
       // element stays exactly as before (absent = false = displaced shell).
       // `solidColor` only when the author picked one (Auto = absent = the designer samples the print's
       // dominant hue). A recolourable element ignores it at render — the walls follow the customer's recolour.
-      ...(solid ? { solid: true, ...(solidEdge > 0 ? { solidEdge: +solidEdge.toFixed(2) } : {}), ...(solidFinish !== 'fondant' ? { solidFinish } : {}), ...(solidColor ? { solidColor } : {}) } : {}),
+      ...(solid ? { solid: true, ...(solidEdge > 0 ? { solidEdge: +solidEdge.toFixed(2) } : {}), ...(solidFinish !== 'fondant' ? { solidFinish } : {}), ...(solidWallColor !== 'dominant' ? { solidWallColor } : {}), ...(solidColor ? { solidColor } : {}) } : {}),
       bake: {
         puff: +puff.toFixed(2),
         domeBlur: blur,
@@ -619,7 +624,7 @@ export default function ReliefStickerStudio() {
       emissive: +printEmissive.toFixed(2),
     },
     // roughness/sheen intentionally absent from the deps — they no longer affect the exported config.
-  }), [recolor, recolorMethod, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, solidColor, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
+  }), [recolor, recolorMethod, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, solidWallColor, solidColor, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
@@ -659,13 +664,22 @@ export default function ReliefStickerStudio() {
     // always auto-samples the final albedo so the walls track the customer's hue; otherwise the authored
     // `solidColor` wins, else the auto-sample, else a neutral fondant tone. Same shared helper, no drift.
     const wallHex = (recolor ? null : solidColor) || autoWallHex || '#efe6da';
-    // Dominant colour + the author-chosen FINISH via the shared factory (identical to the designer). Its
-    // cloned grain normal (if any) is disposed in the cleanup below.
-    const wall = buildSolidWallMaterial(solidFinish, wallHex, printEmissive);
+    // Wall colour + the author-chosen FINISH via the shared factory (identical to the designer). `local`
+    // samples the print per-point (trunk brown, leaves green) via the geometry's uv1; an authored flat
+    // solidColor overrides it. Cloned grain normal + print map are disposed in the cleanup below.
+    const flatOverride = !recolor && !!solidColor;
+    const wall = buildSolidWallMaterial(solidFinish, wallHex, printEmissive,
+      { printMap: (solidWallColor === 'print' && !flatOverride) ? albedoTex : null });
     return [front, wall];
-  }, [solid, albedoTex, maps, nScale, roughness, sheen, envIntensity, toneMapped, printEmissive, solidFinish, solidColor, recolor, autoWallHex]);
-  // Dispose the wall's CLONED fondant normal (index 1) — not the front's shared maps.normal.
-  useEffect(() => () => { if (solidMats) { solidMats[1]?.normalMap?.dispose?.(); solidMats.forEach(m => m.dispose()); } }, [solidMats]);
+  }, [solid, albedoTex, maps, nScale, roughness, sheen, envIntensity, toneMapped, printEmissive, solidFinish, solidColor, solidWallColor, recolor, autoWallHex]);
+  // Dispose the wall's CLONES (index 1): its fondant normal and, in `local` mode, its print-map clone.
+  // Never the front's shared maps.normal / albedoTex. `map === emissiveMap` on the wall, so dispose once.
+  useEffect(() => () => {
+    if (!solidMats) return;
+    solidMats[1]?.normalMap?.dispose?.();
+    solidMats[1]?.map?.dispose?.();
+    solidMats.forEach(m => m.dispose());
+  }, [solidMats]);
   // Positioning group: side → orbit around the wall (Y rot) + slide vertically; top → slide across X/Z.
   const grp = useMemo(() => zone === 'side'
     ? { rotation: [0, posA * Math.PI, 0], position: [0, posB * (TIER_H / 2 - size * 0.5), 0] }
@@ -821,6 +835,19 @@ export default function ReliefStickerStudio() {
                 </select>
               </div>
             )}
+            {/* Wall colour SOURCE (relief.solidWallColor). 'print' samples the print along the silhouette, so a
+                multi-coloured element (a tree: brown trunk, green leaves) gets walls that match each part
+                instead of one averaged hue. 'dominant' is the default — elements authored before this keep
+                their look. An explicit Wall colour below overrides either. */}
+            {solid && (
+              <div style={S.row}><span style={S.lbl}>Wall source</span>
+                <button onClick={() => setSolidWallColor('dominant')} style={S.seg(solidWallColor === 'dominant')}>Dominant</button>
+                <button onClick={() => setSolidWallColor('print')} style={S.seg(solidWallColor === 'print')}>From print</button>
+              </div>
+            )}
+            {solid && solidWallColor === 'print' && (
+              <div style={S.hint}>Walls take the print’s colour at each point of the outline — best for multi-coloured artwork.</div>
+            )}
             {/* Wall colour (relief.solidColor): defaults to AUTO = the print's dominant hue, which is what the
                 designer samples when the key is absent. Pick a colour to pin the walls to it instead.
                 Disabled for a recolourable element: there the customer repaints the print and the walls follow
@@ -832,7 +859,10 @@ export default function ReliefStickerStudio() {
                     onChange={e => setSolidColor(e.target.value)}
                     style={{ ...S.swatch, ...(recolor ? { cursor: 'not-allowed', opacity: 0.5 } : null) }} />
                   <span style={{ ...S.val, width: 'auto', color: '#9BB5A2', fontFamily: 'monospace' }}>
-                    {recolor ? 'auto' : (solidColor || `${autoWallHex ?? '#efe6da'} auto`)}
+                    {recolor ? 'auto'
+                      : solidColor ? solidColor
+                      : solidWallColor === 'print' ? 'from print'
+                      : `${autoWallHex ?? '#efe6da'} auto`}
                   </span>
                   {!recolor && solidColor && (
                     <button onClick={() => setSolidColor(null)} style={{ ...S.seg(false), flex: 'none', padding: '5px 10px' }}>Auto</button>
