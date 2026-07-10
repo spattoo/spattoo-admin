@@ -157,6 +157,12 @@ export async function fetchAllElements() {
   return get('/api/admin/elements');
 }
 
+// One element by id — for an authoring surface opened against a specific element (Relief Sticker
+// Studio via ?element=<id>). Never fetch the whole library to read a single row.
+export async function fetchGlobalElement(id) {
+  return get(`/api/admin/elements/${id}`);
+}
+
 export async function createGlobalElement(payload) {
   return post('/api/admin/elements', payload);
 }

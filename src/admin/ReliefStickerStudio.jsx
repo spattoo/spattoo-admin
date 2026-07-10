@@ -1,12 +1,14 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { extractRegions, recolorRegions } from './recolor.js';
 import { prepareElementImage } from '../lib/elementImage.js';
+import { fetchGlobalElement } from '../lib/api.js';
 // Solid-slab geometry — the SAME builder the designer renders for placement_config.relief.solid, so the
-// studio preview is WYSIWYG (one builder in spattoo-core, no mirrored copy to drift).
-import { buildSolidReliefGeometry, dominantColorOfImage, buildSolidWallMaterial, SOLID_FINISHES, SOLID_FINISH_ORDER } from '@spattoo/designer';
+// studio preview is WYSIWYG (one builder in spattoo-core, no mirrored copy to drift). `corsUrl` is the
+// designer's own R2 qualifier — a plain fetch of an element image can otherwise hit a non-CORS cache entry.
+import { buildSolidReliefGeometry, dominantColorOfImage, buildSolidWallMaterial, corsUrl, SOLID_FINISHES, SOLID_FINISH_ORDER } from '@spattoo/designer';
 
 // Draw an image onto a fresh canvas (capped at `max`px on the long edge) so the pixels can be recoloured.
 function imgToCanvas(img, max = 1024) {
@@ -322,6 +324,11 @@ export default function ReliefStickerStudio() {
   const [cakeColor, setCakeColor] = useState('#f7d9e3');
   const [recolor, setRecolor] = useState(false);          // recolour the image's coloured regions
   const [recolorGuard, setRecolorGuard] = useState(0.18); // min saturation to count as coloured (protects whites/blacks)
+  // The element's recolour METHOD (opaque / saturated / blue_gt_green / hue_regions). This studio only
+  // PREVIEWS hue_regions, but it must never rewrite the method of an element it opened: `opaque` recolours
+  // every pixel, `hue_regions` exposes one swatch per detected hue — silently swapping them on Copy config
+  // would change how the designer paints the element. Hydrated from the element; new elements author hue_regions.
+  const [recolorMethod, setRecolorMethod] = useState('hue_regions');
   const [targets, setTargets] = useState([]);             // per-region target hex, parallel to `regions`
 
   // Bake against the image the DESIGNER will actually load, never the raw file.
@@ -339,27 +346,125 @@ export default function ReliefStickerStudio() {
   // normalized master puts it at 80% — 819px, 1.93x bigger. `domeBlur: 34px` is therefore 8.03% of the
   // subject in the raw frame and 4.15% in the real one: the dome collapsed from a puffy bevel into a flat
   // slab with a hard shoulder. Measured: the height field's flat plateau grew from 42.7% to 65.5%.)
-  async function pickFile(f) {
-    if (!f) return;
+  // The ONE image-ingest path — a picked file and an element loaded from R2 both land here, so both are
+  // baked against the same normalized frame. An element's stored `image_url` is NOT reliably normalized
+  // (ManageElements uploads the raw file when background-removal is off), so it must be normalized too.
+  const loadNormalized = useCallback(async (blob) => {
     setNormalizing(true);
+    setNormalizeError(null);
     setImgEl(null);
     try {
-      const normalized = await prepareElementImage(f, { removeBgEnabled: false });
+      const normalized = await prepareElementImage(blob, { removeBgEnabled: false });
       const img = new Image();
-      img.onload = () => {
-        setImgEl(img);
-        setAspect((img.naturalWidth || 1) / (img.naturalHeight || 1));
-        setNormalizing(false);
-      };
-      img.onerror = () => setNormalizing(false);
-      img.src = URL.createObjectURL(normalized);
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('decode failed'));
+        img.src = URL.createObjectURL(normalized);   // blob: → same-origin, so canvas pixel reads stay untainted
+      });
+      setImgEl(img);
+      setAspect((img.naturalWidth || 1) / (img.naturalHeight || 1));
     } catch (e) {
       // Never silently fall back to the raw file — that is the bug this function exists to prevent.
       console.error('[relief-studio] normalize failed; NOT falling back to the raw image', e);
       setNormalizeError(String(e?.message ?? e));
+    } finally {
       setNormalizing(false);
     }
+  }, []);
+
+  function pickFile(f) { if (f) loadNormalized(f); }
+
+  // ── Open against an existing element: /elements/relief-sticker?element=<id> ──────────────────────
+  // Manage Elements links here so an already-authored sticker can be re-tuned instead of re-authored.
+  // We hydrate EVERY control the element's placement_config carries, so what you land on is what the
+  // designer renders today — an unset key keeps this studio's default, which IS the designer's default.
+  // A key we don't hydrate would silently reset on the next Copy config, so add new keys here too.
+  const elementId = useMemo(() => new URLSearchParams(window.location.search).get('element'), []);
+  const [element, setElement] = useState(null);
+  const [elementError, setElementError] = useState(null);
+  // Start "loading" whenever the URL names an element, so the fetch is NEVER silent: without this the
+  // studio renders untouched defaults while the request is in flight, which is indistinguishable from
+  // "the link did nothing" (and from a route that doesn't exist yet).
+  const [elementLoading, setElementLoading] = useState(() => !!new URLSearchParams(window.location.search).get('element'));
+  // flatMask is a data-URI painted onto the mask canvas — but the canvas is (re)created all-white by an
+  // effect keyed on `imgEl`, which lands AFTER this fetch. Park it here and apply once the image is in.
+  const pendingMaskRef = useRef(null);
+
+  function hydrateFromConfig(pc) {
+    const set = (v, fn) => { if (v !== undefined && v !== null) fn(v); };
+    const r = pc?.relief ?? {};
+    const b = r.bake ?? {};
+    set(r.lift, setLift);
+    set(r.normalScale, setNormalScale);
+    set(r.envIntensity, setEnvIntensity);
+    set(r.toneMapped, setToneMapped);
+    // roughness/sheen are no longer exported, but legacy rows carry them — show what's actually stored.
+    set(r.roughness, setRoughness);
+    set(r.sheen, setSheen);
+    set(r.solid, setSolid);
+    set(r.solidEdge, setSolidEdge);
+    set(r.solidFinish, setSolidFinish);
+    set(r.solidColor, setSolidColor);
+    set(b.puff, setPuff);
+    set(b.domeBlur, setBlur);
+    set(b.edgeRound, setEdgeRound);
+    set(b.detail, setDetail);
+    set(b.grain, setGrain);
+    set(b.delit, setDelit);
+    set(b.flipY, setFlipY);
+    set(b.flattenThin, setFlattenThin);
+    set(b.flatTop, setFlatTop);
+    set(pc?.print_finish?.saturation, setPrintSaturation);
+    set(pc?.print_finish?.emissive, setPrintEmissive);
+    // `recolor`'s PRESENCE is the toggle; its METHOD is authored on the element (AddElement /
+    // ManageElements), so carry it through untouched rather than re-stamping this studio's default.
+    if (pc?.recolor) { setRecolor(true); set(pc.recolor.method, setRecolorMethod); set(pc.recolor.sat, setRecolorGuard); }
+    pendingMaskRef.current = r.flatMask ?? null;
   }
+
+  useEffect(() => {
+    if (!elementId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const el = await fetchGlobalElement(elementId);
+        if (!alive) return;
+        setElement(el);
+        hydrateFromConfig(el.placement_config ?? {});
+        if (!el.image_url) throw new Error('element has no image');
+        const res = await fetch(corsUrl(el.image_url), { mode: 'cors' });
+        if (!res.ok) throw new Error(`image fetch failed (${res.status})`);
+        const blob = await res.blob();
+        if (!alive) return;
+        await loadNormalized(blob);
+      } catch (e) {
+        console.error('[relief-studio] could not open element', elementId, e);
+        if (alive) setElementError(String(e?.message ?? e));
+      } finally {
+        if (alive) setElementLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [elementId, loadNormalized]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Paint a hydrated flatMask onto the fresh mask canvas, once the image (and therefore the canvas) exists.
+  // Runs after the all-white reset effect above; clears the pending ref so a later stroke can't re-apply it.
+  useEffect(() => {
+    const uri = pendingMaskRef.current;
+    if (!uri || !imgEl || !maskRef.current) return;
+    const m = maskRef.current;
+    const img = new Image();
+    img.onload = () => {
+      if (maskRef.current !== m) return;   // a newer image landed — its own reset owns the canvas
+      const ctx = m.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, m.width, m.height);
+      ctx.drawImage(img, 0, 0, m.width, m.height);
+      pendingMaskRef.current = null;
+      setMaskPainted(true);
+      setMaskVersion(v => v + 1);
+    };
+    img.src = uri;   // data: URI — same-origin by construction, no CORS
+  }, [imgEl, maskVersion]);
 
 
   // The subject's pixel extent in the baked image. `domeBlur`/`edgeRound` are ABSOLUTE pixel radii, so this
@@ -466,7 +571,11 @@ export default function ReliefStickerStudio() {
   const reliefConfig = useMemo(() => ({
     // Recolour enabled → mark the element multi-colour recolourable in the designer (also set
     // allowed_actions.color:true on the element). The per-region colours are chosen per instance.
-    ...(recolor ? { recolor: { method: 'hue_regions', sat: +recolorGuard.toFixed(2) } } : {}),
+    // Preserve the element's authored method (see recolorMethod). `sat` only means anything to the
+    // methods that threshold on saturation — `opaque` takes no param, so don't invent one for it.
+    ...(recolor
+      ? { recolor: { method: recolorMethod, ...(recolorMethod === 'opaque' ? {} : { sat: +recolorGuard.toFixed(2) }) } }
+      : {}),
     relief: {
       lift: +lift.toFixed(3),
       normalScale: +normalScale.toFixed(2),
@@ -510,7 +619,7 @@ export default function ReliefStickerStudio() {
       emissive: +printEmissive.toFixed(2),
     },
     // roughness/sheen intentionally absent from the deps — they no longer affect the exported config.
-  }), [recolor, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, solidColor, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
+  }), [recolor, recolorMethod, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, solidColor, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
@@ -580,6 +689,8 @@ export default function ReliefStickerStudio() {
     val: { fontSize: 11, fontWeight: 700, color: '#3D5A44', width: 40, textAlign: 'right' },
     swatch: { width: 40, height: 26, border: '1.5px solid #C5D4C8', borderRadius: 6, cursor: 'pointer', padding: 2, background: '#fff' },
     hint: { fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, margin: '-2px 0 8px' },
+    err: { fontSize: 11, lineHeight: 1.4, color: '#a11', background: '#fff0f0', border: '1px solid #f3b1b1', borderRadius: 6, padding: '6px 8px', margin: '4px 0' },
+    banner: { fontSize: 11, lineHeight: 1.5, color: '#33502f', background: '#f2f8f3', border: '1px solid #cfe3d3', borderRadius: 6, padding: '6px 8px', margin: '4px 0' },
     seg: (a) => ({ flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'Quicksand, sans-serif', fontSize: 12, fontWeight: 700, background: a ? '#3D5A44' : '#E8EDE9', color: a ? '#fff' : '#6B8C74' }),
   };
 
@@ -636,7 +747,22 @@ export default function ReliefStickerStudio() {
           </div>
 
           <div style={S.card}>
-            <label style={S.pick}>＋ Load 2D image (transparent PNG)
+            {/* Opened from Manage Elements with ?element=<id>: name the element being tuned, so a Copy
+                config that lands on the wrong row is obvious before it's pasted. */}
+            {element && (
+              <div style={S.banner}>
+                Editing <b>{element.name}</b> — controls are pre-filled from its saved <code>placement_config</code>.
+                {' '}<a href={`/elements/manage?element=${element.id}`} style={{ color: '#3D5A44', fontWeight: 700 }}>Back to Manage Elements</a>
+              </div>
+            )}
+            {elementLoading && (
+              <div style={S.banner}>Loading element {elementId}…</div>
+            )}
+            {elementError && (
+              <div style={S.err}>Couldn’t load that element — <b>nothing loaded</b>. <span style={{ opacity: 0.7 }}>{elementError}</span></div>
+            )}
+
+            <label style={S.pick}>{element ? '↺ Replace image (transparent PNG)' : '＋ Load 2D image (transparent PNG)'}
               <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => pickFile(e.target.files[0])} />
             </label>
 
@@ -644,15 +770,13 @@ export default function ReliefStickerStudio() {
               <div style={{ fontSize: 11, color: '#3D5A44', padding: '6px 0' }}>Normalizing (trim → 80% of 1024 → WebP)…</div>
             )}
             {normalizeError && (
-              <div style={{ fontSize: 11, lineHeight: 1.4, color: '#a11', background: '#fff0f0', border: '1px solid #f3b1b1',
-                            borderRadius: 6, padding: '6px 8px', margin: '4px 0' }}>
+              <div style={S.err}>
                 Normalize failed — <b>nothing loaded</b>. Fix the image rather than tuning against the raw file:
                 the designer only ever renders the normalized master. <span style={{ opacity: 0.7 }}>{normalizeError}</span>
               </div>
             )}
             {subjectPx && (
-              <div style={{ fontSize: 11, lineHeight: 1.5, color: '#33502f', background: '#f2f8f3', border: '1px solid #cfe3d3',
-                            borderRadius: 6, padding: '6px 8px', margin: '4px 0', fontFamily: 'ui-monospace, monospace' }}>
+              <div style={{ ...S.banner, fontFamily: 'ui-monospace, monospace' }}>
                 Baking the <b>normalized master</b> ({subjectPx.img}) — the exact image the designer loads.<br />
                 subject <b>{subjectPx.w}×{subjectPx.h}px</b> · Edge round / Dome blur are pixel radii measured against this.
               </div>
@@ -764,6 +888,16 @@ export default function ReliefStickerStudio() {
             <div style={S.section}>Recolour</div>
             <div style={S.row}><span style={S.lbl}>Recolour</span>
               <input type="checkbox" checked={recolor} onChange={e => setRecolor(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
+            {/* This studio previews the ORIGINAL artwork and only simulates `hue_regions`. On an element
+                authored with another method the designer's output differs — most starkly with `opaque`,
+                which repaints EVERY pixel in the customer's colour. Say so, rather than let the green
+                preview imply the cake shows green. (Method is preserved on Copy config, never rewritten.) */}
+            {recolor && recolorMethod !== 'hue_regions' && (
+              <div style={S.hint}>
+                Method <code>{recolorMethod}</code> — preserved on Copy config, but <b>not previewed here</b>.
+                {recolorMethod === 'opaque' && ' The designer repaints every pixel in the customer’s colour, so the cake will NOT show the artwork’s own colours.'}
+              </div>
+            )}
             {recolor && (<>
               <Slider label="Colour guard" value={recolorGuard} set={setRecolorGuard} min={0} max={0.5} step={0.01} />
               {regions.length === 0 && <div style={{ fontSize: 11, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>No colour regions found — load a coloured cut-out.</div>}

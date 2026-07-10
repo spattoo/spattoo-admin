@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
@@ -481,6 +481,19 @@ export default function ManageElements() {
   const canvasRef = useRef();
 
   useEffect(() => { loadAll(); }, []);
+
+  // Deep link: /elements/manage?element=<id> opens straight onto that element (the Relief Sticker Studio
+  // links back this way, so you return to the row you were tuning). Waits for BOTH lists — selectElement
+  // resolves the element's type slug to seed a missing placement_config, and would mis-seed on an empty
+  // elementTypes. Fires once; a later manual selection must not be yanked back.
+  const deepLinkId = useMemo(() => new URLSearchParams(window.location.search).get('element'), []);
+  const deepLinkedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkedRef.current || !deepLinkId || !elements.length || !elementTypes.length) return;
+    deepLinkedRef.current = true;
+    const el = elements.find(e => e.id === deepLinkId);
+    if (el) selectElement(el);
+  }, [deepLinkId, elements, elementTypes]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!elementTypeId || isParent) { setParentOptions([]); return; }
@@ -1195,6 +1208,18 @@ export default function ManageElements() {
                           </span>
                         )}
                       </div>
+                    )}
+                    {/* Relief authoring is a 2D-image capability (the studio bakes displacement from the
+                        image's alpha + luminance), so this is gated on the ASSET KIND — not on the element
+                        type. The studio loads this element and pre-fills from its placement_config. */}
+                    {!isGlb && selectedEl.image_url && (
+                      <a
+                        href={`/elements/relief-sticker?element=${selectedEl.id}`}
+                        style={{ ...s.smallBtn, display: 'inline-block', marginTop: 8, marginBottom: 0, textDecoration: 'none' }}
+                        title="Tune this element's raised-fondant relief in the Relief Sticker Studio"
+                      >
+                        Open in Relief Sticker Studio
+                      </a>
                     )}
                   </div>
                   <label style={s.activeToggle(isActive)}>
