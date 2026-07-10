@@ -689,6 +689,10 @@ export default function ManageElements() {
   const recolorDesc = (m = recolorMethod, g = recolorGuard, sv = recolorSat) =>
     m === 'blue_gt_green' ? { method: 'blue_gt_green', guard: g !== '' ? parseInt(g, 10) : 12 }
     : m === 'saturated'   ? { method: 'saturated', sat: sv !== '' ? parseFloat(sv) : 0.25 }
+    // hue_regions clusters the coloured pixels BY HUE and gives the customer one swatch per detected colour
+    // (the multi-colour path — a tree's trunk/leaves/flower stay separate). Like `saturated` it thresholds on
+    // `sat` (which pixels count as coloured); the per-region swatches are chosen per instance in the designer.
+    : m === 'hue_regions' ? { method: 'hue_regions', sat: sv !== '' ? parseFloat(sv) : 0.18 }
     : { method: 'opaque' };
   // The verge descriptor (rests on the rim lip, reclines outward) — only non-blank fields; all blank
   // → '' so patchPc drops the key and the designer uses its defaults (angle_deg 35 / 0 offsets).
@@ -1619,6 +1623,7 @@ export default function ManageElements() {
                         <option value="opaque">Whole image — recolour every pixel (solid stickers)</option>
                         <option value="saturated">Coloured fill, keep black/white lines (any colour + outline)</option>
                         <option value="blue_gt_green">Coloured fill, keep gold/white outline (blue-dominant fill)</option>
+                        <option value="hue_regions">Multi-colour — one swatch per colour (tree: trunk + leaves + flower)</option>
                       </select>
                       {recolorMethod === 'blue_gt_green' && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
@@ -1628,16 +1633,16 @@ export default function ManageElements() {
                             onChange={e => { const g = e.target.value; setRecolorGuard(g); patchPc({ recolor: recolorDesc('blue_gt_green', g) }); }} />
                         </div>
                       )}
-                      {recolorMethod === 'saturated' && (
+                      {(recolorMethod === 'saturated' || recolorMethod === 'hue_regions') && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
                           <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Saturation min</span>
                           <input type="number" min="0" max="0.8" step="0.01" style={{ ...s.input, flex: 1 }} value={recolorSat}
-                            placeholder="0.25 — lower catches more, higher protects lines"
-                            onChange={e => { const sv = e.target.value; setRecolorSat(sv); patchPc({ recolor: recolorDesc('saturated', recolorGuard, sv) }); }} />
+                            placeholder="lower catches more, higher protects lines"
+                            onChange={e => { const sv = e.target.value; setRecolorSat(sv); patchPc({ recolor: recolorDesc(recolorMethod, recolorGuard, sv) }); }} />
                         </div>
                       )}
                       <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>
-                        Which pixels the colour picker recolours (brightness preserved). <b>Whole image</b> for a single-fill sticker; <b>Coloured fill</b> keeps gold/white outlines. Multi-colour artwork isn't a fit — leave colour-changeable off.
+                        Which pixels the colour picker recolours (brightness preserved). <b>Whole image</b> for a single-fill sticker; <b>Coloured fill</b> keeps gold/white outlines; <b>Multi-colour</b> gives the customer one swatch per detected colour (whites/blacks stay) — the fit for artwork like a tree or a dino.
                       </div>
                     </div>
                   )}

@@ -8,7 +8,24 @@ import { fetchGlobalElement } from '../lib/api.js';
 // Solid-slab geometry — the SAME builder the designer renders for placement_config.relief.solid, so the
 // studio preview is WYSIWYG (one builder in spattoo-core, no mirrored copy to drift). `corsUrl` is the
 // designer's own R2 qualifier — a plain fetch of an element image can otherwise hit a non-CORS cache entry.
-import { buildSolidReliefGeometry, dominantColorOfImage, buildSolidWallMaterial, corsUrl, SOLID_FINISHES, SOLID_FINISH_ORDER } from '@spattoo/designer';
+import { buildSolidReliefGeometry, dominantColorOfImage, buildSolidWallMaterial, corsUrl, RECOLOR_METHODS, SOLID_FINISHES, SOLID_FINISH_ORDER } from '@spattoo/designer';
+
+// method → which param it thresholds on ('sat' | 'guard' | null). Straight from the renderer's own registry,
+// so a method added in core can't leave this studio authoring the wrong key.
+const RECOLOR_PARAM = Object.fromEntries(RECOLOR_METHODS.map(m => [m.value, m.param]));
+
+// The `recolor` object to export. Pure, so the round-trip can be reasoned about (and was checked against every
+// real element): carry EVERY authored key through — `default` (the at-load repaint colour), `maxRegions`, … —
+// and touch only the method's own threshold param. Exactly one param belongs to a method, so drop both and
+// re-add the right one; otherwise switching method strands the old one in the config, read by nothing.
+export function buildRecolor(cfg, sat) {
+  const method = cfg.method ?? 'hue_regions';
+  const { sat: _s, guard: _g, ...rest } = cfg;      // strip both thresholds, keep default/maxRegions/…
+  const param = RECOLOR_PARAM[method];
+  if (param === 'sat')   return { ...rest, method, sat: +Number(sat).toFixed(2) };
+  if (param === 'guard') return { ...rest, method, guard: cfg.guard ?? 12 };
+  return { ...rest, method };                        // `opaque` — no threshold at all
+}
 
 // Draw an image onto a fresh canvas (capped at `max`px on the long edge) so the pixels can be recoloured.
 function imgToCanvas(img, max = 1024) {
@@ -327,12 +344,23 @@ export default function ReliefStickerStudio() {
   const [posB, setPosB] = useState(0);   // side: height · top: Z
   const [cakeColor, setCakeColor] = useState('#f7d9e3');
   const [recolor, setRecolor] = useState(false);          // recolour the image's coloured regions
-  const [recolorGuard, setRecolorGuard] = useState(0.18); // min saturation to count as coloured (protects whites/blacks)
-  // The element's recolour METHOD (opaque / saturated / blue_gt_green / hue_regions). This studio only
-  // PREVIEWS hue_regions, but it must never rewrite the method of an element it opened: `opaque` recolours
-  // every pixel, `hue_regions` exposes one swatch per detected hue — silently swapping them on Copy config
-  // would change how the designer paints the element. Hydrated from the element; new elements author hue_regions.
-  const [recolorMethod, setRecolorMethod] = useState('hue_regions');
+  // The element's ENTIRE authored recolor object, carried through untouched. This studio authors exactly one
+  // of its params (`sat`, the Colour guard) and previews exactly one of its methods (`hue_regions`) — so it
+  // must never REBUILD the object from the fields it happens to know. Rebuilding silently dropped every other
+  // key: `default` (the at-load repaint colour — Cream layer would have reverted to its pink artwork),
+  // `guard` (blue_gt_green's own threshold), `maxRegions`. Copy config now round-trips them all.
+  const [recolorCfg, setRecolorCfg] = useState({ method: 'hue_regions', sat: 0.18 });
+  // Derived, never parallel state. The METHOD (opaque / saturated / blue_gt_green / hue_regions) is the
+  // element's, not this studio's: `opaque` recolours every pixel, `hue_regions` exposes one swatch per
+  // detected hue. Rewriting it on Copy config would change how the designer paints the element.
+  const recolorMethod = recolorCfg.method ?? 'hue_regions';
+  // Colour guard = `recolor.sat`, the saturation floor below which a pixel counts as white/black/grey and is
+  // left alone. It ONLY reaches the renderer for methods whose registry `param` is 'sat' (saturated,
+  // hue_regions). `opaque` takes no param and `blue_gt_green` thresholds on `guard` instead — so for those the
+  // slider is hidden rather than left live over a value the designer will never read.
+  const recolorGuard = recolorCfg.sat ?? 0.18;
+  const usesGuard = RECOLOR_PARAM[recolorMethod] === 'sat';
+  const setRecolorGuard = v => setRecolorCfg(c => ({ ...c, sat: v }));
   const [targets, setTargets] = useState([]);             // per-region target hex, parallel to `regions`
 
   // Bake against the image the DESIGNER will actually load, never the raw file.
@@ -423,7 +451,8 @@ export default function ReliefStickerStudio() {
     set(pc?.print_finish?.emissive, setPrintEmissive);
     // `recolor`'s PRESENCE is the toggle; its METHOD is authored on the element (AddElement /
     // ManageElements), so carry it through untouched rather than re-stamping this studio's default.
-    if (pc?.recolor) { setRecolor(true); set(pc.recolor.method, setRecolorMethod); set(pc.recolor.sat, setRecolorGuard); }
+    // Take the recolor object WHOLE — method, sat, guard, default, maxRegions. Its presence is the toggle.
+    if (pc?.recolor) { setRecolor(true); setRecolorCfg(pc.recolor); }
     pendingMaskRef.current = r.flatMask ?? null;
   }
 
@@ -487,7 +516,12 @@ export default function ReliefStickerStudio() {
   }, [imgEl]);
 
   // Distinct colour regions of the image (by hue), so each can be recoloured independently.
-  const regions = useMemo(() => (recolor && imgEl ? extractRegions(imgToCanvas(imgEl), { minSat: recolorGuard }) : []), [recolor, imgEl, recolorGuard]);
+  // Per-hue regions are what `hue_regions` recolours — one swatch per detected colour. Any OTHER method
+  // recolours a single region (or every pixel), so showing detected hues there implies a per-colour control
+  // the designer will never honour. Gate the preview on the method, not merely on `recolor`.
+  const regions = useMemo(() => (
+    recolor && imgEl && recolorMethod === 'hue_regions' ? extractRegions(imgToCanvas(imgEl), { minSat: recolorGuard }) : []
+  ), [recolor, imgEl, recolorGuard, recolorMethod]);
   useEffect(() => { setTargets(regions.map(r => r.hex)); }, [regions]);
 
   // Albedo (colour) — de-light then recolour, both on a canvas. The relief maps below are built from the
@@ -576,11 +610,12 @@ export default function ReliefStickerStudio() {
   const reliefConfig = useMemo(() => ({
     // Recolour enabled → mark the element multi-colour recolourable in the designer (also set
     // allowed_actions.color:true on the element). The per-region colours are chosen per instance.
-    // Preserve the element's authored method (see recolorMethod). `sat` only means anything to the
-    // methods that threshold on saturation — `opaque` takes no param, so don't invent one for it.
-    ...(recolor
-      ? { recolor: { method: recolorMethod, ...(recolorMethod === 'opaque' ? {} : { sat: +recolorGuard.toFixed(2) }) } }
-      : {}),
+    // Keep the element's OWN recolor object — `default`, `maxRegions` and anything else authored elsewhere
+    // must survive a round-trip through here untouched. Never rebuild it from the fields this studio knows.
+    // The METHOD PARAMS are the exception: exactly one belongs to the chosen method (registry `param`), so
+    // strip both and re-add that one. Otherwise switching method leaves the old method's threshold behind —
+    // a `guard: 12` riding on a `hue_regions` element, read by nothing, confusing the next author.
+    ...(recolor ? { recolor: buildRecolor(recolorCfg, recolorGuard) } : {}),
     relief: {
       lift: +lift.toFixed(3),
       normalScale: +normalScale.toFixed(2),
@@ -624,7 +659,7 @@ export default function ReliefStickerStudio() {
       emissive: +printEmissive.toFixed(2),
     },
     // roughness/sheen intentionally absent from the deps — they no longer affect the exported config.
-  }), [recolor, recolorMethod, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, solidWallColor, solidColor, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
+  }), [recolor, recolorCfg, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, solidWallColor, solidColor, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
@@ -690,14 +725,26 @@ export default function ReliefStickerStudio() {
   useEffect(() => () => { maps?.normal?.dispose?.(); maps?.disp?.dispose?.(); }, [maps]);
   useEffect(() => () => place?.geo?.dispose?.(), [place]);
 
+  // The one definition of a section heading's look — shared by the standalone `section` and the boxed
+  // `groupTitle` so they can't drift apart.
+  const SECTION_TITLE = { fontSize: 11, fontWeight: 700, color: '#6B8C74', letterSpacing: 1, textTransform: 'uppercase' };
   const S = {
     page: { minHeight: '100vh', background: '#EDEAE2', fontFamily: 'Quicksand, sans-serif', padding: '24px' },
     title: { fontSize: 22, fontWeight: 800, color: '#2C4433' },
     sub: { fontSize: 13, color: '#6B8C74', fontWeight: 600, marginBottom: 18 },
-    layout: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 320px', gap: 20, maxWidth: 1400, margin: '0 auto', alignItems: 'start' },
+    // The settings panel is two columns wide (desktop-first admin tool): ~25 sliders in ONE column ran far
+    // below the fold, so tuning a slider meant scrolling away from the cake it changes. Two columns fit the
+    // whole recipe beside the preview. `minmax(0,…)` on both tracks so the canvas and the <pre> can shrink.
+    layout: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,600px)', gap: 20, maxWidth: 1640, margin: '0 auto', alignItems: 'start' },
     card: { background: '#fff', borderRadius: 18, border: '1.5px solid #C5D4C8', padding: 18 },
+    // Two settings columns. `alignItems:start` keeps each column packed to the top instead of stretching.
+    cols: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', columnGap: 18, alignItems: 'start' },
     pick: { display: 'block', padding: '12px 16px', borderRadius: 12, border: '2px dashed #C5D4C8', background: '#F4F8F5', color: '#3D5A44', fontWeight: 700, cursor: 'pointer', textAlign: 'center', marginBottom: 14 },
-    section: { fontSize: 11, fontWeight: 700, color: '#6B8C74', letterSpacing: 1, textTransform: 'uppercase', margin: '14px 0 8px' },
+    // A titled settings GROUP — one bordered block per concern. With ~25 controls in two columns a flat run
+    // of sliders gives the eye nothing to anchor on; the border makes each concern a discrete panel and stops
+    // a stray slider reading as part of the section above it.
+    group: { border: '1px solid #E3EAE5', background: '#FCFDFC', borderRadius: 12, padding: '12px 12px 6px', marginBottom: 12 },
+    groupTitle: { ...SECTION_TITLE, margin: '0 0 10px' },   // no top margin: the group's padding owns the gap
     row: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 },
     lbl: { fontSize: 12, fontWeight: 700, color: '#6B8C74', width: 96 },
     val: { fontSize: 11, fontWeight: 700, color: '#3D5A44', width: 40, textAlign: 'right' },
@@ -796,7 +843,13 @@ export default function ReliefStickerStudio() {
               </div>
             )}
 
-            <div style={S.section}>Placement</div>
+            {/* Settings in TWO columns — left: what the piece IS (placement, elevation, the flat mask it's
+                painted with); right: how it LOOKS (surface, recolour, material, print finish) + the config
+                you copy out. The image loader and its banners above stay full width. */}
+            <div style={S.cols}>
+            <div>
+            <div style={S.group}>
+            <div style={S.groupTitle}>Placement</div>
             <div style={{ ...S.row, gap: 6 }}>
               <button style={S.seg(zone === 'side')} onClick={() => setZone('side')}>Side</button>
               <button style={S.seg(zone === 'top')} onClick={() => setZone('top')}>Top</button>
@@ -813,8 +866,10 @@ export default function ReliefStickerStudio() {
               <input type="color" value={cakeColor} onChange={e => setCakeColor(e.target.value)} style={S.swatch} />
               <span style={{ ...S.val, width: 'auto', color: '#9BB5A2', fontFamily: 'monospace' }}>{cakeColor}</span>
             </div>
+            </div>{/* /Placement */}
 
-            <div style={S.section}>Elevation (real 3D)</div>
+            <div style={S.group}>
+            <div style={S.groupTitle}>Elevation (real 3D)</div>
             {/* Solid slab (placement_config.relief.solid): render as a REAL extruded solid (flat printed
                 front + side walls + flat back, bent round the wall) instead of a single displaced shell, so
                 it reads solid from a grazing angle. Thickness = Relief height. v1: outer silhouette only
@@ -882,12 +937,14 @@ export default function ReliefStickerStudio() {
                 poking at a grazing angle — bakes into bake.flattenThin, read by core reliefMaps.js. Colour-
                 INDEPENDENT: it erodes by SHAPE (feature width), never brightness. */}
             <Slider label="Flatten thin" value={flattenThin} set={setFlattenThin} min={0} max={1} step={0.01} fmt={v => (v === 0 ? 'off' : v.toFixed(2))} />
+            </div>{/* /Elevation */}
 
             {/* AUTHORED FLAT MASK — brush the exact parts that should lie flat on the cake (independent of
                 colour & shape). Exported as placement_config.relief.flatMask (a ~128px black=flush data-URI),
                 layered on top of bake.flattenThin. Only written if something is painted. */}
             {imgEl && (<>
-              <div style={S.section}>Flat mask</div>
+              <div style={S.group}>
+              <div style={S.groupTitle}>Flat mask</div>
               <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 8 }}>
                 Paint the parts that should lie flat on the cake (e.g. a dino&rsquo;s back spikes). Red = flush; unpainted stays raised.
               </div>
@@ -906,31 +963,67 @@ export default function ReliefStickerStudio() {
                 </button>
               </div>
               <Slider label="Brush size" value={brushSize} set={setBrushSize} min={4} max={80} step={1} fmt={v => `${v}px`} />
+              </div>{/* /Flat mask */}
             </>)}
 
-            <div style={S.section}>Surface</div>
+            </div>{/* ── column 1 ends ── */}
+            <div>
+            <div style={S.group}>
+            <div style={S.groupTitle}>Surface</div>
             <Slider label="Fondant grain" value={grain} set={setGrain} min={0} max={1} />
             <Slider label="Surface detail" value={detail} set={setDetail} min={0} max={2} />
             <Slider label="Detail strength" value={normalScale} set={setNormalScale} min={0} max={3} />
             <div style={S.row}><span style={S.lbl}>Flip green</span>
               <input type="checkbox" checked={flipY} onChange={e => setFlipY(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
+            </div>{/* /Surface */}
 
-            <div style={S.section}>Recolour</div>
+            <div style={S.group}>
+            <div style={S.groupTitle}>Recolour</div>
             <div style={S.row}><span style={S.lbl}>Recolour</span>
               <input type="checkbox" checked={recolor} onChange={e => setRecolor(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
             {/* This studio previews the ORIGINAL artwork and only simulates `hue_regions`. On an element
                 authored with another method the designer's output differs — most starkly with `opaque`,
                 which repaints EVERY pixel in the customer's colour. Say so, rather than let the green
                 preview imply the cake shows green. (Method is preserved on Copy config, never rewritten.) */}
+            {/* The recolour METHOD — which pixels the customer's colour reaches. An element opened from Manage
+                Elements arrives with its authored method and keeps it unless you change it HERE, deliberately;
+                Copy config never rewrites it behind your back. Options come from the renderer's own registry. */}
+            {recolor && (
+              <div style={S.row}><span style={S.lbl}>Method</span>
+                <select value={recolorMethod} onChange={e => setRecolorCfg(c => ({ ...c, method: e.target.value }))}
+                  style={{ background: '#fff', border: '1px solid #d8d8d8', borderRadius: 6, padding: '4px 6px', fontSize: 12, color: '#222', flex: 1, minWidth: 0 }}>
+                  {RECOLOR_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              </div>
+            )}
             {recolor && recolorMethod !== 'hue_regions' && (
               <div style={S.hint}>
-                Method <code>{recolorMethod}</code> — preserved on Copy config, but <b>not previewed here</b>.
+                <b>Not previewed here</b> — this studio only simulates <code>Auto colour regions</code>.
                 {recolorMethod === 'opaque' && ' The designer repaints every pixel in the customer’s colour, so the cake will NOT show the artwork’s own colours.'}
               </div>
             )}
+            {/* `recolor.default` — the element ships repainted to this colour instead of showing its artwork.
+                Authored elsewhere; shown (read-only) so it's obvious why the cake won't match the preview,
+                and carried through Copy config untouched. Absent = the artwork renders as drawn. */}
+            {recolor && recolorCfg.default && (
+              <div style={S.row}><span style={S.lbl}>Ships as</span>
+                <span style={{ ...S.swatch, background: recolorCfg.default, cursor: 'default' }} title={recolorCfg.default} />
+                <span style={{ ...S.val, width: 'auto', color: '#9BB5A2', fontFamily: 'monospace' }}>{recolorCfg.default} (recolor.default)</span>
+              </div>
+            )}
             {recolor && (<>
-              <Slider label="Colour guard" value={recolorGuard} set={setRecolorGuard} min={0} max={0.5} step={0.01} />
-              {regions.length === 0 && <div style={{ fontSize: 11, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>No colour regions found — load a coloured cut-out.</div>}
+              {/* Colour guard = recolor.sat. Only rendered for methods whose registry param IS 'sat' — on
+                  `opaque` (no param) and `blue_gt_green` (thresholds on `guard`) the designer never reads it,
+                  and a live slider over a value nothing reads is a control that lies. */}
+              {usesGuard
+                ? <Slider label="Colour guard" value={recolorGuard} set={setRecolorGuard} min={0} max={0.5} step={0.01} />
+                : <div style={S.hint}>
+                    Colour guard doesn’t apply to <code>{recolorMethod}</code>
+                    {RECOLOR_PARAM[recolorMethod] === 'guard'
+                      ? <> — it thresholds on <code>guard</code> ({recolorCfg.guard ?? 12}), authored on the element.</>
+                      : ' — it repaints every pixel regardless.'}
+                  </div>}
+              {recolorMethod === 'hue_regions' && regions.length === 0 && <div style={S.hint}>No colour regions found — load a coloured cut-out.</div>}
               {regions.map((r, i) => (
                 <div key={i} style={S.row}>
                   <span style={{ width: 22, height: 22, borderRadius: 6, border: '1.5px solid #C5D4C8', background: r.hex, flexShrink: 0 }} title={`detected ${r.hex}`} />
@@ -939,10 +1032,14 @@ export default function ReliefStickerStudio() {
                   <span style={{ ...S.val, width: 'auto', color: '#9BB5A2', fontFamily: 'monospace' }}>{Math.round(r.share * 100)}%</span>
                 </div>
               ))}
-              <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>Each detected colour recolours on its own; whites, blacks &amp; highlights stay, relief unchanged. (Clustered by hue — brown groups with orange.)</div>
+              {recolorMethod === 'hue_regions' && (
+                <div style={S.hint}>Each detected colour recolours on its own; whites, blacks &amp; highlights stay, relief unchanged. (Clustered by hue — brown groups with orange.)</div>
+              )}
             </>)}
+            </div>{/* /Recolour */}
 
-            <div style={S.section}>Albedo / material</div>
+            <div style={S.group}>
+            <div style={S.groupTitle}>Albedo / material</div>
             <Slider label="De-light" value={delit} set={setDelit} min={0} max={1} />
             <Slider label="Roughness" value={roughness} set={setRoughness} min={0} max={1} />
             <Slider label="Sheen (satin)" value={sheen} set={setSheen} min={0} max={1} />
@@ -960,14 +1057,18 @@ export default function ReliefStickerStudio() {
             <Slider label="Env intensity" value={envIntensity} set={setEnvIntensity} min={0} max={2} />
             <div style={S.row}><span style={S.lbl}>Tone-mapped</span>
               <input type="checkbox" checked={toneMapped} onChange={e => setToneMapped(e.target.checked)} style={{ accentColor: '#3D5A44', width: 16, height: 16 }} /></div>
+            </div>{/* /Albedo */}
 
             {/* PRINT FINISH — exported as top-level placement_config.print_finish (flat AND relief 2D stickers). */}
-            <div style={S.section}>Print finish</div>
+            <div style={S.group}>
+            <div style={S.groupTitle}>Print finish</div>
             <Slider label="Brightness" value={printEmissive} set={setPrintEmissive} min={0} max={0.5} step={0.01} />
             <Slider label="Saturation" value={printSaturation} set={setPrintSaturation} min={1} max={1.5} step={0.01} />
             <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>Decal self-illumination + albedo chroma pre-boost so the print survives the cake&rsquo;s lit-render wash. Absent → designer defaults (1.12 / 0.22).</div>
+            </div>{/* /Print finish */}
 
-            <div style={{ ...S.section, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={S.group}>
+            <div style={{ ...S.groupTitle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>Element config</span>
               <button onClick={copyConfig}
                 style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'Quicksand, sans-serif', fontSize: 11, fontWeight: 700, background: copied ? '#2E7D32' : '#3D5A44', color: '#fff' }}>
@@ -975,7 +1076,10 @@ export default function ReliefStickerStudio() {
               </button>
             </div>
             <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>Paste the <code>relief</code> object into the element’s placement_config when adding it.</div>
-            <pre style={{ margin: 0, padding: 10, borderRadius: 8, background: '#F4F8F5', border: '1.5px solid #C5D4C8', color: '#2C4433', fontSize: 11, lineHeight: 1.45, fontFamily: 'ui-monospace, Menlo, monospace', whiteSpace: 'pre', overflowX: 'auto' }}>{configText}</pre>
+            <pre style={{ margin: 0, padding: 10, borderRadius: 8, background: '#F4F8F5', border: '1.5px solid #C5D4C8', color: '#2C4433', fontSize: 11, lineHeight: 1.45, fontFamily: 'ui-monospace, Menlo, monospace', whiteSpace: 'pre', overflow: 'auto', maxHeight: 260 }}>{configText}</pre>
+            </div>{/* /Element config */}
+            </div>{/* ── column 2 ends ── */}
+            </div>{/* ── S.cols ── */}
           </div>
         </div>
       </div>
