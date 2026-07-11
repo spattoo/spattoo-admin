@@ -195,6 +195,40 @@ export async function matchInspiration(analysis) {
   return post('/api/admin/inspiration/match', { analysis });
 }
 
+// ── Extract Elements (photo → decorations → library elements) ─────────────────
+// Two phases, split on cost. Phase 1 is one cheap vision call and returns immediately; phase 2 is
+// several image generations and runs as a background job the UI polls. So the admin decides what is
+// worth generating BEFORE any money is spent — and what is worth keeping after.
+//
+// Phase 1 — identify decorations in an already-uploaded cake photo (R2 key under
+// elements/candidates/) and crop each one out. A gate rejection comes back as { ok:false, reason }
+// on HTTP 200 (nothing generated, nothing charged), exactly like the Meshy gate.
+export async function identifyDecorations(sourceKey) {
+  return post('/api/admin/element-extract/identify', { sourceKey });
+}
+
+// Phase 2 — regenerate ONLY the ticked candidates. Returns { jobId } immediately.
+export async function generateDecorations(candidateIds) {
+  return post('/api/admin/element-extract/generate', { candidateIds });
+}
+
+// Poll a regeneration job → { status, candidates[] } with each candidate's live status/output.
+export async function getExtractJob(jobId) {
+  return get(`/api/admin/element-extract/${jobId}`);
+}
+
+// One candidate by id — what the AddElement deep-link (?candidate=<id>) reads to load the
+// regenerated image. Returns it with keys already expanded to URLs, so the client never derives an
+// R2 URL itself.
+export async function fetchCandidate(id) {
+  return get(`/api/admin/element-extract/candidates/${id}`);
+}
+
+// Record the admin's verdict on a candidate, or stamp the element it became (provenance).
+export async function updateCandidate(id, body) {
+  return patch(`/api/admin/element-extract/candidates/${id}`, body);
+}
+
 export async function updateGlobalElement(id, payload) {
   const res = await fetch(`${BASE_URL}/api/admin/elements/${id}`, {
     method: 'PATCH',

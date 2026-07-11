@@ -1,28 +1,19 @@
 import { useState, useEffect, useMemo } from 'react';
 import { CakePreview } from '@spattoo/designer';
 import { analyzeInspiration, matchInspiration } from '../lib/api.js';
+import { downscaleToJpeg } from '../lib/thumbnail.js';
 import { inspirationToDesign } from './inspirationToDesign.js';
 
 // Build from Inspiration. Upload a cake photo → GPT-4o validates + reads it into a tier-wise
 // reconstruction spec → match each decoration to a library element (placement-aware), shown with
 // a swap dropdown + a coverage banner. The image is analysed via base64 (no R2 upload).
+//
+// This screen matches a photo against the elements we ALREADY have. Its sibling, Extract Elements,
+// is the inverse: it CREATES library elements from decorations we don't have yet — which is what
+// the gaps reported here are for.
 
-const MAX_DIM = 1536;
 // Decoration types that aren't library elements (cake-level / special) — surfaced as a note.
 const NON_MATCHED = ['drip', 'lettering'];
-
-// Shrink + re-encode to JPEG so the base64 payload stays small and the API's json limit is safe.
-async function downscaleToJpeg(file) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
-    const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
-    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
-    const c = document.createElement('canvas'); c.width = w; c.height = h;
-    c.getContext('2d').drawImage(img, 0, 0, w, h);
-    return await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
-  } finally { URL.revokeObjectURL(url); }
-}
 
 // Best + alternatives, de-duped by id (the candidates the swap dropdown offers).
 function candidatesOf(m) {

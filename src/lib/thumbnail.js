@@ -1,3 +1,23 @@
+// Shrink a photo to fit `maxDim` and re-encode it as JPEG. Used when a full-resolution phone photo
+// is about to be sent somewhere that charges by pixel or byte — the GPT-vision analysis in Build
+// from Inspiration (base64 in the request body) and the source upload in Extract Elements.
+//
+// `maxDim` is the lever: Inspiration only needs to READ the photo (1536 is plenty), while Extract
+// Elements later CROPS a single decoration out of this image and feeds it to an image model as the
+// reference, so it keeps more pixels — a rosette that's 15% of the frame is a much better reference
+// at 2048 than at 1536. Returns a Blob.
+export async function downscaleToJpeg(file, maxDim = 1536, quality = 0.85) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    return await new Promise(res => c.toBlob(res, 'image/jpeg', quality));
+  } finally { URL.revokeObjectURL(url); }
+}
+
 // Re-encode an image blob to WebP (alpha preserved). Returns the blob unchanged if it's already
 // WebP, or if the browser can't encode WebP via canvas (graceful fallback — the caller derives the
 // extension + Content-Type from the returned blob.type, so PNG stays self-consistent). Lets a single

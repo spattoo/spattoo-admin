@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { fetchElementTypes, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
+import { fetchElementTypes, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide, fetchCandidate, updateCandidate } from '../lib/api.js';
 import { normalizeThumbnail } from '../lib/thumbnail.js';
 import { prepareElementImage } from '../lib/elementImage.js';
 import { toStatColumns } from '../lib/glb.js';
@@ -260,6 +260,10 @@ export default function AddElement() {
   const [glbEnvPreset, setGlbEnvPreset]   = useState('none');
   const [glbHasTexture, setGlbHasTexture] = useState(null);
   const [assetFile, setAssetFile]         = useState(null);
+  // Set when this screen was opened from Extract Elements (?candidate=<id>). On save we stamp the
+  // new element's id back onto that candidate row — the provenance link that later answers "which
+  // photo did this element come from, and is any of the generated output actually being used?".
+  const [candidateId, setCandidateId]     = useState(null);
   // 3D GLBs must pass through GLB Studio (measure + optimize) before creation. `glbStudioFile` is the
   // file currently open in the embedded Studio; `optimizedStats` holds the measured cost returned —
   // its presence is the gate that a GLB has been reviewed.
@@ -339,6 +343,44 @@ export default function AddElement() {
     if (assetType !== '2D' || !assetFile) { if (assetType === '2D') setThumbnailBlob(null); return; }
     processRemoveBg(assetFile);
   }, [assetFile, assetType, removeBgEnabled]);
+
+  // Deep-link prefill: /elements/add?candidate=<id>
+  // How "Create element" in Extract Elements hands off. We carry the candidate ID (not a blob, not a
+  // raw R2 key) so the link survives a reload and the API stays the only thing that turns keys into
+  // URLs. The fetched image is loaded into the SAME `assetFile` state a manual upload sets, so
+  // everything downstream — the 2D pipeline, GPT suggest, save — runs unchanged. This screen gains a
+  // new entry point, not a second code path. (Same deep-link precedent as ReliefStickerStudio's
+  // ?element=.)
+  //
+  // remove-bg goes OFF for these: the regenerated decoration is already cut out with real alpha, so
+  // re-running remove.bg would re-cut an already-cut image and cost another call for nothing.
+  useEffect(() => {
+    const candidateParam = new URLSearchParams(window.location.search).get('candidate');
+    if (!candidateParam) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { candidate } = await fetchCandidate(candidateParam);
+        if (cancelled) return;
+        if (!candidate?.outputUrl) throw new Error('that candidate has no generated image yet');
+
+        const res = await fetch(candidate.outputUrl);
+        if (!res.ok) throw new Error(`could not load the image (${res.status})`);
+        const blob = await res.blob();
+        if (cancelled) return;
+
+        setCandidateId(candidate.id);
+        if (candidate.label) setName(candidate.label);
+        setAssetType('2D');
+        setRemoveBgEnabled(false);
+        setAssetFile(new File([blob], 'decoration.png', { type: blob.type || 'image/png' }));
+      } catch (err) {
+        if (!cancelled) setMsg({ ok: false, text: `Could not load the extracted decoration: ${err.message}` });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   function toggleZone(zone) {
     setApplicableZones(prev =>
@@ -642,6 +684,17 @@ export default function AddElement() {
         });
       }
 
+      // Step 3 — if this element came from an extracted decoration, link the two. Best-effort: the
+      // element IS saved at this point, so a provenance write failing must not report the save as
+      // failed. We log it and move on rather than lie to the user in either direction.
+      if (candidateId && created?.id) {
+        try {
+          await updateCandidate(candidateId, { elementId: created.id });
+        } catch (err) {
+          console.error('Could not link candidate to element:', err.message);
+        }
+      }
+
       setMsg({ ok: true, text: 'Element saved!' });
       setName('');
       setElementTypeId('');
@@ -649,6 +702,7 @@ export default function AddElement() {
       setIsParent(false);
       setParentId('');
       setAssetFile(null);
+      setCandidateId(null);
       setElementColor('#F0DEB8');
       setUserPickedColor(false);
       setGlbRoughness(0.6);
