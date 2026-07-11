@@ -4,10 +4,12 @@ import {
   createGlobalElement, fetchAdminTextStyles, createTextStyle, updateTextStyle,
 } from '../lib/api.js';
 import { prepareElementImage } from '../lib/elementImage.js';
+// The renderer lives in spattoo-core and is imported, NOT copied: the designer composites the
+// customer's value with these exact functions, so this preview and the cake cannot drift.
 import {
-  DEFAULT_TEXT_STYLE, composeTextTopper, bakeArtwork, resolveStyle, loadSlotFonts, loadStyleFont,
-  findCleanSource,
-} from '../lib/textSlots.js';
+  DEFAULT_TEXT_STYLE, composeTextTopper, bakeArtwork, resolveTextStyle as resolveStyle,
+  loadSlotFonts, loadStyleFont, findCleanSource,
+} from '@spattoo/designer';
 
 // ── Text Topper Studio ─────────────────────────────────────────────────────────
 // Authors a template whose text is a PLACEHOLDER the customer fills: a {number} plaque, a {name}
@@ -17,9 +19,9 @@ import {
 //   image_url                        = the artwork (patches baked in)
 //   placement_config.text_slots      = [{ key, label, kind, default, maxLen, rect, style_key, style_override }]
 //
-// Rendering is ONE shared module (lib/textSlots.js) — this preview and the designer's texture use the
-// same function, so they cannot drift. Reuses createGlobalElement + the upload helpers, not a parallel
-// element-creation path.
+// Rendering is ONE shared module — spattoo-core's shared/textures/textSlots.js, imported from
+// @spattoo/designer. This preview and the designer's on-cake texture call the SAME functions, so they
+// cannot drift. Reuses createGlobalElement + the upload helpers, not a parallel element-creation path.
 //
 // ORDER MATTERS: the artwork is normalized (remove-bg → crop-to-content → centred at 80% of a square)
 // on UPLOAD, and slots are authored against that canonical frame. Authoring first and normalizing at
