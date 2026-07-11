@@ -71,6 +71,12 @@ export async function fetchAdminTextures()       { return get('/api/admin/textur
 export async function createTexture(payload)     { return post('/api/admin/textures', payload); }
 export async function updateTexture(id, payload) { return patch(`/api/admin/textures/${id}`, payload); }
 
+// ── Text styles (the look of an editable {name}/{number} placeholder) ──────────
+export async function fetchTextStyles()            { return get('/api/text-styles'); }
+export async function fetchAdminTextStyles()       { return get('/api/admin/text-styles'); }
+export async function createTextStyle(payload)     { return post('/api/admin/text-styles', payload); }
+export async function updateTextStyle(id, payload) { return patch(`/api/admin/text-styles/${id}`, payload); }
+
 // ── Materials (frosting material + its ordered style list) ─────────────────────
 export async function fetchMaterials()            { return get('/api/materials'); }
 export async function fetchAdminMaterials()       { return get('/api/admin/materials'); }
@@ -134,6 +140,19 @@ export async function uploadAsset(folder, file, basename = crypto.randomUUID()) 
   const { url, key } = await getSignedUploadUrl(folder, `${basename}.${ext}`, contentType);
   await uploadToR2(url, file, contentType);
   return key;
+}
+
+// Store a webfont for a text style and return its PUBLIC URL — deliberately NOT a bare key. A style's
+// `config.font.url` is read straight out of jsonb by the renderer's FontFace loader, and the API only
+// expands key columns it knows about (image_url, thumbnail_url), never nested jsonb. Same reason the
+// photo-cake frame stores a full URL inside its design JSON.
+export async function uploadFont(file) {
+  const isWoff = (file.name?.split('.').pop() || '').toLowerCase() === 'woff';
+  const ext = isWoff ? 'woff' : 'woff2';
+  const contentType = isWoff ? 'font/woff' : 'font/woff2';
+  const { url, key, publicUrl } = await getSignedUploadUrl('elements/fonts', `${crypto.randomUUID()}.${ext}`, contentType);
+  await uploadToR2(url, file, contentType);
+  return publicUrl || key;
 }
 
 // Store an image blob as a WebP thumbnail in R2 under `folder` and return its key.

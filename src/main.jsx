@@ -46,6 +46,8 @@ const BackgroundRemover     = lazy(() => import('./admin/BackgroundRemover.jsx')
 const LusterDustStudio      = lazy(() => import('./admin/LusterDustStudio.jsx'));
 const MaterialStyles        = lazy(() => import('./admin/MaterialStyles.jsx'));
 const ReliefStickerStudio   = lazy(() => import('./admin/ReliefStickerStudio.jsx'));
+const TextTopperStudio      = lazy(() => import('./admin/TextTopperStudio.jsx'));
+const IsomaltStudio         = lazy(() => import('./admin/IsomaltStudio.jsx'));
 const EditorsIndex          = lazy(() => import('./admin/EditorsIndex.jsx'));
 const ROUTES = {
   '/editors':                     EditorsIndex,
@@ -55,6 +57,7 @@ const ROUTES = {
   '/elements/luster-dust':        LusterDustStudio,
   '/elements/material-styles':    MaterialStyles,
   '/elements/relief-sticker':     ReliefStickerStudio,
+  '/elements/isomalt':            IsomaltStudio,
   '/templates/create':    CreateTemplate,
   '/templates/design':    DesignTemplate,
   '/templates':           ManageTemplates,
@@ -79,6 +82,7 @@ const ROUTES = {
   '/elements/cream-pen':         CreamPenStudio,
   '/elements/folded-sticker':    ButterflyStudio,
   '/elements/photo-frame':       PhotoFrameStudio,
+  '/elements/text-topper':       TextTopperStudio,
   '/elements/recolor-tester':    RecolorTester,
   '/elements/freehand-pen':      FreehandPenStudio,
   '/elements/chocolate-drip':    ChocolateDripStudio,
@@ -123,7 +127,9 @@ const NAV_GROUPS = [
     { href: '/elements/second-cream-layer', label: 'Second Cream Layer' },
     { href: '/elements/folded-sticker', label: 'Folded Butterfly' },
     { href: '/elements/photo-frame',    label: 'Photo Frame Studio' },
+    { href: '/elements/text-topper',    label: 'Text Topper Studio' },
     { href: '/elements/relief-sticker', label: 'Relief Sticker Studio' },
+    { href: '/elements/isomalt',        label: 'Isomalt Studio' },
     { href: '/elements/recolor-tester', label: 'Recolour Tester' },
     { href: '/pattern-builder',         label: 'Pattern Builder' },
   ] },
