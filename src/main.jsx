@@ -47,6 +47,7 @@ const LusterDustStudio      = lazy(() => import('./admin/LusterDustStudio.jsx'))
 const MaterialStyles        = lazy(() => import('./admin/MaterialStyles.jsx'));
 const ReliefStickerStudio   = lazy(() => import('./admin/ReliefStickerStudio.jsx'));
 const TextTopperStudio      = lazy(() => import('./admin/TextTopperStudio.jsx'));
+const CakeShapeStudio       = lazy(() => import('./admin/CakeShapeStudio.jsx'));
 const IsomaltStudio         = lazy(() => import('./admin/IsomaltStudio.jsx'));
 const EditorsIndex          = lazy(() => import('./admin/EditorsIndex.jsx'));
 const ROUTES = {
@@ -83,6 +84,7 @@ const ROUTES = {
   '/elements/folded-sticker':    ButterflyStudio,
   '/elements/photo-frame':       PhotoFrameStudio,
   '/elements/text-topper':       TextTopperStudio,
+  '/elements/cake-shapes':       CakeShapeStudio,
   '/elements/recolor-tester':    RecolorTester,
   '/elements/freehand-pen':      FreehandPenStudio,
   '/elements/chocolate-drip':    ChocolateDripStudio,
@@ -128,6 +130,7 @@ const NAV_GROUPS = [
     { href: '/elements/folded-sticker', label: 'Folded Butterfly' },
     { href: '/elements/photo-frame',    label: 'Photo Frame Studio' },
     { href: '/elements/text-topper',    label: 'Text Topper Studio' },
+    { href: '/elements/cake-shapes',    label: 'Cake Shape Studio' },
     { href: '/elements/relief-sticker', label: 'Relief Sticker Studio' },
     { href: '/elements/isomalt',        label: 'Isomalt Studio' },
     { href: '/elements/recolor-tester', label: 'Recolour Tester' },

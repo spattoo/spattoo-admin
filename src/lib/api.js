@@ -77,6 +77,12 @@ export async function fetchAdminTextStyles()       { return get('/api/admin/text
 export async function createTextStyle(payload)     { return post('/api/admin/text-styles', payload); }
 export async function updateTextStyle(id, payload) { return patch(`/api/admin/text-styles/${id}`, payload); }
 
+// ── Cake shapes (the catalog of tier footprints: round, sheet, heart, butterfly…) ─
+export async function fetchCakeShapes()            { return get('/api/cake-shapes'); }
+export async function fetchAdminCakeShapes()       { return get('/api/admin/cake-shapes'); }
+export async function createCakeShape(payload)     { return post('/api/admin/cake-shapes', payload); }
+export async function updateCakeShape(id, payload) { return patch(`/api/admin/cake-shapes/${id}`, payload); }
+
 // ── Materials (frosting material + its ordered style list) ─────────────────────
 export async function fetchMaterials()            { return get('/api/materials'); }
 export async function fetchAdminMaterials()       { return get('/api/admin/materials'); }
