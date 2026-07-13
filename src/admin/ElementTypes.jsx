@@ -168,6 +168,32 @@ export default function ElementTypes() {
     }
   }
 
+  // Can a baker/customer upload their OWN image as this kind of decoration? Data, not a hardcoded list
+  // in the designer — this toggle IS the list.
+  async function toggleUploadable(type) {
+    try {
+      const updated = await updateElementType(type.id, { baker_uploadable: !type.baker_uploadable });
+      setTypes(prev => prev.map(t => t.id === type.id ? updated : t));
+    } catch (err) {
+      setMsg({ ok: false, text: err.message });
+    }
+  }
+
+  // Which kind an un-promoted upload BEHAVES AS when placed straight on a cake (it carries no placement
+  // of its own — behaviour is authored at promotion). EXACTLY ONE type may hold it, so this reads as a
+  // radio, not a checkbox: picking a new default takes it from whoever had it. The API performs that
+  // move server-side (a unique index would otherwise reject the second one), so we just re-read the
+  // list afterwards rather than mutating two rows optimistically and guessing right.
+  async function makeUploadDefault(type) {
+    if (type.default_for_uploads) return;              // already it — turning it OFF would leave none
+    try {
+      await updateElementType(type.id, { default_for_uploads: true });
+      await load();                                    // the incumbent changed too
+    } catch (err) {
+      setMsg({ ok: false, text: err.message });
+    }
+  }
+
   const s = {
     page:       { minHeight: '100vh', background: '#EDEAE2', fontFamily: 'Quicksand, sans-serif', padding: '32px 24px' },
     header:     { display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: 640, margin: '0 auto 24px' },
@@ -258,6 +284,31 @@ export default function ElementTypes() {
                   <div style={s.typeSlug}>{t.slug}</div>
                   {t.description && <div style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600, marginTop: 3 }}>{t.description}</div>}
                   <PlacementSummary rules={t.placement_rules} />
+
+                  {/* Uploads. Two different questions, so two different controls:
+                      · "Users can upload this" — MANY kinds may be uploadable → a toggle, per type.
+                      · "Uploads behave as this" — EXACTLY ONE kind can be it (a unique index enforces
+                        it) → a radio. An un-promoted upload carries no placement of its own, so it
+                        borrows this type's rules when placed straight on a cake. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8, flexWrap: 'wrap' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!!t.baker_uploadable} onChange={() => toggleUploadable(t)} />
+                      <span style={{ fontSize: 11, fontWeight: 700, color: t.baker_uploadable ? '#3D5A44' : '#9BB5A2' }}>
+                        Users can upload this
+                      </span>
+                    </label>
+
+                    {t.baker_uploadable && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: t.default_for_uploads ? 'default' : 'pointer' }}
+                        title="An uploaded image that hasn’t been added to a library borrows this kind’s placement rules.">
+                        <input type="radio" name="default_for_uploads" checked={!!t.default_for_uploads}
+                          onChange={() => makeUploadDefault(t)} />
+                        <span style={{ fontSize: 11, fontWeight: 700, color: t.default_for_uploads ? '#3D5A44' : '#9BB5A2' }}>
+                          Uploads behave as this
+                        </span>
+                      </label>
+                    )}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                   <Toggle on={t.is_active} onChange={() => toggleActive(t)} />
