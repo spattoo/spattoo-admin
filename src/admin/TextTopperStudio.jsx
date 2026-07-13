@@ -8,7 +8,7 @@ import { prepareElementImage } from '../lib/elementImage.js';
 // customer's value with these exact functions, so this preview and the cake cannot drift.
 import {
   DEFAULT_TEXT_STYLE, composeTextTopper, bakeArtwork, resolveTextStyle as resolveStyle,
-  loadSlotFonts, loadStyleFont, findCleanSource,
+  loadSlotFonts, loadStyleFont, findCleanSource, findInkColor,
 } from '@spattoo/designer';
 
 // ── Text Topper Studio ─────────────────────────────────────────────────────────
@@ -34,6 +34,63 @@ const NEW_RECT = { x: 0.5, y: 0.5, w: 0.3, h: 0.3, rot: 0 };
 const HANDLE = 0.022;                               // corner grip half-size, normalized
 
 const SAMPLES = { number: '2', text: 'Amara' };
+
+// ── The style panel is DATA ────────────────────────────────────────────────────
+// One row per Look, listing the config each of its controls edits by path. A new algorithm in core adds
+// a row here and nothing else — the panel never branches on `algorithm` in JSX.
+const LOOKS = {
+  fondant: {
+    label: 'Fondant (a puffy piece of icing)',
+    short: 'Fondant',
+    // Icing is modelled, not drawn: a piped/rolled figure has no ink line round it, and an outline on one
+    // reads as a sticker. `defaults` is applied when the Look is chosen, so it is a starting point the
+    // operator can overrule — not a rule the renderer enforces.
+    defaults: { outline: { width: 0 } },
+    swatches: [['Icing', 'fill'], ['Outline', 'outline.color']],
+    sliders: [
+      ['Light from',        'fondant.light',        0,    360,  5,     v => `${Math.round(v)}°`],
+      ['Puffiness',         'fondant.bevel',        0.05, 1,    0.05],
+      ['Sheen',             'fondant.gloss',        0,    1,    0.05],
+      ['Shading',           'fondant.ao',           0,    1,    0.05],
+      ['Outline width',     'outline.width',        0,    0.12, 0.005],
+      ['Shadow softness',   'fondant.shadow_blur',  0,    0.2,  0.01],
+      ['Shadow drop',       'fondant.shadow_dy',    0,    0.12, 0.005],
+      ['Shadow strength',   'fondant.shadow_alpha', 0,    0.8,  0.05],
+    ],
+  },
+  scribble: {
+    label: 'Scribble (hairlines carved through the fill)',
+    short: 'Scribble',
+    swatches: [['Fill', 'fill'], ['Outline', 'outline.color'], ['Hatch', 'hatch.color']],
+    sliders: [
+      ['Outline width',    'outline.width',  0,     0.12, 0.005],
+      ['Outline wobble',   'outline.wobble', 0,     1,    0.05],
+      ['Hatch spacing',    'hatch.gap',      0,     0.16, 0.005],
+      ['Hatch thickness',  'hatch.width',    0.002, 0.05, 0.002],
+      ['Hatch angle',      'hatch.angle',    -90,   90,   1,     v => `${Math.round(v)}°`],
+    ],
+  },
+  flat: {
+    label: 'Flat (solid fill + outline)',
+    short: 'Flat',
+    swatches: [['Fill', 'fill'], ['Outline', 'outline.color']],
+    sliders: [['Outline width', 'outline.width', 0, 0.12, 0.005]],
+  },
+};
+const COMMON_SLIDERS = [['Letter spacing', 'tracking', -0.1, 0.4, 0.01]];
+
+const atPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
+
+// A style's `key` is its stable identity, so it is derived once from the name and never re-derived.
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+function uniqueKey(label, existing) {
+  const base = slug(label) || 'style';
+  const taken = new Set(existing.map(st => st.key));
+  let key = base;
+  for (let i = 2; taken.has(key); i++) key = `${base}_${i}`;
+  return key;
+}
+const NESTED = ['font', 'hatch', 'outline', 'fondant'];   // the one level of nesting the style shape has
 const newSlotKey = (slots, kind) => {
   const base = kind === 'number' ? 'number' : 'name';
   if (!slots.some(s => s.key === base)) return base;
@@ -67,6 +124,17 @@ export default function TextTopperStudio() {
   const [values, setValues]     = useState({});        // sample values driving the preview
   const [sel, setSel]           = useState(null);      // { kind:'slot'|'patch', i }
   const [tool, setTool]         = useState('slots');   // 'slots' | 'patch'
+  const [picking, setPicking]   = useState(null);      // config path the next canvas click samples into
+  // ── Styles are FORK-ON-EDIT ────────────────────────────────────────────────
+  // A style row is DB master data SHARED by every template that references it. Picking one reuses it;
+  // *editing* one while authoring makes a DRAFT, which is saved as a NEW style when the topper is saved —
+  // so authoring a topper can never silently restyle somebody else's. Deliberately restyling everyone is
+  // still possible (`mode = 'update'`), it just has to be asked for. The operator never manages a style
+  // row by hand: "Save text topper" is the ONE save, and the preview can no longer promise a look the
+  // designer (which renders from the DB) won't render.
+  const [dirty, setDirty]       = useState([]);        // style ids edited in this tab
+  const [mode, setMode]         = useState({});        // style id → 'fork' (default) | 'update'
+  const [draftLabel, setDraft]  = useState({});        // style id → the new style's name, when forking
   const [fontTick, setFontTick] = useState(0);         // bumped when a webfont finishes loading
 
   const canvasRef = useRef(null);
@@ -178,6 +246,12 @@ export default function TextTopperStudio() {
   function onPointerDown(e) {
     if (!patched) return;
     const p = ptOf(e);
+    if (picking) {
+      const hex = pickColorAt(p);
+      if (hex) editSlotColor(picking, hex);
+      setPicking(null);
+      return;                                    // a sampling click never moves a box
+    }
     const list = tool === 'patch' ? patches : slots;
     for (let i = list.length - 1; i >= 0; i--) {
       const r = list[i].rect;
@@ -238,15 +312,23 @@ export default function TextTopperStudio() {
     const d = dragRef.current;
     dragRef.current = null;
     if (!d || d.mode === 'from' || tool === 'patch' || !artwork) return;
-    setSlots(prev => prev.map((sl, i) => (
-      i === d.i && sl.cover ? { ...sl, cover: { from: findCleanSource(artwork, sl.rect) } } : sl
-    )));
+    setSlots(prev => prev.map((sl, i) => {
+      if (i !== d.i) return sl;
+      const next = sl.cover ? { ...sl, cover: { from: findCleanSource(artwork, sl.rect) } } : { ...sl };
+      // The box has landed somewhere else — so has the value it covers. Re-inherit ITS colour, unless the
+      // operator has already chosen one (a manual pick is a decision; it must not be silently undone).
+      if (next.autoColor) {
+        const ink = findInkColor(artwork, next.rect);
+        if (ink) next.style_override = { ...next.style_override, fill: ink };
+      }
+      return next;
+    }));
   }
 
   // ── Slots / patches ────────────────────────────────────────────────────────
-  // A placeholder is useless without a style, and making the operator go find "Save as new style…"
-  // before anything renders is a trap. The code holds the SEED (DEFAULT_TEXT_STYLE); the first
-  // placeholder promotes it to the DB row every template then shares.
+  // A placeholder is useless without a style, and making the operator go author one before anything
+  // renders is a trap. The code holds the SEED (DEFAULT_TEXT_STYLE); the first placeholder promotes it
+  // to the DB row every template then shares. Editing it from here forks (see commitDraftStyles).
   async function ensureStyle() {
     if (styles.length) return styles[0].key;
     const created = await createTextStyle({
@@ -272,11 +354,17 @@ export default function TextTopperStudio() {
     // Cover by default: a placeholder that lands on a baked-in value must ERASE it, not render "23".
     // The source is the flattest opaque region of the artwork — bare plaque, never a glyph or an animal.
     const from = artwork ? findCleanSource(artwork, rect) : null;
+    // …and the value it replaces hands over its COLOUR, so the placeholder starts out the icing the
+    // artwork is actually made of instead of the preset's brown. Re-picked as the box moves (below),
+    // until the operator overrules it with the eyedropper or the swatch.
+    const ink = artwork ? findInkColor(artwork, rect) : null;
 
     setSlots(s => [...s, {
       key, label: kind === 'number' ? 'Age / number' : 'Name',
       kind, default: def, maxLen: kind === 'number' ? 2 : 12,
-      rect, style_key, style_override: {},
+      rect, style_key,
+      style_override: ink ? { fill: ink } : {},
+      autoColor: true,                          // local only — the save payload lists its fields explicitly
       cover: from ? { from } : null,
     }]);
     setValues(v => ({ ...v, [key]: def }));
@@ -305,16 +393,63 @@ export default function TextTopperStudio() {
   const selStyle = styles.find(st => st.key === selSlot?.style_key) || null;
 
   function editStyleConfig(patch) {
-    setStyles(list => list.map(st => (st.id !== selStyle.id ? st : {
-      ...st,
-      config: {
-        ...st.config,
-        ...patch,
-        hatch: { ...DEFAULT_TEXT_STYLE.hatch, ...st.config?.hatch, ...(patch.hatch || {}) },
-        outline: { ...DEFAULT_TEXT_STYLE.outline, ...st.config?.outline, ...(patch.outline || {}) },
-        font: { ...DEFAULT_TEXT_STYLE.font, ...st.config?.font, ...(patch.font || {}) },
+    if (!selStyle) return;
+    markDirty(selStyle.id);
+    setStyles(list => list.map(st => {
+      if (st.id !== selStyle.id) return st;
+      const config = { ...st.config, ...patch };
+      for (const k of NESTED) {
+        config[k] = { ...DEFAULT_TEXT_STYLE[k], ...st.config?.[k], ...(patch[k] || {}) };
+      }
+      return { ...st, config };
+    }));
+  }
+
+  // Edit one control by its config path — what makes the LOOKS table above the whole panel.
+  function editStylePath(path, value) {
+    const [a, b] = path.split('.');
+    editStyleConfig(b ? { [a]: { [b]: value } } : { [a]: value });
+  }
+
+  // COLOUR is per-SLOT, not per-style. The style is shared by every template using it, so writing this
+  // artwork's icing colour into the preset would silently restyle all of them; `style_override` is the
+  // seam that already exists for exactly this (one field tweaked, the preset otherwise intact).
+  function editSlotColor(path, value) {
+    if (sel?.kind !== 'slot') return;
+    const [a, b] = path.split('.');
+    patchSlot(sel.i, {
+      autoColor: false,                          // an explicit choice outranks the artwork
+      style_override: {
+        ...(selSlot.style_override || {}),
+        ...(b
+          ? { [a]: { ...(selSlot.style_override?.[a] || {}), [b]: value } }
+          : { [a]: value }),
       },
-    })));
+    });
+  }
+
+  const markDirty = id => setDirty(d => (d.includes(id) ? d : [...d, id]));
+  const suggestLabel = st => `${LOOKS[st.algorithm]?.short || 'Style'}${name.trim() ? ` — ${name.trim()}` : ''}`;
+
+  // Choosing a Look brings that Look's starting points with it (fondant: no outline). Config, not a
+  // branch — and only a default: whatever the operator sets afterwards stands.
+  function chooseLook(algorithm) {
+    markDirty(selStyle.id);
+    setStyles(l => l.map(x => (x.id === selStyle.id ? { ...x, algorithm } : x)));
+    const defaults = LOOKS[algorithm]?.defaults;
+    if (defaults) editStyleConfig(defaults);
+  }
+
+  // Eyedropper: the colour of the icing comes from the ARTWORK the operator is looking at. This is the
+  // only part of the reference art that transfers — the shading cannot, because it follows the shape it
+  // was painted on (which is why `fondant` derives its bevel from the typed glyph instead).
+  function pickColorAt(p) {
+    if (!patched) return null;
+    const x = Math.max(0, Math.min(S - 1, Math.round(p.x * S)));
+    const y = Math.max(0, Math.min(S - 1, Math.round(p.y * S)));
+    const d = patched.getContext('2d', { willReadFrequently: true }).getImageData(x, y, 1, 1).data;
+    if (d[3] < 8) return null;   // transparent — off the artwork
+    return '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('');
   }
 
   async function onFont(file) {
@@ -334,34 +469,33 @@ export default function TextTopperStudio() {
     }
   }
 
-  async function saveStyle(asNew) {
-    const src = selStyle;
-    if (!src && !asNew) return;
-    setBusy('Saving style…');
-    setMsg(null);
-    try {
-      if (asNew) {
-        const key = window.prompt('New style key (stable, e.g. scribble_brown):', '');
-        if (!key?.trim()) { setBusy(null); return; }
-        const label = window.prompt('Label (e.g. Scribble Brown):', key) || key;
-        const created = await createTextStyle({
-          key: key.trim(), label: label.trim(),
-          algorithm: src?.algorithm ?? 'scribble',
-          config: src?.config ?? DEFAULT_TEXT_STYLE,
-        });
-        setStyles(list => [...list, created]);
-        if (selSlot) patchSlot(sel.i, { style_key: created.key });
-        setMsg({ ok: true, text: `Style "${created.label}" created.` });
-      } else {
-        const saved = await updateTextStyle(src.id, { algorithm: src.algorithm, config: src.config });
-        setStyles(list => list.map(st => (st.id === saved.id ? saved : st)));
-        setMsg({ ok: true, text: `Style "${saved.label}" saved.` });
+  // Persist every draft style a placeholder points at, and return the styles + slots as they now are —
+  // a forked style has a NEW key, so the slots that referenced the draft must follow it. Runs as the
+  // first step of saving the topper: by the time the element row is written, every style_key it names
+  // exists in the DB with exactly the look that was on screen.
+  async function commitDraftStyles() {
+    let live = styles;
+    let next = slots;
+    for (const st of styles) {
+      if (!dirty.includes(st.id) || !next.some(sl => sl.style_key === st.key)) continue;
+
+      if (mode[st.id] === 'update') {
+        const saved = await updateTextStyle(st.id, { algorithm: st.algorithm, config: st.config });
+        live = live.map(x => (x.id === saved.id ? saved : x));
+        continue;
       }
-    } catch (err) {
-      setMsg({ ok: false, text: err.message || 'Style save failed.' });
-    } finally {
-      setBusy(null);
+      const label = (draftLabel[st.id] ?? suggestLabel(st)).trim();
+      if (!label) throw new Error('Name the new style before saving.');
+      const created = await createTextStyle({
+        key: uniqueKey(label, live), label, algorithm: st.algorithm, config: st.config,
+      });
+      live = [...live, created];
+      next = next.map(sl => (sl.style_key === st.key ? { ...sl, style_key: created.key } : sl));
     }
+    setStyles(live);
+    setSlots(next);
+    setDirty([]);
+    return { live, next };
   }
 
   // ── Save the element ───────────────────────────────────────────────────────
@@ -372,18 +506,23 @@ export default function TextTopperStudio() {
     if (!slots.length) return setMsg({ ok: false, text: 'Add at least one placeholder — otherwise this is a plain sticker (use Add Element).' });
     if (slots.some(sl => !sl.style_key)) return setMsg({ ok: false, text: 'Every placeholder needs a text style.' });
 
-    setBusy('Saving element…');
+    setBusy('Saving…');
     setMsg(null);
     try {
+      // Styles first — the element's slots must name style_keys that EXIST, carrying the look on screen.
+      const { live, next } = await commitDraftStyles();
+      const byKey = new Map(live.map(st => [st.key, { algorithm: st.algorithm, ...(st.config || {}) }]));
+      const savedStyleOf = sl => byKey.get(sl.style_key) || DEFAULT_TEXT_STYLE;
+
       // The artwork with patches AND slot covers baked in — the designer never replays a clone.
-      const artCanvas = bakeArtwork(S, artwork, patches, slots);
+      const artCanvas = bakeArtwork(S, artwork, patches, next);
       const blob = await new Promise(res => artCanvas.toBlob(res, 'image/png'));
       const { url, key } = await getSignedUploadUrl('elements/files/2D', `${crypto.randomUUID()}.png`, 'image/png');
       await uploadToR2(url, blob, 'image/png');
 
       // Thumbnail = the topper with its DEFAULT values, so the picker tile reads as a real topper.
       const thumbBlob = await new Promise(res =>
-        composeTextTopper(512, artCanvas, slots, Object.fromEntries(slots.map(sl => [sl.key, sl.default])), styleOf).toBlob(res, 'image/png'));
+        composeTextTopper(512, artCanvas, next, Object.fromEntries(next.map(sl => [sl.key, sl.default])), savedStyleOf).toBlob(res, 'image/png'));
       const thumbKey = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       await createGlobalElement({
@@ -399,7 +538,7 @@ export default function TextTopperStudio() {
           top_surface: topMode,
           side: 'hug',
           r: 1,
-          text_slots: slots.map(sl => ({
+          text_slots: next.map(sl => ({
             key: sl.key,
             label: sl.label,
             kind: sl.kind,
@@ -426,6 +565,9 @@ export default function TextTopperStudio() {
 
   const cfg = selStyle?.config || {};
   const st = resolveStyle(selStyle ? { algorithm: selStyle.algorithm, ...cfg } : null, selSlot?.style_override);
+  const look = LOOKS[selStyle?.algorithm] || LOOKS.flat;
+  const isDraft = !!selStyle && dirty.includes(selStyle.id);
+  const isUpdate = isDraft && mode[selStyle.id] === 'update';
 
   return (
     <div style={s.page}>
@@ -543,14 +685,16 @@ export default function TextTopperStudio() {
                 <div style={{ ...s.card, background: '#FBF7EF', borderColor: '#E6D9BE' }}>
                   <div style={s.cardHead}>
                     <b style={{ fontSize: 12, color: '#7A5E1F' }}>Style — {selStyle.label}</b>
-                    <span style={{ fontSize: 11, color: '#9a8a63' }}>shared by every template using it</span>
+                    <span style={{ fontSize: 11, color: isDraft ? '#7A5E1F' : '#9a8a63', fontWeight: isDraft ? 700 : 400 }}>
+                      {isDraft
+                        ? (isUpdate ? 'edited — will restyle every template using it' : 'edited — will be saved as a new style')
+                        : 'shared by every template using it'}
+                    </span>
                   </div>
 
                   <div style={s.mini}>Look</div>
-                  <select style={s.select} value={selStyle.algorithm}
-                    onChange={e => setStyles(l => l.map(x => (x.id === selStyle.id ? { ...x, algorithm: e.target.value } : x)))}>
-                    <option value="scribble">Scribble (hairlines carved through the fill)</option>
-                    <option value="flat">Flat (solid fill + outline)</option>
+                  <select style={s.select} value={selStyle.algorithm} onChange={e => chooseLook(e.target.value)}>
+                    {Object.entries(LOOKS).map(([k, l]) => <option key={k} value={k}>{l.label}</option>)}
                   </select>
 
                   <label style={{ ...s.fileBox, marginTop: 8 }}>
@@ -562,29 +706,58 @@ export default function TextTopperStudio() {
                     <div style={{ fontSize: 11, color: '#9a8a63', marginTop: 2 }}>The face is data — a new look never needs a code change.</div>
                   </label>
 
+                  {/* Colours belong to THIS artwork (the slot's style_override), not to the shared preset. */}
                   <div style={s.row}>
-                    <Swatch label="Fill" value={st.fill} onChange={v => editStyleConfig({ fill: v })} />
-                    <Swatch label="Outline" value={st.outline.color} onChange={v => editStyleConfig({ outline: { color: v } })} />
-                    <Swatch label="Hatch" value={st.hatch.color} onChange={v => editStyleConfig({ hatch: { color: v } })} />
+                    {look.swatches.map(([label, path]) => (
+                      <Swatch key={path} label={label} value={atPath(st, path)} onChange={v => editSlotColor(path, v)} />
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#9a8a63', marginTop: 4, lineHeight: 1.5 }}>
+                    {selSlot.autoColor
+                      ? 'Colour taken from what the placeholder covers — this artwork\'s own value.'
+                      : 'Colour set by hand for this template. The Look below is what\'s shared.'}
                   </div>
 
-                  <Slider label="Outline width" min={0} max={0.12} step={0.005} value={st.outline.width}
-                    onChange={v => editStyleConfig({ outline: { width: v } })} />
-                  <Slider label="Outline wobble" min={0} max={1} step={0.05} value={st.outline.wobble}
-                    onChange={v => editStyleConfig({ outline: { wobble: v } })} />
-                  <Slider label="Hatch spacing" min={0} max={0.16} step={0.005} value={st.hatch.gap}
-                    onChange={v => editStyleConfig({ hatch: { gap: v } })} />
-                  <Slider label="Hatch thickness" min={0.002} max={0.05} step={0.002} value={st.hatch.width}
-                    onChange={v => editStyleConfig({ hatch: { width: v } })} />
-                  <Slider label="Hatch angle" min={-90} max={90} step={1} value={st.hatch.angle}
-                    onChange={v => editStyleConfig({ hatch: { angle: v } })} fmt={v => `${Math.round(v)}°`} />
-                  <Slider label="Letter spacing" min={-0.1} max={0.4} step={0.01} value={st.tracking}
-                    onChange={v => editStyleConfig({ tracking: v })} />
+                  <button style={{ ...s.btnSm, marginTop: 8, width: '100%', ...(picking ? s.btnSmOn : null) }}
+                    disabled={!patched}
+                    onClick={() => setPicking(p => (p ? null : look.swatches[0][1]))}>
+                    {picking ? 'Click the artwork to sample that colour…' : `Pick ${look.swatches[0][0].toLowerCase()} colour from the artwork`}
+                  </button>
 
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button style={s.btnSm} onClick={() => saveStyle(false)}>Save style</button>
-                    <button style={s.btnSm} onClick={() => saveStyle(true)}>Save as new style…</button>
-                  </div>
+                  {[...look.sliders, ...COMMON_SLIDERS].map(([label, path, min, max, step, fmt]) => (
+                    <Slider key={path} label={label} min={min} max={max} step={step} fmt={fmt}
+                      value={atPath(st, path)} onChange={v => editStylePath(path, v)} />
+                  ))}
+
+                  {isDraft && (
+                    <div style={s.draftBox}>
+                      {isUpdate ? (
+                        <>
+                          <div style={{ fontSize: 12, color: '#c0392b', fontWeight: 700, lineHeight: 1.5 }}>
+                            Restyling “{selStyle.label}” itself — every template already using it changes too.
+                          </div>
+                          <button style={{ ...s.btnSm, marginTop: 8 }}
+                            onClick={() => setMode(m => ({ ...m, [selStyle.id]: 'fork' }))}>
+                            No — save this as a new style instead
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div style={s.mini}>Save as a new style named</div>
+                          <input style={s.input} value={draftLabel[selStyle.id] ?? suggestLabel(selStyle)}
+                            onChange={e => setDraft(d => ({ ...d, [selStyle.id]: e.target.value }))} />
+                          <div style={{ fontSize: 11, color: '#9a8a63', marginTop: 5, lineHeight: 1.5 }}>
+                            Saved with the topper. “{selStyle.label}” is left as it is, so the templates using
+                            it don&apos;t change.
+                          </div>
+                          <button style={{ ...s.btnSm, marginTop: 8 }}
+                            onClick={() => setMode(m => ({ ...m, [selStyle.id]: 'update' }))}>
+                            Update “{selStyle.label}” everywhere instead
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -594,7 +767,17 @@ export default function TextTopperStudio() {
                     This placeholder has no style — the default one couldn't be created (is the API running?).
                     Pick a style above, or create one from the defaults.
                   </div>
-                  <button style={{ ...s.btnSm, marginTop: 8 }} onClick={() => saveStyle(true)}>Create a style…</button>
+                  <button style={{ ...s.btnSm, marginTop: 8 }}
+                    onClick={async () => {
+                      try {
+                        const key = await ensureStyle();
+                        patchSlot(sel.i, { style_key: key });
+                      } catch (err) {
+                        setMsg({ ok: false, text: `Could not create the default text style: ${err.message}` });
+                      }
+                    }}>
+                    Create the default style
+                  </button>
                 </div>
               )}
             </>
@@ -699,6 +882,8 @@ const s = {
   empty:   { marginTop: 10, padding: '10px 12px', borderRadius: 8, background: '#F7FAF8', border: '1px dashed #D6E3DA', fontSize: 12, color: '#6B8C74', lineHeight: 1.5 },
   btn:     { marginTop: 18, padding: '11px 16px', borderRadius: 10, border: 'none', background: '#3D5A44', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
   btnSm:   { padding: '7px 12px', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', color: '#2C4433', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
+  btnSmOn: { borderColor: '#3D5A44', background: '#EEF5F0', color: '#3D5A44' },
+  draftBox:{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #E6D9BE' },
   msg:     { marginTop: 10, fontSize: 13, fontWeight: 700 },
   canvas:  { width: 460, height: 460, maxWidth: '100%', borderRadius: 12, border: '1.5px solid #C5D4C8', background: '#fff', touchAction: 'none', cursor: 'crosshair' },
 };
