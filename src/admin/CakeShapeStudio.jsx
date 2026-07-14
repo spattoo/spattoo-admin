@@ -8,7 +8,7 @@ import {
 import {
   CakePreview, applyCakeShapeConfig, cakeShapeDef, cakeShapeList,
   TIER_RADII, BOTTOM_H, TIER_HEIGHT_STEP, SHEET_SIZES, SHEET_DEFAULT_KEY,
-  SHAPE_VIEW, captureThumbnailBlob,
+  shapeView, captureThumbnailBlob,
 } from '@spattoo/designer';
 
 // ── Cake Shape Studio ──────────────────────────────────────────────────────────
@@ -220,7 +220,7 @@ export default function CakeShapeStudio() {
   // The picture the customer's New-cake grid shows. Captured off the HIDDEN preview below, not the big
   // one you have been orbiting: a thumbnail has to be the same view for every shape or the grid becomes a
   // row of cakes photographed from wherever each author happened to leave the camera. So it renders the
-  // same cake through SHAPE_VIEW (core's one shape camera, which the picker's live fallback also uses).
+  // same cake through shapeView() — core's one shape camera, which fits the cake and which the picker's live tile also uses.
   //
   // A failed capture is NON-FATAL: the shape saves without a picture and the picker renders it live
   // instead. Losing the photograph must never cost you the shape you just authored.
@@ -383,7 +383,7 @@ export default function CakeShapeStudio() {
           <div style={s.card}>
             <div style={s.cardHead}>
               <b style={{ fontSize: 12, color: '#2C4433' }}>Tiers</b>
-              <span style={{ fontSize: 11, color: '#6B8C74' }}>not saved with the shape — for judging it</span>
+              <span style={{ fontSize: 11, color: '#6B8C74' }}>saved with the shape — this is the cake a customer starts with</span>
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
               <button style={s.btnSm} disabled={tiers.length >= MAX_TIERS}
@@ -451,12 +451,13 @@ export default function CakeShapeStudio() {
       </div>
 
       {/* The capture stage — what the customer's picker will show. Off-screen but REALLY RENDERED (a
-          display:none canvas has no WebGL frame to read back), pinned to SHAPE_VIEW so every shape is
-          photographed from the identical angle. Kept separate from the big preview above precisely
+          display:none canvas has no WebGL frame to read back), framed by core's shapeView() so every shape
+          is photographed the same way — and so a 2- or 3-tier stack is FITTED rather than decapitated by a
+          camera placed for a single tier. Kept separate from the big preview above precisely
           BECAUSE that one is orbitable: capturing whatever angle the author drifted to would give the
           customer a grid of cakes shot from a dozen different cameras. */}
       <div ref={shotRef} style={s.shot} aria-hidden="true">
-        <CakePreview design={design} autoRotate={false} {...SHAPE_VIEW} />
+        <CakePreview design={design} autoRotate={false} {...shapeView(design)} />
       </div>
     </div>
   );
