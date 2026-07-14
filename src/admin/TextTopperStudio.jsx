@@ -28,10 +28,29 @@ import {
 // save would silently shift every rect, because normalizing re-frames the image.
 
 const S = 1024;                                     // the canonical authoring/asset frame
+// The PREVIEW frame. The asset is authored at 1024, but the operator looks at a 460px canvas — and the
+// preview used to compose at 1024 and then downscale into it, so every frame of a drag inked a ~940px
+// glyph to show it at less than half that size. Fondant builds ~11 layer canvases at O(size²) with
+// gaussian blurs over each, so that was ~1.8s of main thread PER POINTER MOVE: the box was clamped,
+// and the tab still died. Slot rects are normalized, so composing at the size actually displayed is
+// the same picture for a twentieth of the pixels. The SAVED asset is still baked at S (see save()).
+const PREVIEW = 460;
+// While a box is being DRAGGED the preview renders at this fraction of the frame. Fondant costs ~0.4s
+// at full preview size — eleven layer canvases and five gaussian blurs, all O(size²) — which is a
+// perfectly reasonable price to pay ONCE, and an absurd one to pay sixty times a second. So the drag
+// gets a cheap proxy (a quarter of the pixels) and the moment the operator lets go it re-renders at
+// full quality. The asset itself is never proxied: it is baked at S on save.
+const DRAG_SCALE = 0.4;
 const TOPPER_ZONES = ['top_surface', 'side'];
 const TOPPER_ACTIONS = { resize: true, duplicate: true, color: false, gradient: false, delete: true, move: true, tilt: false };
 const NEW_RECT = { x: 0.5, y: 0.5, w: 0.3, h: 0.3, rot: 0 };
 const HANDLE = 0.022;                               // corner grip half-size, normalized
+// A placeholder box is normalized to the artwork: never smaller than a grip, never bigger than the
+// picture it sits on. The ceiling is not cosmetic — the ink algorithms build their layers at O(size²),
+// so an unbounded box is an unbounded canvas (see applyDrag).
+const MIN_BOX = 0.03;
+const clamp   = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const clamp01 = (v) => clamp(v, 0, 1);
 
 const SAMPLES = { number: '2', text: 'Amara' };
 
@@ -125,6 +144,7 @@ export default function TextTopperStudio() {
   const [sel, setSel]           = useState(null);      // { kind:'slot'|'patch', i }
   const [tool, setTool]         = useState('slots');   // 'slots' | 'patch'
   const [picking, setPicking]   = useState(null);      // config path the next canvas click samples into
+  const [dragging, setDragging] = useState(false);     // a box is being moved/resized → render the proxy
   // ── Styles are FORK-ON-EDIT ────────────────────────────────────────────────
   // A style row is DB master data SHARED by every template that references it. Picking one reuses it;
   // *editing* one while authoring makes a DRAFT, which is saved as a NEW style when the topper is saved —
@@ -149,18 +169,32 @@ export default function TextTopperStudio() {
   }, [styles]);
 
   // A style's face is an uploaded woff2 — canvas can't shape with it until it's in document.fonts.
+  //
+  // Keyed on WHICH FACES are in use, not on the slots array. `slots` gets a new identity on every frame
+  // of a drag, and this effect then re-ran and bumped fontTick — which the preview effect depends on —
+  // so the full 1024² bake + compose ran TWICE for every pointer move. The fonts themselves hadn't
+  // changed; only the box had. (loadStyleFont is promise-cached, so the reload was free — the second
+  // render it triggered was not.)
+  const fontFaces = useMemo(
+    () => slots.map(sl => resolveStyle(styleOf(sl), sl.style_override)?.font?.family ?? '').join('|'),
+    [slots, styleOf],
+  );
   useEffect(() => {
     if (!slots.length) return;
     let alive = true;
     loadSlotFonts(slots, styleOf).then(() => { if (alive) setFontTick(t => t + 1); });
     return () => { alive = false; };
-  }, [slots, styleOf]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontFaces]);
 
   // The artwork with its clone-patches AND slot covers baked in — what actually gets uploaded, and what
   // the preview must show (otherwise the operator tunes a slot against a "2" that won't be there).
+  // The frame the preview is composed in — smaller mid-drag (see DRAG_SCALE).
+  const previewS = dragging ? Math.round(PREVIEW * DRAG_SCALE) : PREVIEW;
+
   const patched = useMemo(
-    () => (artwork ? bakeArtwork(S, artwork, patches, slots) : null),
-    [artwork, patches, slots],
+    () => (artwork ? bakeArtwork(previewS, artwork, patches, slots) : null),
+    [artwork, patches, slots, previewS],
   );
 
   async function onArtwork(file) {
@@ -193,7 +227,7 @@ export default function TextTopperStudio() {
     }
     if (!patched) return;
 
-    const composed = composeTextTopper(S, patched, slots, values, styleOf);
+    const composed = composeTextTopper(previewS, patched, slots, values, styleOf);
     ctx.drawImage(composed, 0, 0, D, D);
 
     // Authoring overlay — the rects themselves are never part of the asset.
@@ -234,7 +268,7 @@ export default function TextTopperStudio() {
       }
       ctx.restore();
     }
-  }, [patched, slots, patches, values, styleOf, sel, tool, fontTick]);
+  }, [patched, slots, patches, values, styleOf, sel, tool, fontTick, previewS]);
 
   // ── Canvas drag: move / resize a rect, or move a clone source ───────────────
   function ptOf(e) {
@@ -261,7 +295,9 @@ export default function TextTopperStudio() {
         if (Math.abs(p.x - cx) < HANDLE && Math.abs(p.y - cy) < HANDLE) {
           setSel({ kind: tool === 'patch' ? 'patch' : 'slot', i });
           dragRef.current = { mode: 'resize', corner: k, i, start: p, rect0: { ...r } };
-          e.currentTarget.setPointerCapture(e.pointerId);
+          setDragging(true);
+          setDragging(true);
+        e.currentTarget.setPointerCapture(e.pointerId);
           return;
         }
       }
@@ -269,12 +305,14 @@ export default function TextTopperStudio() {
       const from = tool === 'patch' ? list[i].from : null;
       if (from && sel?.kind === 'patch' && sel.i === i && Math.hypot(p.x - from.x, p.y - from.y) < HANDLE) {
         dragRef.current = { mode: 'from', i, start: p, from0: { ...from } };
+        setDragging(true);
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
       }
       if (p.x >= l && p.x <= rt && p.y >= t && p.y <= bt) {
         setSel({ kind: tool === 'patch' ? 'patch' : 'slot', i });
         dragRef.current = { mode: 'move', i, start: p, rect0: { ...r } };
+        setDragging(true);
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
       }
@@ -285,7 +323,21 @@ export default function TextTopperStudio() {
   function onPointerMove(e) {
     const d = dragRef.current;
     if (!d) return;
-    const p = ptOf(e);
+    // Coalesce to ONE update per animation frame. A pointer emits 60-120+ events a second and every
+    // one of them re-bakes the 1024² artwork and re-inks every glyph — work that cannot finish before
+    // the next event arrives, so the queue grows and the tab dies of its own input. The pointer's
+    // latest position is all that matters; the ones in between are already stale.
+    d.pending = e;
+    if (d.frame) return;
+    d.frame = requestAnimationFrame(() => {
+      d.frame = null;
+      const ev = d.pending;
+      if (!ev || dragRef.current !== d) return;
+      applyDrag(d, ptOf(ev));
+    });
+  }
+
+  function applyDrag(d, p) {
     const dx = p.x - d.start.x, dy = p.y - d.start.y;
     const isPatch = tool === 'patch';
     const setList = isPatch ? setPatches : setSlots;
@@ -295,12 +347,21 @@ export default function TextTopperStudio() {
       // Only a patch has a draggable source (keep its sample side `s`).
       if (d.mode === 'from') return { ...it, from: { ...d.from0, x: d.from0.x + dx, y: d.from0.y + dy } };
       const r0 = d.rect0;
-      if (d.mode === 'move') return { ...it, rect: { ...it.rect, x: r0.x + dx, y: r0.y + dy } };
-      // resize: the grabbed corner follows the pointer, the opposite corner stays put
+      if (d.mode === 'move') {
+        return { ...it, rect: { ...it.rect, x: clamp01(r0.x + dx), y: clamp01(r0.y + dy) } };
+      }
+      // resize: the grabbed corner follows the pointer, the opposite corner stays put.
+      //
+      // The upper clamp is the whole bug: the canvas has pointer capture, so once the pointer leaves it
+      // the deltas keep growing (ptOf is unnormalized — it will happily return 2.4), and the box grew
+      // past the artwork. The ink algorithms build their layers at O(size²), so a box of 2.0 asked
+      // fondant for eleven ~30-megapixel canvases per frame and hung the tab. A placeholder bigger than
+      // the artwork it sits on is meaningless anyway. (spattoo-core's renderTextSlot now refuses one too
+      // — this clamp is so the operator sees the box stop, rather than dragging into a silent ceiling.)
       const sx = d.corner.includes('w') ? -1 : 1;
       const sy = d.corner.includes('n') ? -1 : 1;
-      const w = Math.max(0.03, r0.w + sx * dx * 2);
-      const h = Math.max(0.03, r0.h + sy * dy * 2);
+      const w = clamp(r0.w + sx * dx * 2, MIN_BOX, 1);
+      const h = clamp(r0.h + sy * dy * 2, MIN_BOX, 1);
       return { ...it, rect: { ...it.rect, w, h } };
     }));
   }
@@ -311,7 +372,15 @@ export default function TextTopperStudio() {
   function onPointerUp() {
     const d = dragRef.current;
     dragRef.current = null;
-    if (!d || d.mode === 'from' || tool === 'patch' || !artwork) return;
+    setDragging(false);          // back to full quality now the box has landed
+    if (!d) return;
+    // Flush the last pointer position before letting go. The coalescer drops every event but the one it
+    // renders, so without this the box would settle wherever the previous frame left it — up to 16ms of
+    // movement thrown away, which the operator sees as the box "snapping back" a hair on release.
+    if (d.frame) cancelAnimationFrame(d.frame);
+    if (d.pending) applyDrag(d, ptOf(d.pending));
+
+    if (d.mode === 'from' || tool === 'patch' || !artwork) return;
     setSlots(prev => prev.map((sl, i) => {
       if (i !== d.i) return sl;
       const next = sl.cover ? { ...sl, cover: { from: findCleanSource(artwork, sl.rect) } } : { ...sl };
@@ -805,7 +874,10 @@ export default function TextTopperStudio() {
 
         <div style={s.col}>
           <label style={s.label}>Live preview</label>
-          <canvas ref={canvasRef} width={460} height={460} style={s.canvas}
+          <canvas
+              ref={canvasRef}
+              width={PREVIEW}
+              height={PREVIEW} style={s.canvas}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} />
 
           {slots.length > 0 && (
