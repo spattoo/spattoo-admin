@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { supabase } from './lib/supabase.js';
 import Login from './auth/Login.jsx';
 import logo from './images/spattoo-green.png';
-import { getSignedUploadUrl, uploadToR2, createTemplate } from './lib/api.js';
+import { uploadBlob, createTemplate } from './lib/api.js';
 import { ErrorBoundary } from '@spattoo/designer';
 import { initTelemetry } from './lib/telemetry.js';
 
@@ -351,8 +351,7 @@ function Router({ session }) {
         if (thumbnailBlob) {
           const ext = thumbnailBlob.type === 'image/webp' ? 'webp' : 'png';
           const filename = `${crypto.randomUUID()}.${ext}`;
-          const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, thumbnailBlob.type);
-          await uploadToR2(url, thumbnailBlob);
+          const { key } = await uploadBlob('templates/thumbnails', filename, thumbnailBlob);
           thumbnailKey = key;
         }
         await createTemplate({

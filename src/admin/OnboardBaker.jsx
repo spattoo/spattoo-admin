@@ -2,7 +2,7 @@ import { useState } from 'react';
 // FULL ("max") metadata — the default "min" bundle only length-checks and wrongly
 // accepts junk like "123123123" for IN. "max" enforces real per-country patterns.
 import { isValidPhoneNumber, getCountries, getCountryCallingCode } from 'libphonenumber-js/max';
-import { createBaker, getSignedUploadUrl, uploadToR2 } from '../lib/api.js';
+import { createBaker, uploadBlob } from '../lib/api.js';
 
 // Note: no subscription/tier picker here — every baker starts on the one-time Spark trial
 // automatically (api bakerProvisioning). Plan changes happen in the Baker Subscriptions screen.
@@ -77,8 +77,7 @@ export default function OnboardBaker() {
       if (logoFile) {
         const ext = logoFile.name.split('.').pop();
         const filename = `${crypto.randomUUID()}.${ext}`;
-        const { url, key } = await getSignedUploadUrl('logos', filename, logoFile.type);
-        await uploadToR2(url, logoFile);
+        const { key } = await uploadBlob('logos', filename, logoFile);
         baker.logo_url = key;
       }
 

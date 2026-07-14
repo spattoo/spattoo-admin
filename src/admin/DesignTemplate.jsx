@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { CakeDesigner } from '@spattoo/designer';
 import { supabase } from '../lib/supabase.js';
-import { fetchAdminBakers, getSignedUploadUrl, uploadToR2, createTemplate } from '../lib/api.js';
+import { fetchAdminBakers, uploadBlob, createTemplate } from '../lib/api.js';
 
 const BASE_URL = import.meta.env.VITE_API_URL;
 
@@ -116,8 +116,7 @@ export default function DesignTemplate() {
       // can't encode WebP via canvas) so the R2 signed PUT signature stays consistent.
       const ext = thumbnailBlob.type === 'image/webp' ? 'webp' : 'png';
       const filename = `${crypto.randomUUID()}.${ext}`;
-      const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, thumbnailBlob.type);
-      await uploadToR2(url, thumbnailBlob);
+      const { key } = await uploadBlob('templates/thumbnails', filename, thumbnailBlob);
       thumbnailKey = key;
     }
     await createTemplate({

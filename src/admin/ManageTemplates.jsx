@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, getSignedUploadUrl, uploadToR2, fetchAllTags, saveTemplateTags, saveTemplateAttrs } from '../lib/api.js';
+import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, saveTemplateTags, saveTemplateAttrs } from '../lib/api.js';
 
 const SHAPES = [
   { value: 'round',      label: 'Round' },
@@ -236,8 +236,7 @@ function TemplateForm({ onSaved, onCancel }) {
       if (thumbBlob) {
         const ext = thumbBlob.type === 'image/webp' ? 'webp' : 'png';
         const filename = `${crypto.randomUUID()}.${ext}`;
-        const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, thumbBlob.type);
-        await uploadToR2(url, thumbBlob);
+        const { key } = await uploadBlob('templates/thumbnails', filename, thumbBlob);
         thumbnailKey = key;
       }
       const newTemplate = await createTemplate({

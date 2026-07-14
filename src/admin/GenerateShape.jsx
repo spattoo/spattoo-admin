@@ -4,7 +4,7 @@ import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 import { measureGlbBuffer, toStatColumns, deriveAssetClass } from '../lib/glb.js';
 import { displaceCreamWaveCylinder, getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 
@@ -549,8 +549,7 @@ export default function GenerateShape() {
         const canvas = canvas2dRef.current;
         const rawBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
         const fn = `${crypto.randomUUID()}.png`;
-        const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/2D', fn, 'image/png');
-        await uploadToR2(fu, rawBlob);
+        const { key: fk } = await uploadBlob('elements/files/2D', fn, rawBlob, 'image/png');
         let thumbBlob = rawBlob;
         try { thumbBlob = await removeBg(rawBlob); } catch (e) { console.warn('remove.bg failed:', e.message); }
         const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
@@ -569,8 +568,7 @@ export default function GenerateShape() {
         const glbBlob = new Blob([glbBuffer], { type: 'model/gltf-binary' });
 
         const glbFilename = `${crypto.randomUUID()}.glb`;
-        const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', glbFilename, 'model/gltf-binary');
-        await uploadToR2(fu, glbBlob);
+        const { key: fk } = await uploadBlob('elements/files/3D', glbFilename, glbBlob, 'model/gltf-binary');
 
         const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
