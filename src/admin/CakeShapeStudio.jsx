@@ -8,7 +8,7 @@ import {
 import {
   CakePreview, applyCakeShapeConfig, cakeShapeDef, cakeShapeList,
   TIER_RADII, BOTTOM_H, TIER_HEIGHT_STEP, SHEET_SIZES, SHEET_DEFAULT_KEY,
-  shapeView, captureThumbnailBlob,
+  shapeView, captureThumbnailBlob, CAMERA_FOV, CAMERA_POSITION,
 } from '@spattoo/designer';
 
 // ── Cake Shape Studio ──────────────────────────────────────────────────────────
@@ -96,6 +96,8 @@ export default function CakeShapeStudio() {
   const [sizeKey, setSizeKey] = useState(SHEET_DEFAULT_KEY);   // which sheet size a rect shape starts at
   const [spin, setSpin]       = useState(false);               // turntable off by default: a shape is
                                                                // judged from a held angle, not a moving one
+  // Which lens the big preview looks through. Defaults to the CUSTOMER's — see the preview comment below.
+  const [lens, setLens]       = useState('customer');           // 'customer' | 'silhouette'
   const [adding, setAdding]   = useState(false);               // the "which curve?" step
   const [busy, setBusy]       = useState(null);
   const [msg, setMsg]         = useState(null);
@@ -431,21 +433,41 @@ export default function CakeShapeStudio() {
 
         <div style={s.stage}>
           <label style={s.label}>
-            Preview — the real designer renderer{' '}
+            Preview — {lens === 'customer' ? "the customer's view" : 'silhouette lens'}{' '}
             <span style={{ fontWeight: 400, color: '#8fae98' }}>· drag to orbit, scroll to zoom</span>
           </label>
           <div style={s.canvas}>
-            {/* A LONG lens (18°, camera pulled well back), aimed at the middle of the cake. The default
-                preview lens is a 42° portrait lens for a thumbnail: it splays the near bottom edge
-                outward, and a vertical wall then reads as a cake bulging at its base. You cannot judge a
-                silhouette through a lens that is editorialising about it. */}
-            <CakePreview design={design} autoRotate={spin} enableZoom
-              fov={18} cameraPosition={[0, 7.5, 20]} target={[0, 0.9, 0]} />
+            {/* DEFAULT: the camera the CUSTOMER looks through — core's own CAMERA_FOV/CAMERA_POSITION, not
+                numbers invented here. This studio exists to judge a cake's PROPORTIONS, and proportions are
+                a property of the lens as much as the mesh: the old preview used a long 18° lens from a much
+                lower angle, which shows the side wall and foreshortens the top, so every cake read TALLER
+                here than on the cake it was authoring. Height was tuned against a picture the customer
+                never sees. The geometry was always right; the camera was a second opinion.
+
+                SILHOUETTE: the long lens, kept and made explicit. A wide lens splays the near bottom edge
+                outward and a vertical wall reads as bulging at its base, which is a bad way to judge a
+                CURVE. Both views are legitimate — the mistake was making the analytic one the default and
+                calling it "what a customer gets". */}
+            <CakePreview
+              design={design} autoRotate={spin} enableZoom
+              {...(lens === 'customer'
+                ? { fov: CAMERA_FOV, cameraPosition: CAMERA_POSITION, target: [0, 0.9, 0] }
+                : { fov: 18, cameraPosition: [0, 7.5, 20], target: [0, 0.9, 0] })}
+            />
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button style={{ ...s.btnSm, ...(spin ? s.btnSmOn : null) }} onClick={() => setSpin(v => !v)}>
               {spin ? 'Stop turntable' : 'Spin'}
             </button>
+            <button style={{ ...s.btnSm, ...(lens === 'silhouette' ? s.btnSmOn : null) }}
+              onClick={() => setLens(l => (l === 'customer' ? 'silhouette' : 'customer'))}>
+              {lens === 'customer' ? 'Silhouette lens' : "Customer's view"}
+            </button>
+          </div>
+          <div style={s.hint}>
+            <b>Customer&apos;s view</b> is the designer&apos;s own camera — the cake as she will actually see
+            it, which is the only honest way to judge how TALL it looks. The <b>silhouette lens</b> is a long
+            lens that removes perspective splay; use it to judge the CURVE, not the height.
           </div>
         </div>
       </div>
