@@ -7,7 +7,7 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { toCreasedNormals, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 import { measureGlbRoot, evaluateCaps, deriveAssetClass, measureForSave, toStatColumns, ASSET_CLASSES, CAPS } from '../lib/glb.js';
 import { GlbBudgetRows } from './GlbStats.jsx';
 
@@ -861,8 +861,7 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
 
       const buffer = await buildGLBBuffer();
       const glbBlob = new Blob([buffer], { type: 'model/gltf-binary' });
-      const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', `${crypto.randomUUID()}.glb`, 'model/gltf-binary');
-      await uploadToR2(fu, glbBlob);
+      const { key: fk } = await uploadBlob('elements/files/3D', `${crypto.randomUUID()}.glb`, glbBlob, 'model/gltf-binary');
       const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       // Record the GLB cost of what we just built/optimized (§3) — flagged, not gated.

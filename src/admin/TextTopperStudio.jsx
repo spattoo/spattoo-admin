@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, uploadFont,
+  fetchElementTypes, uploadBlob, uploadThumbnail, uploadFont,
   createGlobalElement, fetchAdminTextStyles, createTextStyle, updateTextStyle,
 } from '../lib/api.js';
 import { prepareElementImage } from '../lib/elementImage.js';
@@ -517,8 +517,7 @@ export default function TextTopperStudio() {
       // The artwork with patches AND slot covers baked in — the designer never replays a clone.
       const artCanvas = bakeArtwork(S, artwork, patches, next);
       const blob = await new Promise(res => artCanvas.toBlob(res, 'image/png'));
-      const { url, key } = await getSignedUploadUrl('elements/files/2D', `${crypto.randomUUID()}.png`, 'image/png');
-      await uploadToR2(url, blob, 'image/png');
+      const { key } = await uploadBlob('elements/files/2D', `${crypto.randomUUID()}.png`, blob, 'image/png');
 
       // Thumbnail = the topper with its DEFAULT values, so the picker tile reads as a real topper.
       const thumbBlob = await new Promise(res =>

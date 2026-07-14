@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 import { toStatColumns } from '../lib/glb.js';
 import { GlbReviewBanner } from './GlbStats.jsx';
 import GlbStudio from './GlbStudio.jsx';
@@ -594,8 +594,7 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
       try { thumbBlob = await removeBg(rawThumb); } catch (e) { console.warn('remove.bg failed:', e.message); }
 
       const { blob, stats, metaSegments, groups } = reviewed;
-      const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', `${crypto.randomUUID()}.glb`, 'model/gltf-binary');
-      await uploadToR2(fu, blob);
+      const { key: fk } = await uploadBlob('elements/files/3D', `${crypto.randomUUID()}.glb`, blob, 'model/gltf-binary');
       const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       await createGlobalElement({

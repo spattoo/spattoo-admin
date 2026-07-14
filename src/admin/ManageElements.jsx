@@ -9,8 +9,8 @@ import {
 } from '../lib/api.js';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
-import { normalizeThumbnail } from '../lib/thumbnail.js';
-import { prepareElementImage } from '../lib/elementImage.js';
+import { normalizeArtwork } from '@spattoo/designer';
+import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 import { statsFromElement } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
 
@@ -469,6 +469,12 @@ export default function ManageElements() {
   const [recolorMethod, setRecolorMethod] = useState('opaque');
   const [recolorGuard,  setRecolorGuard]  = useState('12');
   const [recolorSat,    setRecolorSat]    = useState('0.25');
+  // Print finish (placement_config.print_finish) — OPTIONAL artistic overrides. The designer now renders a
+  // print at exactly 1× its artwork by construction (spattoo-core shared/printExposure.js), so these exist
+  // to make a deliberate choice, NOT to correct a render that is wrong. Blank writes no key at all.
+  const [printSat,     setPrintSat]     = useState('');   // print_finish.saturation — chroma boost (1 = the artwork)
+  const [printShading, setPrintShading] = useState('');   // print_finish.shading    — how much cake light it takes
+  const [printGain,    setPrintGain]    = useState('');   // print_finish.gain       — exposure (1 = the artwork)
   const [patternOnly,        setPatternOnly]        = useState(false);
   const [description,      setDescription]      = useState('');
   const [glbRotation,        setGlbRotation]        = useState([0, 0, 0]);
@@ -557,6 +563,7 @@ export default function ManageElements() {
     setSideProud(pc.side_proud === true);
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
+    loadPrintFinishFromPc(pc);
     setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
@@ -584,7 +591,7 @@ export default function ManageElements() {
       // thumbnail AND (for 2D + remove-bg) the replacement asset, so the sticker comes out transparent.
       setNewThumbBlob(await prepareElementImage(blob, { removeBgEnabled: enabled }));
     } catch {
-      setNewThumbBlob(await normalizeThumbnail(blob, 1024));
+      setNewThumbBlob(await normalizeArtwork(blob, { size: ELEMENT_IMAGE_DIM }));
     } finally {
       setRemovingBg(false);
     }
@@ -627,6 +634,14 @@ export default function ManageElements() {
       return JSON.stringify(cur, null, 2);
     });
   }
+  // Reflect placement_config.print_finish into its controls (used by both load + JSON-edit sync — one
+  // helper, so the two paths can't drift). Blank when absent: the designer's defaults then apply.
+  function loadPrintFinishFromPc(pc) {
+    setPrintSat(pc.print_finish?.saturation != null ? String(pc.print_finish.saturation) : '');
+    setPrintShading(pc.print_finish?.shading != null ? String(pc.print_finish.shading) : '');
+    setPrintGain(pc.print_finish?.gain != null ? String(pc.print_finish.gain) : '');
+    // `emissive` is the LEGACY key from the pre-exposure model; the designer ignores it. Not surfaced.
+  }
   // Reflect placement_config.cluster into the cluster controls (used by both load + JSON-edit sync).
   function loadClusterFromPc(pc) {
     setCanCluster(!!pc.cluster);
@@ -663,6 +678,7 @@ export default function ManageElements() {
     setSideProud(pc.side_proud === true);
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
+    loadPrintFinishFromPc(pc);
     setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
@@ -694,6 +710,19 @@ export default function ManageElements() {
     // `sat` (which pixels count as coloured); the per-region swatches are chosen per instance in the designer.
     : m === 'hue_regions' ? { method: 'hue_regions', sat: sv !== '' ? parseFloat(sv) : 0.18 }
     : { method: 'opaque' };
+  // The print_finish descriptor — only non-blank fields; all blank → '' so patchPc drops the key entirely
+  // and the print renders as its artwork. Never write a "default" value into the config: an explicit key
+  // freezes the element against the model. (The Relief Studio used to stamp its defaults into every
+  // element it touched, which is how {emissive:0.22, saturation:1.12} ended up frozen on 7 elements and
+  // the 1.4× overshoot got baked across the library. Don't reintroduce that.) The legacy `emissive` key is
+  // dropped on save, so re-saving a legacy element cleans it up.
+  const printFinishDesc = (sat = printSat, sh = printShading, g = printGain) => {
+    const p = {};
+    if (numPatch(sat) !== '') p.saturation = numPatch(sat);
+    if (numPatch(sh)  !== '') p.shading    = numPatch(sh);
+    if (numPatch(g)   !== '') p.gain       = numPatch(g);
+    return Object.keys(p).length ? p : '';
+  };
   // The verge descriptor (rests on the rim lip, reclines outward) — only non-blank fields; all blank
   // → '' so patchPc drops the key and the designer uses its defaults (angle_deg 35 / 0 offsets).
   const vergeDesc = (seat = vergeSeat, a = vergeAngle, y = vergeYOffset, ei = vergeEdgeInset) => {
@@ -990,7 +1019,7 @@ export default function ManageElements() {
     try {
       const raw = await new Promise(r => canvas.toBlob(r, 'image/png'));
       if (!raw) throw new Error('Could not capture the pattern preview.');
-      const thumb = await normalizeThumbnail(raw);
+      const thumb = await normalizeArtwork(raw, { size: PATTERN_THUMB_DIM });
       const key = await uploadThumbnail('elements/thumbnails', thumb);
       const oldThumb = selectedEl.thumbnail_url;
       await updateGlobalElement(selectedEl.id, { thumbnail_url: key });
@@ -1647,6 +1676,42 @@ export default function ManageElements() {
                     </div>
                   )}
                 </div>
+
+                {/* ── Print finish — 2D image stickers only (these act on the printed decal, not a GLB). ──
+                    LEAVE THESE BLANK unless you mean it. The designer renders a print at exactly 1× its
+                    artwork by construction (spattoo-core shared/printExposure.js) — so a print that looks
+                    wrong on the cake is now a bug to REPORT, not a slider to fight. These are deliberate
+                    artistic overrides only. Blank writes no key at all. */}
+                {selectedEl?.image_url && !isGlb && (
+                  <div style={s.field}>
+                    <label style={s.label}>Print finish <span style={{ fontWeight: 500, color: '#6B8C74' }}>— optional; blank = looks like the artwork</span></label>
+                    {[
+                      { k: 'gain', label: 'Exposure', v: printGain, min: 0.2, max: 1.5, step: 0.01,
+                        ph: '1.0 = exactly the artwork. Below 1 dims the print, above 1 brightens it.',
+                        set: setPrintGain, desc: (x) => printFinishDesc(printSat, printShading, x) },
+                      { k: 'saturation', label: 'Saturation', v: printSat, min: 0.5, max: 1.6, step: 0.01,
+                        ph: "1.0 = the artwork's own colour. Above 1 punches the chroma up.",
+                        set: setPrintSat, desc: (x) => printFinishDesc(x, printShading, printGain) },
+                      { k: 'shading', label: 'Takes shading', v: printShading, min: 0, max: 1, step: 0.05,
+                        ph: '0.35 — how much of the cake\'s light/shadow falls on the print. 0 = flat, immune to light.',
+                        set: setPrintShading, desc: (x) => printFinishDesc(printSat, x, printGain) },
+                    ].map(f => (
+                      <div key={f.k} style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>{f.label}</span>
+                        <input type="number" min={f.min} max={f.max} step={f.step} style={{ ...s.input, flex: 1 }}
+                          value={f.v} placeholder={f.ph}
+                          onChange={e => { const x = e.target.value; f.set(x); patchPc({ print_finish: f.desc(x) }); }} />
+                      </div>
+                    ))}
+                    <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>
+                      <b>Leave these blank.</b> A print now renders as its artwork — same brightness on the wall,
+                      on a topper, on any cake — so you should not need to calibrate elements one by one.
+                      Use them only to make a deliberate choice (a deliberately muted or punchier print).
+                      If an element looks wrong with these blank, that&apos;s a renderer bug worth reporting, not a
+                      slider to fight.
+                    </div>
+                  </div>
+                )}
 
                 {/* ── Default color ── */}
                 <div style={s.field}>

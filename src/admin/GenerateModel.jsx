@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 import { measureForSave, toStatColumns, deriveAssetClass } from '../lib/glb.js';
 
 import { ZONE_LIST as ZONES } from '../lib/constants.js';
@@ -398,8 +398,7 @@ export default function GenerateModel() {
       const glbBuffer = await exportGLB(exportRoot);
       const glbBlob = new Blob([glbBuffer], { type: 'model/gltf-binary' });
 
-      const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', `${crypto.randomUUID()}.glb`, 'model/gltf-binary');
-      await uploadToR2(fu, glbBlob);
+      const { key: fk } = await uploadBlob('elements/files/3D', `${crypto.randomUUID()}.glb`, glbBlob, 'model/gltf-binary');
       const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       // Stash the part-map + source script alongside placement (jsonb) so the

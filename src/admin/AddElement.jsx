@@ -4,8 +4,8 @@ import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { fetchElementTypes, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
-import { normalizeThumbnail } from '../lib/thumbnail.js';
-import { prepareElementImage } from '../lib/elementImage.js';
+import { normalizeArtwork } from '@spattoo/designer';
+import { prepareElementImage, ELEMENT_IMAGE_DIM } from '../lib/elementImage.js';
 import { toStatColumns } from '../lib/glb.js';
 import { GlbReviewBanner } from './GlbStats.jsx';
 import GlbStudio from './GlbStudio.jsx';
@@ -359,7 +359,7 @@ export default function AddElement() {
       // normalize. The result is the element's master image (image_url) AND thumbnail_url.
       setThumbnailBlob(await prepareElementImage(blob, { removeBgEnabled }));
     } catch {
-      setThumbnailBlob(await normalizeThumbnail(blob, 1024));
+      setThumbnailBlob(await normalizeArtwork(blob, { size: ELEMENT_IMAGE_DIM }));
     } finally {
       setRemovingBg(false);
     }

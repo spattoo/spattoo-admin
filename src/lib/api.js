@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import { encodeWebp } from './thumbnail.js';
+import { encodeWebp } from '@spattoo/designer';
 
 const BASE_URL = import.meta.env.VITE_API_URL;
 
@@ -111,8 +111,23 @@ export async function fetchParentElements(elementTypeId) {
   return get(`/api/elements?parents_only=true&element_type_id=${elementTypeId}`);
 }
 
-export async function getSignedUploadUrl(folder, filename, contentType) {
-  return post('/api/storage/sign-upload', { folder, filename, contentType });
+// `contentLength` is REQUIRED by the API and is signed into the URL: R2 rejects a PUT whose body is a
+// different length, which is what makes the per-folder size ceiling enforceable at all (the body goes
+// browser → R2 and never passes through our server, so a client-side check is advice, not a limit).
+// Callers should not reach for this directly — use `uploadBlob`, which cannot get the length wrong.
+export async function getSignedUploadUrl(folder, filename, contentType, contentLength) {
+  return post('/api/storage/sign-upload', { folder, filename, contentType, contentLength });
+}
+
+// Sign + PUT, in ONE place. Every upload in this app was the same copy-pasted pair — sign, then
+// uploadToR2 — repeated at 14 call sites, and the signed Content-Length turned that duplication from
+// untidy into dangerous: 14 chances to sign one length and send a body of another (an upload that
+// fails at R2 with a signature error, which reads like a credentials bug). The length is now derived
+// from the very blob that is PUT, so it cannot disagree.
+export async function uploadBlob(folder, filename, blob, contentType = blob.type) {
+  const { url, key, publicUrl } = await getSignedUploadUrl(folder, filename, contentType, blob.size);
+  await uploadToR2(url, blob, contentType);
+  return { key, publicUrl };
 }
 
 // Delete a managed R2 object. Accepts a bare key or a full public URL; the API
@@ -143,8 +158,7 @@ export async function uploadAsset(folder, file, basename = crypto.randomUUID()) 
   const nameExt = (file.name?.split('.').pop() || '').toLowerCase();
   const contentType = file.type || MIME_BY_EXT[nameExt] || 'application/octet-stream';
   const ext = EXT_BY_MIME[contentType] || nameExt || 'bin';
-  const { url, key } = await getSignedUploadUrl(folder, `${basename}.${ext}`, contentType);
-  await uploadToR2(url, file, contentType);
+  const { key } = await uploadBlob(folder, `${basename}.${ext}`, file, contentType);
   return key;
 }
 
@@ -156,8 +170,7 @@ export async function uploadFont(file) {
   const isWoff = (file.name?.split('.').pop() || '').toLowerCase() === 'woff';
   const ext = isWoff ? 'woff' : 'woff2';
   const contentType = isWoff ? 'font/woff' : 'font/woff2';
-  const { url, key, publicUrl } = await getSignedUploadUrl('elements/fonts', `${crypto.randomUUID()}.${ext}`, contentType);
-  await uploadToR2(url, file, contentType);
+  const { key, publicUrl } = await uploadBlob('elements/fonts', `${crypto.randomUUID()}.${ext}`, file, contentType);
   return publicUrl || key;
 }
 
@@ -173,8 +186,7 @@ const IMAGE_EXT = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png
 export async function uploadThumbnail(folder, blob, basename = crypto.randomUUID()) {
   const webp = await encodeWebp(blob);
   const ext = IMAGE_EXT[webp.type] ?? 'png';
-  const { url, key } = await getSignedUploadUrl(folder, `${basename}.${ext}`, webp.type);
-  await uploadToR2(url, webp);
+  const { key } = await uploadBlob(folder, `${basename}.${ext}`, webp);
   return key;
 }
 
