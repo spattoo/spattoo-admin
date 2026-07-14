@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  fetchAdminCakeShapes, createCakeShape, updateCakeShape,
+  fetchAdminCakeShapes, createCakeShape, updateCakeShape, uploadAsset,
 } from '../lib/api.js';
 // The catalog + the REAL cake renderer, both imported from core — never re-implemented here. The
 // preview below is the same component the customer's designer draws with (CakePreview → toCanvasConfig
@@ -8,6 +8,7 @@ import {
 import {
   CakePreview, applyCakeShapeConfig, cakeShapeDef, cakeShapeList,
   TIER_RADII, BOTTOM_H, TIER_HEIGHT_STEP, SHEET_SIZES, SHEET_DEFAULT_KEY,
+  SHAPE_VIEW, captureThumbnailBlob,
 } from '@spattoo/designer';
 
 // ── Cake Shape Studio ──────────────────────────────────────────────────────────
@@ -17,9 +18,17 @@ import {
 // data, so a new shape is very often just new config against an existing family (an octagon IS a
 // polygon with sides=8) and needs no deploy.
 //
-// The tier sliders are NOT saved with the shape. A shape has no size of its own — its outline is
-// normalised, and the tier's width/depth scale it. The sliders exist so the shape can be judged at the
-// sizes a real cake uses, which is the only way to know whether it holds up.
+// The tier sliders ARE saved with the shape. They did not used to be, and that was a hole you could see
+// from the customer's side: "Cylinder" and "2T Cylinder" were both family=circle with an empty config, so
+// they were the SAME ROW in every respect the catalog could express, and the picker drew the same cake
+// twice. A shape is the cake you start with — its outline AND its stack — so the tiers persist. A shape
+// saved with no stack still means "one tier at the designer's default", which is what every older row
+// meant and still means.
+//
+// Save also captures a FRONT VIEW of the cake through the real renderer and stores it in R2. That picture
+// is what the customer's New-cake grid shows, so the tile is a photograph of the cake she will get, not a
+// drawing of its footprint (the first version drew top-down outlines, and every circle-family shape came
+// out as the same pink disc — useless on sight).
 
 // The CURVES the code ships, and the knobs each exposes. Data, so a new curve in core adds a row here —
 // not a branch in the JSX. `authorable` = you can build new shapes from it; `circle` is not, because
@@ -90,6 +99,7 @@ export default function CakeShapeStudio() {
   const [adding, setAdding]   = useState(false);               // the "which curve?" step
   const [busy, setBusy]       = useState(null);
   const [msg, setMsg]         = useState(null);
+  const shotRef = useRef(null);        // the off-screen capture stage (see the bottom of the render)
 
   // SEED first, DB second — the same contract the designer renders under (applyCakeShapeConfig overlays
   // rows onto core's in-code seed). So the studio works with no `cake_shapes` table at all: the shapes
@@ -118,12 +128,26 @@ export default function CakeShapeStudio() {
   const sel = shapes.find(s => s.key === selKey) || null;
   const fam = FAMILIES[sel?.family] || FAMILIES.circle;
 
-  // Switching shape re-seats the cake on the DEFAULT size for that family — a heart lands on the round
-  // cake's footprint, a sheet on its sheet size — so the comparison is always like-for-like.
-  const reset = (count = tiers.length, key = sizeKey) => setTiers(defaultTiers(sel?.family, count, key));
+  // Selecting a shape loads the CAKE IT WAS SAVED AS — its own stack, at its own sizes. A row with no
+  // stack (every row authored before shapes could be multi-tier) falls back to the family default, which
+  // is precisely what it has always rendered as, so nothing that exists changes.
+  //
+  // Reset re-seats the cake on the DEFAULT size for the family — a heart lands on the round cake's
+  // footprint, a sheet on its sheet size — so a like-for-like comparison is always one click away.
+  const reset = (count = tiers.length, key = sizeKey) => editTiers(defaultTiers(sel?.family, count, key));
   useEffect(() => {
-    if (sel) setTiers(t => defaultTiers(sel.family, t.length, sizeKey));
-  }, [sel?.family, sizeKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+    if (!sel) return;
+    setTiers(prev => (sel.tiers?.length
+      ? sel.tiers.map(t => ({ ...t }))
+      : defaultTiers(sel.family, prev.length, sizeKey)));
+  }, [selKey, sel?.family, sizeKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The stack is part of the shape now, so moving a tier slider makes the shape DIRTY — the same as
+  // dragging a proportion knob. Before, the sliders were a scratch pad and Save ignored them.
+  function editTiers(next) {
+    setTiers(next);
+    if (sel) setDirty(d => (d.includes(sel.key) ? d : [...d, sel.key]));
+  }
   const isDraft = !!sel && dirty.includes(sel.key);
   const isReserved = RESERVED.includes(sel?.key);
   const isNew = !!sel && !sel.id;                 // a draft: authored here, not yet in the catalog
@@ -193,6 +217,25 @@ export default function CakeShapeStudio() {
     } finally { setBusy(null); }
   }
 
+  // The picture the customer's New-cake grid shows. Captured off the HIDDEN preview below, not the big
+  // one you have been orbiting: a thumbnail has to be the same view for every shape or the grid becomes a
+  // row of cakes photographed from wherever each author happened to leave the camera. So it renders the
+  // same cake through SHAPE_VIEW (core's one shape camera, which the picker's live fallback also uses).
+  //
+  // A failed capture is NON-FATAL: the shape saves without a picture and the picker renders it live
+  // instead. Losing the photograph must never cost you the shape you just authored.
+  async function captureThumb() {
+    try {
+      const canvas = shotRef.current?.querySelector('canvas');
+      if (!canvas) return null;
+      const blob = await captureThumbnailBlob(canvas);
+      if (!blob) return null;
+      return await uploadAsset('shapes/thumbnails', blob);
+    } catch {
+      return null;
+    }
+  }
+
   // The ONE save. A draft becomes a row here (POST); an existing shape is updated (PATCH). Either way,
   // this is the only moment anything reaches the database — which is what makes the numbers above YOURS.
   async function save() {
@@ -204,13 +247,15 @@ export default function CakeShapeStudio() {
     setBusy('Saving…');
     setMsg(null);
     try {
+      const thumbnail_key = await captureThumb();
       const saved = isNew
         ? await createCakeShape({
             key: slug(label), label, family: sel.family,
-            config: sel.config, sort_order: shapes.length + 1,
+            config: sel.config, tiers, thumbnail_key, sort_order: shapes.length + 1,
           })
         : await updateCakeShape(sel.id, {
-            label, family: sel.family, config: sel.config, sort_order: sel.sort_order,
+            label, family: sel.family, config: sel.config, tiers, thumbnail_key,
+            sort_order: sel.sort_order,
           });
 
       applyCakeShapeConfig([saved]);
@@ -342,9 +387,9 @@ export default function CakeShapeStudio() {
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
               <button style={s.btnSm} disabled={tiers.length >= MAX_TIERS}
-                onClick={() => setTiers(t => [...t, defaultTiers(sel?.family, t.length + 1, sizeKey)[t.length]])}>+ Tier</button>
+                onClick={() => editTiers(t => [...t, defaultTiers(sel?.family, t.length + 1, sizeKey)[t.length]])}>+ Tier</button>
               <button style={s.btnSm} disabled={tiers.length <= 1}
-                onClick={() => setTiers(t => t.slice(0, -1))}>− Tier</button>
+                onClick={() => editTiers(t => t.slice(0, -1))}>− Tier</button>
               <button style={s.btnSm} onClick={() => reset()}>Reset to core&apos;s default cake</button>
             </div>
 
@@ -365,11 +410,11 @@ export default function CakeShapeStudio() {
                 <div key={i} style={s.tier}>
                   <div style={s.mini}>Tier {i + 1}{i === 0 ? ' (bottom)' : ''}</div>
                   <Slider label="Width"  min={0.4} max={3.6} step={0.02} value={t.width}  base={base.width}
-                    onChange={v => setTiers(l => l.map((x, j) => (j === i ? { ...x, width: v } : x)))} />
+                    onChange={v => editTiers(l => l.map((x, j) => (j === i ? { ...x, width: v } : x)))} />
                   <Slider label="Depth"  min={0.4} max={3.6} step={0.02} value={t.depth}  base={base.depth}
-                    onChange={v => setTiers(l => l.map((x, j) => (j === i ? { ...x, depth: v } : x)))} />
+                    onChange={v => editTiers(l => l.map((x, j) => (j === i ? { ...x, depth: v } : x)))} />
                   <Slider label="Height" min={0.3} max={2.2} step={0.02} value={t.height} base={base.height}
-                    onChange={v => setTiers(l => l.map((x, j) => (j === i ? { ...x, height: v } : x)))} />
+                    onChange={v => editTiers(l => l.map((x, j) => (j === i ? { ...x, height: v } : x)))} />
                 </div>
               );
             })}
@@ -404,6 +449,15 @@ export default function CakeShapeStudio() {
           </div>
         </div>
       </div>
+
+      {/* The capture stage — what the customer's picker will show. Off-screen but REALLY RENDERED (a
+          display:none canvas has no WebGL frame to read back), pinned to SHAPE_VIEW so every shape is
+          photographed from the identical angle. Kept separate from the big preview above precisely
+          BECAUSE that one is orbitable: capturing whatever angle the author drifted to would give the
+          customer a grid of cakes shot from a dozen different cameras. */}
+      <div ref={shotRef} style={s.shot} aria-hidden="true">
+        <CakePreview design={design} autoRotate={false} {...SHAPE_VIEW} />
+      </div>
     </div>
   );
 }
@@ -430,6 +484,9 @@ function Slider({ label, min, max, step, value, onChange, base }) {
 }
 
 const s = {
+  // Off-screen, but on-screen enough to RENDER: WebGL needs a real, laid-out canvas to produce a frame we
+  // can read back, so this is parked outside the viewport rather than display:none'd away.
+  shot: { position: 'absolute', left: -9999, top: 0, width: 320, height: 320, pointerEvents: 'none' },
   page:    { maxWidth: 1720, margin: '0 auto', padding: '24px 20px 64px', fontFamily: "'Quicksand', sans-serif" },
   h1:      { fontSize: 22, fontWeight: 800, color: '#2C4433', margin: '0 0 6px' },
   sub:     { fontSize: 13, color: '#5C7565', lineHeight: 1.6, margin: '0 0 16px', maxWidth: 860 },
