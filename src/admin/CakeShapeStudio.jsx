@@ -21,17 +21,37 @@ import {
 // normalised, and the tier's width/depth scale it. The sliders exist so the shape can be judged at the
 // sizes a real cake uses, which is the only way to know whether it holds up.
 
-// The knobs each family exposes — data, so a new family adds a row here, not a branch in the JSX.
+// The CURVES the code ships, and the knobs each exposes. Data, so a new curve in core adds a row here —
+// not a branch in the JSX. `authorable` = you can build new shapes from it; `circle` is not, because
+// Round already IS the circle and a second one would just be Round twice in the customer's picker.
 const FAMILIES = {
-  circle:       { label: 'Circle (round cake)', params: [], note: 'The analytic round tier — the cylinder path, with its cream wall styles and finishes.' },
-  rounded_rect: { label: 'Rounded rectangle (sheet cake)', params: [], note: 'The analytic sheet prism. Width and depth come from the tier; "square" locks them equal.' },
-  heart:        { label: 'Heart',     params: [['Plumpness', 'plump', 0.4, 2, 0.05], ['Cleft depth', 'cleft', 0.2, 2.5, 0.05]] },
-  butterfly:    { label: 'Butterfly', params: [['Wing spread', 'wing', 0.4, 2, 0.05]] },
-  polygon:      { label: 'Polygon',   params: [['Sides', 'sides', 3, 16, 1], ['Rotation', 'rotation', -180, 180, 1]] },
-  oval:         { label: 'Oval',      params: [], note: 'A circle the tier\'s width and depth stretch.' },
+  circle:       { short: 'round',     label: 'Circle (round cake)', authorable: false, params: [],
+                  note: 'The analytic round tier — the cylinder path, with its cream wall styles and finishes.' },
+  rounded_rect: { short: 'sheet',     label: 'Rounded rectangle (sheet cake)', authorable: true, params: [],
+                  note: 'The analytic sheet prism. Width and depth come from the tier; "square" locks them equal.' },
+  heart:        { short: 'heart',     label: 'Heart',     authorable: true,
+                  params: [['Plumpness', 'plump', 0.4, 2, 0.05], ['Cleft depth', 'cleft', 0.2, 2.5, 0.05],
+                           ['Tip roundness', 'tip', 0, 0.35, 0.01]] },
+  butterfly:    { short: 'butterfly', label: 'Butterfly', authorable: true,
+                  params: [['Wing spread', 'wing', 0.4, 2, 0.05]] },
+  polygon:      { short: 'polygon',   label: 'Polygon',   authorable: true,
+                  params: [['Sides', 'sides', 3, 16, 1], ['Rotation', 'rotation', -180, 180, 1]] },
+  oval:         { short: 'oval',      label: 'Oval',      authorable: true, params: [],
+                  note: 'A circle the tier\'s width and depth stretch.' },
+};
+
+// Where a new shape STARTS. Not an opinion about what the shape should be — just a legible starting
+// point to drag away from; the whole job of this studio is that you decide the numbers.
+const NEW_CONFIG = {
+  heart:        { plump: 1, cleft: 1, tip: 0.12 },
+  butterfly:    { wing: 1 },
+  polygon:      { sides: 6, rotation: 0 },
+  oval:         {},
+  rounded_rect: { square: true },
 };
 
 const RESERVED = ['round', 'rect'];               // what existing designs already store — never re-key
+const DRAFT_KEY = '__draft';                      // a shape being authored; local only, never a row
 const MAX_TIERS = 4;
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
@@ -67,6 +87,7 @@ export default function CakeShapeStudio() {
   const [sizeKey, setSizeKey] = useState(SHEET_DEFAULT_KEY);   // which sheet size a rect shape starts at
   const [spin, setSpin]       = useState(false);               // turntable off by default: a shape is
                                                                // judged from a held angle, not a moving one
+  const [adding, setAdding]   = useState(false);               // the "which curve?" step
   const [busy, setBusy]       = useState(null);
   const [msg, setMsg]         = useState(null);
 
@@ -105,10 +126,7 @@ export default function CakeShapeStudio() {
   }, [sel?.family, sizeKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isDraft = !!sel && dirty.includes(sel.key);
   const isReserved = RESERVED.includes(sel?.key);
-  // A shape is saveable only once it is a ROW. Until the `cake_shapes` table exists, this studio tunes
-  // the code seed: real shapes, real renderer, nothing persisted. Saying so is better than a Save button
-  // that quietly fails.
-  const persisted = !!sel?.id;
+  const isNew = !!sel && !sel.id;                 // a draft: authored here, not yet in the catalog
 
   // Every edit re-overlays the catalog, so the 3D preview reflects the knob the operator is dragging
   // RIGHT NOW — not the last saved row.
@@ -135,36 +153,73 @@ export default function CakeShapeStudio() {
     texts: [], ages: [], stickers: [], writing: null, piping: [],
   }), [tiers, selKey, shapes]);       // `shapes` in deps: a config edit must re-render the cake
 
-  async function addShape() {
-    const label = window.prompt('New shape name (e.g. Octagon):', '');
-    if (!label?.trim()) return;
-    setBusy('Creating…');
+  // A new shape starts as a DRAFT — local only. Nothing is written to the catalog until you decide the
+  // proportions are right and press Save. Creating the row up front would put a shape nobody has looked
+  // at into the database, which is the whole thing this studio exists to prevent.
+  //
+  // The CURVE is chosen here because it is the one thing that cannot change afterwards: a different
+  // curve is a different cake, not a tweak. Everything after this is proportions.
+  function startDraft(family) {
+    setAdding(false);
+    const draft = {
+      key: DRAFT_KEY, id: null, family,
+      label: '', config: { ...(NEW_CONFIG[family] ?? {}) },
+    };
+    applyCakeShapeConfig([draft]);            // so the preview renders it immediately
+    setShapes(list => [...list.filter(s => s.key !== DRAFT_KEY), draft]);
+    setSelKey(DRAFT_KEY);
+    setMsg(null);
+  }
+
+  function discardDraft() {
+    setShapes(list => list.filter(s => s.key !== DRAFT_KEY));
+    setSelKey('round');
+  }
+
+  // Soft-delete: the row stays, it just stops being offered. A hard delete would strand any design that
+  // already stores the key (the designer degrades an unknown shape to round — a cake silently changing
+  // shape is the worst possible outcome).
+  async function retire() {
+    if (!sel?.id || isReserved) return;
+    if (!window.confirm(`Retire "${sel.label}"? It stops being offered; cakes already using it keep it.`)) return;
+    setBusy('Retiring…');
     try {
-      const created = await createCakeShape({
-        key: slug(label), label: label.trim(), family: 'polygon',
-        config: { sides: 8, rotation: 0 }, sort_order: shapes.length + 1,
-      });
-      applyCakeShapeConfig([created]);
-      setShapes(list => [...list, created]);
-      setSelKey(created.key);
-      setMsg({ ok: true, text: `"${created.label}" created — tune it below, then Save.` });
+      const saved = await updateCakeShape(sel.id, { is_active: false });
+      setShapes(list => list.filter(s => s.key !== saved.key));
+      setSelKey('round');
+      setMsg({ ok: true, text: `"${saved.label}" retired.` });
     } catch (err) {
-      setMsg({ ok: false, text: err.message || 'Could not create the shape.' });
+      setMsg({ ok: false, text: err.message || 'Could not retire the shape.' });
     } finally { setBusy(null); }
   }
 
+  // The ONE save. A draft becomes a row here (POST); an existing shape is updated (PATCH). Either way,
+  // this is the only moment anything reaches the database — which is what makes the numbers above YOURS.
   async function save() {
-    if (!sel || !persisted) return;
+    if (!sel) return;
+    const isNew = !sel.id;
+    const label = (sel.label || '').trim();
+    if (isNew && !label) return setMsg({ ok: false, text: 'Name the shape before saving it.' });
+
     setBusy('Saving…');
     setMsg(null);
     try {
-      const saved = await updateCakeShape(sel.id, {
-        label: sel.label, family: sel.family, config: sel.config, sort_order: sel.sort_order,
-      });
+      const saved = isNew
+        ? await createCakeShape({
+            key: slug(label), label, family: sel.family,
+            config: sel.config, sort_order: shapes.length + 1,
+          })
+        : await updateCakeShape(sel.id, {
+            label, family: sel.family, config: sel.config, sort_order: sel.sort_order,
+          });
+
       applyCakeShapeConfig([saved]);
-      setShapes(list => list.map(s => (s.key === saved.key ? saved : s)));
-      setDirty(d => d.filter(k => k !== saved.key));
-      setMsg({ ok: true, text: `"${saved.label}" saved. Every cake using it follows.` });
+      setShapes(list => [...list.filter(s => s.key !== sel.key && s.key !== saved.key), saved]);
+      setDirty(d => d.filter(k => k !== sel.key && k !== saved.key));
+      setSelKey(saved.key);
+      setMsg({ ok: true, text: isNew
+        ? `"${saved.label}" saved to the catalog.`
+        : `"${saved.label}" updated. Every cake using it follows.` });
     } catch (err) {
       setMsg({ ok: false, text: err.message || 'Save failed.' });
     } finally { setBusy(null); }
@@ -174,8 +229,10 @@ export default function CakeShapeStudio() {
     <div style={s.page}>
       <h1 style={s.h1}>Cake Shape Studio</h1>
       <p style={s.sub}>
-        The catalog of cake <b>footprints</b>. A shape is a <b>family</b> (the curve) plus its
-        <b> proportions</b> (data) — so an octagon is just a polygon with 8 sides, and needs no release.
+        The catalog of cake <b>footprints</b> — the shapes a customer can pick from. The code ships the
+        <b> curves</b> (heart, butterfly, polygon, oval); <b>you author the shapes</b>: start one from a
+        curve, tune its proportions against a real cake, and save it when it looks right. Only
+        <b> Round</b> and <b>Rectangle</b> come ready-made, because existing designs already use them.
         The preview is the real designer renderer, so what you see here is what a customer gets.
       </p>
 
@@ -183,31 +240,57 @@ export default function CakeShapeStudio() {
         <div style={s.col}>
           <label style={s.label}>Shape</label>
           <select style={s.select} value={selKey ?? ''} onChange={e => setSelKey(e.target.value)}>
-            {shapes.map(sh => <option key={sh.id} value={sh.key}>{sh.label}{sh.is_active ? '' : ' (inactive)'}</option>)}
+            {shapes.map(sh => (
+              <option key={sh.key} value={sh.key}>
+                {sh.key === DRAFT_KEY ? `${sh.label || 'New shape'} (unsaved)` : sh.label}
+              </option>
+            ))}
           </select>
-          <button style={{ ...s.btnSm, marginTop: 8 }} onClick={addShape} disabled={!!busy || !shapes.some(sh => sh.id)}>
+          <button style={{ ...s.btnSm, marginTop: 8 }} onClick={() => setAdding(a => !a)} disabled={!!busy}>
             + New shape
           </button>
+
+          {adding && (
+            <div style={s.card}>
+              <div style={s.mini}>Build it from which curve?</div>
+              <div style={s.hint}>
+                The curve is code and cannot be changed afterwards — a different curve is a different
+                cake. The proportions are yours to tune.
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {Object.entries(FAMILIES).filter(([, f]) => f.authorable).map(([k, f]) => (
+                  <button key={k} style={s.btnSm} onClick={() => startDraft(k)}>{f.label}</button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {sel && (
             <div style={s.card}>
               <div style={s.cardHead}>
-                <b style={{ fontSize: 12, color: '#7A5E1F' }}>{sel.label}</b>
-                <span style={{ fontSize: 11, color: isDraft ? '#7A5E1F' : '#9a8a63', fontWeight: isDraft ? 700 : 400 }}>
-                  {isDraft ? 'edited — not saved' : 'every cake using it shares this'}
+                <b style={{ fontSize: 12, color: '#7A5E1F' }}>{sel.label || 'New shape'}</b>
+                <span style={{ fontSize: 11, color: isNew || isDraft ? '#7A5E1F' : '#9a8a63', fontWeight: isNew || isDraft ? 700 : 400 }}>
+                  {isNew ? 'draft — nothing saved yet'
+                    : isDraft ? 'edited — not saved'
+                    : 'every cake using it shares this'}
                 </span>
               </div>
 
-              <div style={s.mini}>Family</div>
-              <select style={s.select} value={sel.family}
-                onChange={e => edit({ family: e.target.value, config: {} })} disabled={isReserved}>
-                {Object.entries(FAMILIES).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
-              </select>
+              {isNew && (
+                <>
+                  <div style={s.mini}>Name</div>
+                  <input style={s.input} autoFocus value={sel.label} placeholder="e.g. Heart"
+                    onChange={e => edit({ label: e.target.value })} />
+                </>
+              )}
+
+              {/* The curve is fixed at creation — changing it would make this a different cake, not a
+                  tuned one, and every design already storing the key would silently change shape. */}
+              <div style={s.mini}>Built from the {fam.label.toLowerCase()} curve</div>
               {fam.note && <div style={s.hint}>{fam.note}</div>}
               {isReserved && (
                 <div style={s.hint}>
-                  “{sel.key}” is what existing designs already store, so its family is fixed — changing it
-                  would reshape every cake that uses it.
+                  “{sel.key}” is what existing designs already store, so it can&apos;t be renamed or retired.
                 </div>
               )}
 
@@ -225,17 +308,26 @@ export default function CakeShapeStudio() {
                   onChange={v => edit({ config: { [key]: v } })} />
               ))}
 
-              {persisted ? (
-                <button style={{ ...s.btn, opacity: busy || !isDraft ? 0.55 : 1 }}
-                  disabled={!!busy || !isDraft} onClick={save}>
-                  {busy || (isDraft ? 'Save shape' : 'Saved')}
-                </button>
-              ) : (
-                <div style={s.notice}>
-                  <b>Tuning the code seed.</b> The <code>cake_shapes</code> table isn&apos;t wired yet, so
-                  nothing here persists — reload and it&apos;s back to what core ships. Dial a shape in,
-                  tell me the numbers, and they go into the seed; when the table lands, these same controls
-                  save straight to it.
+              <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'center' }}>
+                {(isNew || isDraft) ? (
+                  <button style={{ ...s.btn, marginTop: 0, flex: 1 }} disabled={!!busy} onClick={save}>
+                    {busy || (isNew ? 'Save to the catalog' : 'Save changes')}
+                  </button>
+                ) : (
+                  <div style={{ flex: 1, fontSize: 12, color: '#8fae98', fontWeight: 700 }}>Up to date</div>
+                )}
+                {isNew && (
+                  <button style={s.btnSm} disabled={!!busy} onClick={discardDraft}>Discard</button>
+                )}
+                {!isNew && !isReserved && (
+                  <button style={{ ...s.btnSm, color: '#c0392b', borderColor: '#e8c4bd' }}
+                    disabled={!!busy} onClick={retire}>Retire</button>
+                )}
+              </div>
+              {isNew && (
+                <div style={s.hint}>
+                  Nothing has been written to the catalog. Tune it against the cake, name it, and save it
+                  when the proportions are right.
                 </div>
               )}
             </div>
@@ -298,7 +390,12 @@ export default function CakeShapeStudio() {
             <span style={{ fontWeight: 400, color: '#8fae98' }}>· drag to orbit, scroll to zoom</span>
           </label>
           <div style={s.canvas}>
-            <CakePreview design={design} autoRotate={spin} enableZoom />
+            {/* A LONG lens (18°, camera pulled well back), aimed at the middle of the cake. The default
+                preview lens is a 42° portrait lens for a thumbnail: it splays the near bottom edge
+                outward, and a vertical wall then reads as a cake bulging at its base. You cannot judge a
+                silhouette through a lens that is editorialising about it. */}
+            <CakePreview design={design} autoRotate={spin} enableZoom
+              fov={18} cameraPosition={[0, 7.5, 20]} target={[0, 0.9, 0]} />
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button style={{ ...s.btnSm, ...(spin ? s.btnSmOn : null) }} onClick={() => setSpin(v => !v)}>
