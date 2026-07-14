@@ -24,6 +24,7 @@ function createAdminApiClient(bakerId = null) {
     fetchElementTypes: () => authFetch('/api/element-types'),
     fetchTextures: () => authFetch('/api/textures'),
     fetchMaterials: () => authFetch('/api/materials'),
+    fetchCakeShapes: () => authFetch('/api/cake-shapes'),   // the footprints authored in the Cake Shape Studio
     fetchElements: (opts = {}) => {
       const p = new URLSearchParams();
       if (opts.parentsOnly)    p.set('parents_only', 'true');
