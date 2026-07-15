@@ -35,6 +35,7 @@ const FAMILIES = {
   butterfly:    { label: 'Butterfly', params: [['Wing spread', 'wing', 0.4, 2, 0.05]] },
   polygon:      { label: 'Polygon',   params: [['Sides', 'sides', 3, 16, 1], ['Rotation', 'rotation', -180, 180, 1]] },
   oval:         { label: 'Oval',      params: [] },
+  number:       { label: 'Number',    params: [] },   // config is the typed digits, not sliders (see below)
 };
 
 // Where a tier's proportions START when you pick a family. Not an opinion about the shape — a legible
@@ -46,6 +47,7 @@ const NEW_CONFIG = {
   oval:      {},
   rounded_rect: { square: false },
   circle:    {},
+  number:    { digits: '1' },
 };
 
 // A tier stores its own shape KEY too (for cakeShapeOf + the legacy 'rect' checks); it follows the family.
@@ -68,7 +70,9 @@ const baseSize = (family, i) => (family === 'rounded_rect' ? sheetTier(i) : roun
 // A fresh tier of `family` at stack index `i`, at that family's default size + starting proportions.
 function newTier(family = 'circle', i = 0) {
   const b = baseSize(family, i);
-  return { family, config: { ...(NEW_CONFIG[family] ?? {}) }, width: b.width, depth: b.depth, height: b.height };
+  // A number cake is a flat slab, not a tall block — default it thinner (the customer/admin can raise it).
+  const height = family === 'number' ? 0.7 : b.height;
+  return { family, config: { ...(NEW_CONFIG[family] ?? {}) }, width: b.width, depth: b.depth, height };
 }
 
 // A saved design's tiers → the editable rows this studio drives (family + config + world sizes).
@@ -314,6 +318,15 @@ export default function CakeShapeStudio() {
                   </label>
                 )}
 
+                {t.family === 'number' && (
+                  <>
+                    <div style={s.mini}>Number (the customer edits this on their cake)</div>
+                    <input style={s.select} value={t.config?.digits ?? ''} placeholder="e.g. 4"
+                      inputMode="numeric" maxLength={4}
+                      onChange={e => setTierConfig(i, { digits: e.target.value.replace(/[^0-9]/g, '').slice(0, 4) })} />
+                  </>
+                )}
+
                 {fam.params.map(([label, key, min, max, step]) => (
                   <Slider key={key} label={label} min={min} max={max} step={step}
                     value={t.config?.[key] ?? NEW_CONFIG[t.family]?.[key] ?? min}
@@ -322,7 +335,8 @@ export default function CakeShapeStudio() {
 
                 <Slider label="Width" min={0.4} max={3.6} step={0.02} value={t.width} base={b.width}
                   onChange={v => setTierSize(i, { width: v })} />
-                {!square && (
+                {/* A number's depth is set by the digit's own aspect (it must not distort), like a square rect. */}
+                {!square && t.family !== 'number' && (
                   <Slider label="Depth" min={0.4} max={3.6} step={0.02} value={t.depth} base={b.depth}
                     onChange={v => setTierSize(i, { depth: v })} />
                 )}
