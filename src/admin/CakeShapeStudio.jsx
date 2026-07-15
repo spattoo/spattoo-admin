@@ -116,11 +116,13 @@ export default function CakeShapeStudio() {
       .then(rows => {
         if (!rows?.length) return;
         applyCakeShapeConfig(rows);
-        // Rows WIN over the seed (they carry an id, which is what makes a shape saveable); seeded
-        // shapes with no row stay in the list so nothing the code can render disappears from the picker.
+        // Rows WIN over the seed (they carry an id, which is what makes a shape saveable). A row now
+        // stores a self-contained `design`, not family/config columns — so we keep the DERIVED catalog
+        // entry (family/config/tiers unpacked from the design by applyCakeShapeConfig, which the sliders
+        // read) and staple the row's id + sort_order on, which are what Save needs.
         setShapes(list => {
           const byKey = new Map(list.map(s => [s.key, s]));
-          for (const row of rows) byKey.set(row.key, row);
+          for (const row of rows) byKey.set(row.key, { ...cakeShapeDef(row.key), key: row.key, id: row.id, sort_order: row.sort_order });
           return [...byKey.values()];
         });
       })
@@ -158,7 +160,10 @@ export default function CakeShapeStudio() {
   // RIGHT NOW — not the last saved row.
   function edit(patch) {
     if (!sel) return;
-    const next = { ...sel, ...patch, config: { ...sel.config, ...(patch.config || {}) } };
+    // Drop the stale saved `design` while editing: the studio's working model is family/config/tiers, and
+    // applyCakeShapeConfig prefers a row's stored design over its explicit config. Nulling it makes the
+    // live preview reflect the knob being dragged; Save rebuilds the design from the tuned family/config.
+    const next = { ...sel, ...patch, config: { ...sel.config, ...(patch.config || {}) }, design: null };
     applyCakeShapeConfig([next]);
     setShapes(list => list.map(s => (s.key === sel.key ? next : s)));
     setDirty(d => (d.includes(sel.key) ? d : [...d, sel.key]));
@@ -169,6 +174,8 @@ export default function CakeShapeStudio() {
   const design = useMemo(() => ({
     tiers: tiers.map(t => ({
       shape: selKey ?? 'round',
+      shapeFamily: sel?.family ?? 'circle',   // self-contained geometry — the preview renders the way a
+      shapeConfig: sel?.config ?? {},         // saved cake will, and this object doubles as the Save payload
       width: t.width,
       depth: t.depth,
       radius: t.width / 2,            // the round path is sized by radius; keep the two in step
@@ -245,23 +252,24 @@ export default function CakeShapeStudio() {
     const isNew = !sel.id;
     const label = (sel.label || '').trim();
     if (isNew && !label) return setMsg({ ok: false, text: 'Name the shape before saving it.' });
+    const key = isNew ? slug(label) : sel.key;
 
     setBusy('Saving…');
     setMsg(null);
     try {
       const thumbnail_key = await captureThumb();
+      // Save the design we just previewed — self-contained (shapeFamily/shapeConfig per tier) — with each
+      // tier's `shape` set to the row's real key (the live preview used the draft/selected key).
+      const shapeDesign = { ...design, tiers: design.tiers.map(t => ({ ...t, shape: key })) };
       const saved = isNew
-        ? await createCakeShape({
-            key: slug(label), label, family: sel.family,
-            config: sel.config, tiers, thumbnail_key, sort_order: shapes.length + 1,
-          })
-        : await updateCakeShape(sel.id, {
-            label, family: sel.family, config: sel.config, tiers, thumbnail_key,
-            sort_order: sel.sort_order,
-          });
+        ? await createCakeShape({ key, label, design: shapeDesign, thumbnail_key, sort_order: shapes.length + 1 })
+        : await updateCakeShape(sel.id, { label, design: shapeDesign, thumbnail_key, sort_order: sel.sort_order });
 
       applyCakeShapeConfig([saved]);
-      setShapes(list => [...list.filter(s => s.key !== sel.key && s.key !== saved.key), saved]);
+      // Store the DERIVED entry (family/config/tiers unpacked from the saved design) + id, so the sliders
+      // keep reading one field shape whether a row came from load or was just saved.
+      const entry = { ...cakeShapeDef(saved.key), key: saved.key, id: saved.id, sort_order: saved.sort_order };
+      setShapes(list => [...list.filter(s => s.key !== sel.key && s.key !== saved.key), entry]);
       setDirty(d => d.filter(k => k !== sel.key && k !== saved.key));
       setSelKey(saved.key);
       setMsg({ ok: true, text: isNew
