@@ -35,7 +35,7 @@ const FAMILIES = {
   butterfly:    { label: 'Butterfly', params: [['Wing spread', 'wing', 0.4, 2, 0.05]] },
   polygon:      { label: 'Polygon',   params: [['Sides', 'sides', 3, 16, 1], ['Rotation', 'rotation', -180, 180, 1]] },
   oval:         { label: 'Oval',      params: [] },
-  number:       { label: 'Number',    params: [] },   // config is the typed digits, not sliders (see below)
+  number:       { label: 'Number',    params: [['Thickness', 'weight', 0, 0.04, 0.005], ['Corner rounding', 'cornerR', 0, 1, 0.05]] },   // + the typed digits (special-cased below)
 };
 
 // Where a tier's proportions START when you pick a family. Not an opinion about the shape — a legible
@@ -47,7 +47,7 @@ const NEW_CONFIG = {
   oval:      {},
   rounded_rect: { square: false },
   circle:    {},
-  number:    { digits: '1' },
+  number:    { digits: '1', weight: 0, cornerR: 0 },
 };
 
 // A tier stores its own shape KEY too (for cakeShapeOf + the legacy 'rect' checks); it follows the family.
