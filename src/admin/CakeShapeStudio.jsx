@@ -420,13 +420,15 @@ export default function CakeShapeStudio() {
             <span style={{ fontWeight: 400, color: '#8fae98' }}>· drag to orbit, scroll to zoom</span>
           </label>
           <div style={s.canvas}>
-            {/* DEFAULT: the camera the CUSTOMER looks through (core's CAMERA_FOV/CAMERA_POSITION) — the only
-                honest way to judge how TALL a cake reads. SILHOUETTE: a long lens that removes perspective
-                splay, for judging the CURVE rather than the height. */}
+            {/* DEFAULT: the camera the CUSTOMER looks through — core's CAMERA_FOV/CAMERA_POSITION *and its
+                target* ([0,2,0], the exact aim of the live editor's OrbitControls). Aiming lower ([0,0.9,0])
+                pulled a flat number's tall digit up into the top edge and clipped it; [0,2,0] frames it the way
+                the real editor does, so the studio shows what the customer gets. SILHOUETTE: a long lens that
+                removes perspective splay, for judging the CURVE rather than the height. */}
             <CakePreview
               design={design} autoRotate={spin} enableZoom
               {...(lens === 'customer'
-                ? { fov: CAMERA_FOV, cameraPosition: CAMERA_POSITION, target: [0, 0.9, 0] }
+                ? { fov: CAMERA_FOV, cameraPosition: CAMERA_POSITION, target: [0, 2, 0] }
                 : { fov: 18, cameraPosition: [0, 7.5, 20], target: [0, 0.9, 0] })}
             />
           </div>
