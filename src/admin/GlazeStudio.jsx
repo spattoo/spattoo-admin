@@ -247,6 +247,144 @@ function makeDripGeometry(R, drip, seed) {
   return { geo: g, maxDepth: maxD };
 }
 
+// ── Non-round bodies (heart) — a VERIFICATION that the same 3D marble field generalises to any shape ──
+// Everything below reuses the UNCHANGED makeMarbleField + paintField; only the geometry and how we WALK it
+// change. The wall is unwrapped by ARC LENGTH around the footprint outline (u) × height (v) — exactly the
+// unwrap core's buildOutlinePrism uses — so the field (sampled at true 3D position) flows continuously
+// around and over the edge on a heart just as it does on a cylinder. (Core will ultimately evaluate this
+// field in an object-space shader so it needs no unwrap at all; this bake is the faithful look preview.)
+function heartOutline(n, scale) {
+  let raw = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    const x = 16 * Math.pow(Math.sin(t), 3);
+    const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+    raw.push([x, y]);
+  }
+  // Light Laplacian smoothing rounds the two CUSPS (bottom point + top notch) — real heart cakes have
+  // rounded points, and an infinitely-sharp vertex makes the rounded-rim inward inset self-intersect.
+  for (let pass = 0; pass < 4; pass++) {
+    raw = raw.map((p, i) => {
+      const a = raw[(i - 1 + n) % n], b = raw[(i + 1) % n];
+      return [p[0] * 0.6 + (a[0] + b[0]) * 0.2, p[1] * 0.6 + (a[1] + b[1]) * 0.2];
+    });
+  }
+  let m = 0; for (const [x, y] of raw) m = Math.max(m, Math.hypot(x, y));
+  return raw.map(([x, y]) => ({ x: (x / m) * scale, z: -(y / m) * scale }));   // parametric heart → xz footprint
+}
+// Inward unit normals per outline vertex (perpendicular to the local tangent, oriented toward the centroid).
+// This is the studio stand-in for core's perimeter(shape).at(s).{nx,nz} — the rail a rounded rim / drip rides.
+function outlineInwardNormals(outline) {
+  const n = outline.length; let cx = 0, cz = 0;
+  for (const p of outline) { cx += p.x; cz += p.z; } cx /= n; cz /= n;
+  return outline.map((p, i) => {
+    const a = outline[(i - 1 + n) % n], b = outline[(i + 1) % n];
+    let tx = b.x - a.x, tz = b.z - a.z; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+    let nx = -tz, nz = tx;                                   // perpendicular to the tangent
+    if ((cx - p.x) * nx + (cz - p.z) * nz < 0) { nx = -nx; nz = -nz; }   // orient inward
+    return { nx, nz };
+  });
+}
+// Cumulative-arc-length sampler: at(u∈[0,1)) → {x,z, nx,nz} (position + inward UNIT normal at that fraction).
+function outlineArc(outline) {
+  const n = outline.length, cum = [0], nrm = outlineInwardNormals(outline);
+  for (let i = 1; i <= n; i++) { const a = outline[i - 1], b = outline[i % n]; cum.push(cum[i - 1] + Math.hypot(b.x - a.x, b.z - a.z)); }
+  const total = cum[n];
+  return { total, at(u) {
+    const target = (((u % 1) + 1) % 1) * total;
+    let lo = 1, hi = n; while (lo < hi) { const mid = (lo + hi) >> 1; if (cum[mid] < target) lo = mid + 1; else hi = mid; }
+    const i = Math.max(1, lo), seg = (cum[i] - cum[i - 1]) || 1e-9, f = (target - cum[i - 1]) / seg;
+    const a = outline[(i - 1) % n], b = outline[i % n], na = nrm[(i - 1) % n], nb = nrm[i % n];
+    let nx = na.nx + (nb.nx - na.nx) * f, nz = na.nz + (nb.nz - na.nz) * f; const nl = Math.hypot(nx, nz) || 1;
+    return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f, nx: nx / nl, nz: nz / nl };
+  } };
+}
+// Rim inset at height h: 0 up the straight wall, growing along a quarter-round to r at the very top — the edge
+// rolls inward exactly like the round cake's lathe rim, so glaze auto-rounds its edge on ANY shape.
+function rimInset(h, H, r) {
+  if (r <= 1e-6 || h <= H - r) return 0;
+  const t = Math.min(1, (h - (H - r)) / r);
+  return r * (1 - Math.sqrt(1 - t * t));
+}
+// Bake the field over the outline WALL: columns = arc length (u), rows = height (v). Rim rows are sampled at
+// their TRUE inset position (outline + inward·inset) so the marble flows unbroken over the rounded edge.
+function bakeFieldOutlineWall(sample, size, outline, H, r) {
+  const arc = outlineArc(outline), f = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const h = (1 - y / size) * H, off = rimInset(h, H, r);
+    for (let x = 0; x < size; x++) { const p = arc.at(x / size); f[y * size + x] = sample(p.x + p.nx * off, h, p.z + p.nz * off); }
+  }
+  return f;
+}
+// Bake the flat TOP over the footprint bounding box (x∈[-halfW,halfW], z∈[-halfD,halfD]) at height H; the cap
+// UVs map (x,z) → this box, so the top samples the SAME field the wall does at the shared top edge.
+function bakeFieldTopBox(sample, size, halfW, halfD, H) {
+  const f = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const pz = (y / size * 2 - 1) * halfD;
+    for (let x = 0; x < size; x++) f[y * size + x] = sample((x / size * 2 - 1) * halfW, H, pz);
+  }
+  return f;
+}
+// Vertical wall + rounded top rim around the outline. Straight wall 0..H-r, then a quarter-round rolling the
+// edge inward by r to meet the flat cap (returned as capOutline, inset by r). UV u=arc-length, v=height.
+function buildOutlineWall(outline, H, r) {
+  const n = outline.length, nrm = outlineInwardNormals(outline), cum = [0];
+  for (let i = 1; i <= n; i++) { const a = outline[i - 1], b = outline[i % n]; cum.push(cum[i - 1] + Math.hypot(b.x - a.x, b.z - a.z)); }
+  const total = cum[n];
+  const rings = [{ off: 0, y: 0 }, { off: 0, y: H - r }];            // bottom, top of the straight wall
+  const SEG = r > 1e-6 ? 8 : 0;
+  for (let i = 1; i <= SEG; i++) { const a = (Math.PI / 2) * (i / SEG); rings.push({ off: r * (1 - Math.cos(a)), y: (H - r) + r * Math.sin(a) }); }
+  const stride = n + 1, pos = [], uv = [], idx = [];
+  for (const ring of rings) for (let i = 0; i <= n; i++) {
+    const p = outline[i % n], w = nrm[i % n];
+    pos.push(p.x + w.nx * ring.off, ring.y, p.z + w.nz * ring.off);
+    uv.push(cum[i] / total, 1 - ring.y / H);
+  }
+  for (let ri = 0; ri < rings.length - 1; ri++) for (let i = 0; i < n; i++) {
+    const a = ri * stride + i, c = (ri + 1) * stride + i;
+    idx.push(a, c, a + 1, a + 1, c, c + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  const capOutline = outline.map((p, i) => ({ x: p.x + nrm[i].nx * r, z: p.z + nrm[i].nz * r }));   // inset flat top
+  return { geo: g, capOutline };
+}
+// Flat top cap = fan triangulation from the centroid (a heart is star-shaped from its centre); UVs map the
+// footprint bbox so the cap reads the top-field texture at each vertex's true (x,z).
+function buildOutlineCap(outline, halfW, halfD) {
+  const n = outline.length; let cx = 0, cz = 0; for (const p of outline) { cx += p.x; cz += p.z; } cx /= n; cz /= n;
+  const pos = [cx, 0, cz], uv = [(cx / halfW) * 0.5 + 0.5, (cz / halfD) * 0.5 + 0.5], idx = [];
+  for (let i = 0; i < n; i++) { const p = outline[i]; pos.push(p.x, 0, p.z); uv.push((p.x / halfW) * 0.5 + 0.5, (p.z / halfD) * 0.5 + 0.5); }
+  for (let i = 0; i < n; i++) idx.push(0, 1 + i, 1 + ((i + 1) % n));
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+// Drip fringe along the outline (same pendant profile as the round one, but the tendrils ride arc length).
+function makeOutlineDrip(outline, drip, seed) {
+  const n = outline.length, rnd = mulberry32(((seed | 0) || 1) * 131 + 7);
+  const phase = rnd() * Math.PI * 2, phase2 = rnd() * Math.PI * 2, base = drip * 0.62;
+  const nT = 9 + Math.round(rnd() * 8), peaks = [];
+  for (let i = 0; i < nT; i++) peaks.push({ s: rnd(), w: 0.01 + rnd() * 0.02, h: drip * (0.45 + rnd() * 0.7) });
+  const depth = (u) => {
+    let d = base * (0.8 + 0.2 * Math.sin(u * Math.PI * 2 * 9 + phase) + 0.1 * Math.sin(u * Math.PI * 2 * 21 + phase2));
+    for (const p of peaks) { let du = (((u - p.s + 0.5) % 1) + 1) % 1 - 0.5; d += p.h * Math.exp(-(du * du) / (2 * p.w * p.w)); }
+    return d;
+  };
+  const pos = [], idx = []; let maxD = 0;
+  for (let i = 0; i <= n; i++) { const p = outline[i % n], d = depth(i / n); if (d > maxD) maxD = d; pos.push(p.x, 0, p.z, p.x, -d, p.z); }
+  for (let i = 0; i < n; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return { geo: g, maxDepth: maxD };
+}
+
 // Debounce a fast-changing value: the expensive marble bake should fire only after a slider settles, not
 // on every intermediate tick of a drag (that is what froze the studio while scrubbing Flow).
 function useDebounced(value, ms) {
@@ -258,24 +396,28 @@ function useDebounced(value, ms) {
 // The glazed cake: a LATHE of a profile whose top edge is ROUNDED by `rim` (0 = sharp), wearing the
 // glaze material as ONE seamless surface (wall → rounded rim → top). Single colour → solid tint;
 // multi colour → the marble map. Material is kept live-synced without a rebuild (like the drip studio).
-function GlazedCake({ colors, marbleParams, material, rim, drip }) {
+function GlazedCake({ colors, marbleParams, material, rim, drip, bodyShape }) {
   const H = BOTTOM_H;
-  const r = Math.max(0, Math.min(rim, R - 0.05, H - 0.05));
+  const isHeart = bodyShape === 'heart';
+  const r = Math.max(0, Math.min(rim, R - 0.05, H - 0.05));   // rounded top rim — applied to EVERY shape (glaze auto-rounds its edge)
   const innerR = R - r;
   const SIZE = 640;      // output texture size
   const FR = SIZE;       // field bake resolution — no supersample: the SMOOTH field barely aliases (unlike
                          // the old hard bands), so we skip the 4× cost of SS=2 and lean on anisotropy.
   const isMarble = colors.length > 1;
 
+  // Footprint outline for non-round bodies (heart). Same field, different rail.
+  const heart = useMemo(() => (isHeart ? heartOutline(220, R) : null), [isHeart]);
+
   // EXPENSIVE — the 3D marble field. Recompute ONLY when the pattern params change (flow / warp / contrast
-  // / streak / seed / rim), never on colours. Debounced so scrubbing a slider bakes once it SETTLES, not on
-  // every intermediate tick — that repeated synchronous bake is what froze the studio.
-  const fieldSig = useDebounced(`${marbleParams.flow}|${marbleParams.warp}|${marbleParams.contrast}|${marbleParams.streak}|${marbleParams.seed}|${r}`, 170);
+  // / streak / seed / rim / shape), never on colours. Debounced so scrubbing a slider bakes once it SETTLES.
+  const fieldSig = useDebounced(`${marbleParams.flow}|${marbleParams.warp}|${marbleParams.contrast}|${marbleParams.streak}|${marbleParams.seed}|${r}|${bodyShape}`, 170);
   const fields = useMemo(() => {
     if (!isMarble) return null;
     const s = makeMarbleField(marbleParams);
-    // The field is sampled at each surface point's TRUE 3D position; the bakers just feed real geometry
-    // (wall at radius R, rim at its tapering radius, top on its plane) so the 3D field stays continuous.
+    // The field is sampled at each surface point's TRUE 3D position, so it stays continuous over ANY body —
+    // round walks a circle, heart walks its outline; same field, same continuity over the edge.
+    if (isHeart) return { wall: bakeFieldOutlineWall(s, FR, heart, H, r), top: bakeFieldTopBox(s, FR, R, R, H) };
     return { wall: bakeFieldWall(s, FR, R, H, r), top: bakeFieldTop(s, FR, innerR, H) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMarble, fieldSig]);
@@ -295,11 +437,16 @@ function GlazedCake({ colors, marbleParams, material, rim, drip }) {
     m.clearcoat = material.clearcoat;
     m.clearcoatRoughness = material.clearcoatRoughness;
     m.envMapIntensity = material.envMapIntensity;
+    m.side = THREE.DoubleSide;   // hand-built outline meshes may wind either way — DoubleSide is winding-proof
     m.needsUpdate = true;
   }
 
-  // Drip fringe geometry (positions) — rebuilt only when the drip length or seed changes.
-  const dripFringe = useMemo(() => (drip > 0.001 ? makeDripGeometry(R, drip, marbleParams.seed) : null), [drip, marbleParams.seed]);
+  // Drip fringe geometry (positions) — round rides a circle, heart rides its outline. Rebuilt on drip/seed/shape.
+  const dripFringe = useMemo(() => {
+    if (drip <= 0.001) return null;
+    return isHeart ? makeOutlineDrip(heart, drip, marbleParams.seed) : makeDripGeometry(R, drip, marbleParams.seed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drip, marbleParams.seed, isHeart]);
   // Per-vertex marble colour for the fringe: sample the SAME field at each drip's angle (cake-local y=0 =
   // the wall bottom), so every tendril carries the colour of the streak directly above it — one flow.
   useMemo(() => {
@@ -329,9 +476,11 @@ function GlazedCake({ colors, marbleParams, material, rim, drip }) {
   // Seat the board just below the LONGEST tendril so the drips read as hanging, not buried in the board.
   const boardTopY = BOARD_H - (dripFringe ? dripFringe.maxDepth + 0.03 : 0);
 
-  // Wall + rounded rim, revolved, ending at the inner rim radius (OPEN top — the flat disc caps it, so
-  // there is no converging lathe centre to pinwheel).
+  // Body wall: round = a LATHE (wall → rounded rim, open top capped by the disc); heart = a vertical prism
+  // around its outline. Cap: round = flat disc; heart = fan-triangulated outline cap.
+  const heartBody = useMemo(() => (isHeart ? buildOutlineWall(heart, H, r) : null), [isHeart, r]); // eslint-disable-line react-hooks/exhaustive-deps
   const wallGeo = useMemo(() => {
+    if (isHeart) return heartBody.geo;
     const pts = [new THREE.Vector2(R, 0), new THREE.Vector2(R, H - r)];
     if (r > 0.001) {
       const SEG = 14;
@@ -340,7 +489,9 @@ function GlazedCake({ colors, marbleParams, material, rim, drip }) {
       pts.push(new THREE.Vector2(R, H));
     }
     return new THREE.LatheGeometry(pts, 200);
-  }, [r]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r, isHeart, heartBody]);
+  const capGeo = useMemo(() => (isHeart ? buildOutlineCap(heartBody.capOutline, R, R) : null), [isHeart, heartBody]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <group>
@@ -350,9 +501,11 @@ function GlazedCake({ colors, marbleParams, material, rim, drip }) {
       </mesh>
       <mesh position={[0, BOARD_H, 0]} geometry={wallGeo} material={wallMat} />
       {dripFringe && <mesh position={[0, BOARD_H, 0]} geometry={dripFringe.geo} material={dripMat} />}
-      <mesh position={[0, BOARD_H + H, 0]} rotation={[-Math.PI / 2, 0, 0]} material={topMat}>
-        <circleGeometry args={[innerR, 128]} />
-      </mesh>
+      {isHeart
+        ? <mesh position={[0, BOARD_H + H, 0]} geometry={capGeo} material={topMat} />
+        : <mesh position={[0, BOARD_H + H, 0]} rotation={[-Math.PI / 2, 0, 0]} material={topMat}>
+            <circleGeometry args={[innerR, 128]} />
+          </mesh>}
     </group>
   );
 }
@@ -394,8 +547,9 @@ function Slider({ label, value, min, max, step, onChange, fmt = v => v }) {
 const PRESET_COLORS = ['#141414', '#4a2c1a', '#c0392b', '#2e86c1', '#e8b71b'];
 
 export default function GlazeStudio() {
-  // Colours: 1 = solid glaze, 2..5 = marble. Start on a deep-chocolate two-tone (wet ganache look).
-  const [colors, setColors] = useState(['#1a0f0a', '#3a2114']);
+  // Colours: 1 = solid glaze (default), 2..5 = marble. Default is ONE chocolate — a plain poured chocolate
+  // glaze; adding a 2nd colour turns it into a marble.
+  const [colors, setColors] = useState(['#5a3621']);
 
   // MATERIAL — the SAME MeshPhysicalMaterial fields frostings.js uses. Starting point ≈ a wet mirror.
   // Wet mirror glaze — glossy again. The bold marbling reads THROUGH it now, and the uniform-sphere env
@@ -412,6 +566,8 @@ export default function GlazeStudio() {
   // long drip drops the board to stay under it, and too much reads as a floating cake. This is an authored
   // finish property, NOT a customer-facing knob in core.
   const [drip, setDrip]             = useState(0.18);
+  // Body shape — a VERIFY toggle: does the same glaze field generalise off the cylinder? (Round vs Heart.)
+  const [bodyShape, setBodyShape]   = useState('round');
 
   // MARBLE — big organic rivers with defined edges. Contrast up so colours read as distinct (the
   // weak-marble fix); streak adds thin poured veins.
@@ -484,6 +640,15 @@ export default function GlazeStudio() {
           <Slider label="Reflection (env)"  value={envIntensity} min={0}    max={3}   step={0.05}  onChange={setEnvI}      fmt={v => v.toFixed(2)} />
 
           <label style={S.label}>Shape</label>
+          <div style={S.swatchRow}>
+            {['round', 'heart'].map(s => (
+              <button key={s} onClick={() => setBodyShape(s)}
+                style={{ ...S.pill, ...(bodyShape === s ? { background: '#3D5A44', color: '#fff', border: '1.5px solid #3D5A44' } : {}), textTransform: 'capitalize' }}>
+                {s}
+              </button>
+            ))}
+            <span style={{ fontSize: 11, color: '#9BB5A2' }}>verify the glaze on a non-round body</span>
+          </div>
           <Slider label="Rim round"        value={rim}      min={0}   max={0.35} step={0.01} onChange={setRim}      fmt={v => v.toFixed(2)} />
           <Slider label="Drip length"      value={drip}     min={0}   max={0.3}  step={0.01} onChange={setDrip}     fmt={v => v.toFixed(2)} />
 
@@ -530,7 +695,7 @@ export default function GlazeStudio() {
                 <Lightformer form="rect" intensity={2.2} position={[5, 3.8, -1.5]}   scale={[2.2, 10, 1]} color="#ffffff" />
                 <Lightformer form="rect" intensity={2.2} position={[-4.6, 3.8, -2.5]} scale={[2.2, 10, 1]} color="#ffffff" />
               </Environment>
-              <GlazedCake colors={colors} marbleParams={marbleParams} material={material} rim={rim} drip={drip} />
+              <GlazedCake colors={colors} marbleParams={marbleParams} material={material} rim={rim} drip={drip} bodyShape={bodyShape} />
               <OrbitControls target={[0, 1.1, 0]} makeDefault enablePan minPolarAngle={0.2} maxPolarAngle={Math.PI / 2.05} />
             </Canvas>
           </div>
