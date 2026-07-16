@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, Lightformer } from '@react-three/drei';
 import * as THREE from 'three';
@@ -202,27 +202,76 @@ function bakeFieldTop(sample, size, innerR, H) {
   return f;
 }
 
+// Drip tendrils — the glaze that has run down the wall and hangs off the bottom edge as an irregular,
+// rounded pendant fringe (the single biggest "poured glaze" cue in the reference photo). A per-angle depth
+// = a gently wavy baseline (glaze sheets down all the way round) + a few Gaussian tendrils (where it ran
+// heavier and hangs lower) is revolved into a thin skirt below the wall bottom. The Gaussian falloff gives
+// each tendril a naturally ROUNDED tip. Returns the skirt geometry (top edge at local y=0 = the wall
+// bottom, hanging to y=−depth) plus the peak depth so the caller can seat the board below the longest drip.
+function makeDripGeometry(R, drip, seed) {
+  const SEG = 320;
+  const rnd = mulberry32(((seed | 0) || 1) * 131 + 7);
+  const phase = rnd() * Math.PI * 2, phase2 = rnd() * Math.PI * 2;
+  const base = drip * 0.62;                                  // baseline sheet depth (never bare)
+  const peaks = [];
+  const nT = 9 + Math.round(rnd() * 8);                      // a handful of longer tendrils
+  for (let i = 0; i < nT; i++) peaks.push({ a: rnd() * Math.PI * 2, w: 0.025 + rnd() * 0.055, h: drip * (0.45 + rnd() * 0.7) });
+  const depth = (th) => {
+    let d = base * (0.8 + 0.2 * Math.sin(th * 9 + phase) + 0.1 * Math.sin(th * 21 + phase2));
+    for (const p of peaks) {
+      let da = ((th - p.a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;  // shortest angular gap
+      d += p.h * Math.exp(-(da * da) / (2 * p.w * p.w));
+    }
+    return d;
+  };
+  const pos = [], idx = [];
+  let maxD = 0;
+  for (let i = 0; i <= SEG; i++) {
+    const th = (i / SEG) * Math.PI * 2;
+    const x = R * Math.cos(th), z = R * Math.sin(th), d = depth(th);
+    if (d > maxD) maxD = d;
+    pos.push(x, 0, z, x, -d, z);                             // top vertex (wall bottom), bottom vertex (drip tip)
+  }
+  for (let i = 0; i < SEG; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return { geo: g, maxDepth: maxD };
+}
+
+// Debounce a fast-changing value: the expensive marble bake should fire only after a slider settles, not
+// on every intermediate tick of a drag (that is what froze the studio while scrubbing Flow).
+function useDebounced(value, ms) {
+  const [v, setV] = useState(value);
+  useEffect(() => { const id = setTimeout(() => setV(value), ms); return () => clearTimeout(id); }, [value, ms]);
+  return v;
+}
+
 // The glazed cake: a LATHE of a profile whose top edge is ROUNDED by `rim` (0 = sharp), wearing the
 // glaze material as ONE seamless surface (wall → rounded rim → top). Single colour → solid tint;
 // multi colour → the marble map. Material is kept live-synced without a rebuild (like the drip studio).
-function GlazedCake({ colors, marbleParams, material, rim }) {
+function GlazedCake({ colors, marbleParams, material, rim, drip }) {
   const H = BOTTOM_H;
   const r = Math.max(0, Math.min(rim, R - 0.05, H - 0.05));
   const innerR = R - r;
-  const SIZE = 512;      // output texture size
-  const SS = 2;          // supersample factor (anti-aliasing for the marble's hard ribbon edges)
-  const FR = SIZE * SS;  // field bake resolution
+  const SIZE = 640;      // output texture size
+  const FR = SIZE;       // field bake resolution — no supersample: the SMOOTH field barely aliases (unlike
+                         // the old hard bands), so we skip the 4× cost of SS=2 and lean on anisotropy.
   const isMarble = colors.length > 1;
 
-  // EXPENSIVE — the marbling field (band indices). Recompute ONLY when the pattern params change
-  // (flow / swirl / streak / seed), never on colours. This is what made changing a colour slow.
+  // EXPENSIVE — the 3D marble field. Recompute ONLY when the pattern params change (flow / warp / contrast
+  // / streak / seed / rim), never on colours. Debounced so scrubbing a slider bakes once it SETTLES, not on
+  // every intermediate tick — that repeated synchronous bake is what froze the studio.
+  const fieldSig = useDebounced(`${marbleParams.flow}|${marbleParams.warp}|${marbleParams.contrast}|${marbleParams.streak}|${marbleParams.seed}|${r}`, 170);
   const fields = useMemo(() => {
     if (!isMarble) return null;
     const s = makeMarbleField(marbleParams);
     // The field is sampled at each surface point's TRUE 3D position; the bakers just feed real geometry
     // (wall at radius R, rim at its tapering radius, top on its plane) so the 3D field stays continuous.
     return { wall: bakeFieldWall(s, FR, R, H, r), top: bakeFieldTop(s, FR, innerR, H) };
-  }, [isMarble, marbleParams.flow, marbleParams.warp, marbleParams.contrast, marbleParams.streak, marbleParams.seed, r, innerR]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMarble, fieldSig]);
 
   // CHEAP — recolour + downsample the cached field when colours change (no marbling recompute).
   const wallTex = useMemo(() => (fields ? paintField(fields.wall, FR, SIZE, colors, THREE.RepeatWrapping) : null), [fields, colors.join(',')]);
@@ -242,6 +291,37 @@ function GlazedCake({ colors, marbleParams, material, rim }) {
     m.needsUpdate = true;
   }
 
+  // Drip fringe geometry (positions) — rebuilt only when the drip length or seed changes.
+  const dripFringe = useMemo(() => (drip > 0.001 ? makeDripGeometry(R, drip, marbleParams.seed) : null), [drip, marbleParams.seed]);
+  // Per-vertex marble colour for the fringe: sample the SAME field at each drip's angle (cake-local y=0 =
+  // the wall bottom), so every tendril carries the colour of the streak directly above it — one flow.
+  useMemo(() => {
+    if (!dripFringe) return;
+    const geo = dripFringe.geo, p = geo.getAttribute('position');
+    const rgb = colors.map(hexToRgb);
+    const s = isMarble ? makeMarbleField(marbleParams) : null;
+    const col = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      const c = s ? paletteLerp(rgb, s(p.getX(i), 0, p.getZ(i))) : rgb[0];
+      col[i * 3] = c[0] / 255; col[i * 3 + 1] = c[1] / 255; col[i * 3 + 2] = c[2] / 255;
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  }, [dripFringe, isMarble, colors.join(','), marbleParams.flow, marbleParams.warp, marbleParams.contrast, marbleParams.streak, marbleParams.seed]);
+
+  // Fringe wears the same wet glaze material; vertexColors carry the marble down each tendril.
+  const dripMat = useMemo(() => new THREE.MeshPhysicalMaterial({ metalness: 0, vertexColors: true }), []);
+  dripMat.vertexColors = true;
+  dripMat.color.set('#ffffff');
+  dripMat.roughness = material.roughness;
+  dripMat.clearcoat = material.clearcoat;
+  dripMat.clearcoatRoughness = material.clearcoatRoughness;
+  dripMat.envMapIntensity = material.envMapIntensity;
+  dripMat.side = THREE.DoubleSide;   // thin skirt — show both faces so a tendril never vanishes edge-on
+  dripMat.needsUpdate = true;
+
+  // Seat the board just below the LONGEST tendril so the drips read as hanging, not buried in the board.
+  const boardTopY = BOARD_H - (dripFringe ? dripFringe.maxDepth + 0.03 : 0);
+
   // Wall + rounded rim, revolved, ending at the inner rim radius (OPEN top — the flat disc caps it, so
   // there is no converging lathe centre to pinwheel).
   const wallGeo = useMemo(() => {
@@ -257,11 +337,12 @@ function GlazedCake({ colors, marbleParams, material, rim }) {
 
   return (
     <group>
-      <mesh position={[0, BOARD_H / 2, 0]}>
+      <mesh position={[0, boardTopY - BOARD_H / 2, 0]}>
         <cylinderGeometry args={[BOARD_R, BOARD_R, BOARD_H, 72]} />
         <meshStandardMaterial color="#d9b44a" metalness={0.5} roughness={0.4} />
       </mesh>
       <mesh position={[0, BOARD_H, 0]} geometry={wallGeo} material={wallMat} />
+      {dripFringe && <mesh position={[0, BOARD_H, 0]} geometry={dripFringe.geo} material={dripMat} />}
       <mesh position={[0, BOARD_H + H, 0]} rotation={[-Math.PI / 2, 0, 0]} material={topMat}>
         <circleGeometry args={[innerR, 128]} />
       </mesh>
@@ -320,6 +401,10 @@ export default function GlazeStudio() {
   // A poured mirror glaze has only a SUBTLE rounded edge. A big rim foreshortens the pattern's outer
   // annulus into a busy strip that reads as a "separate" band — keep the default small so cap → wall flows.
   const [rim, setRim]               = useState(0.05);
+  // Drip tendrils hanging off the bottom edge — 0 = clean, higher = longer drips. Kept to a SAFE range: a
+  // long drip drops the board to stay under it, and too much reads as a floating cake. This is an authored
+  // finish property, NOT a customer-facing knob in core.
+  const [drip, setDrip]             = useState(0.18);
 
   // MARBLE — big organic rivers with defined edges. Contrast up so colours read as distinct (the
   // weak-marble fix); streak adds thin poured veins.
@@ -352,7 +437,7 @@ export default function GlazeStudio() {
         flow: +flow.toFixed(2), warp: +warp.toFixed(2), contrast: +contrast.toFixed(2), streak: +streak.toFixed(2),
       },
       // geometry hint for the glaze finish — how much to round the top rim
-      shape: { rim: +rim.toFixed(2) },
+      shape: { rim: +rim.toFixed(2), drip: +drip.toFixed(2) },
     };
     navigator.clipboard?.writeText(JSON.stringify(json, null, 2));
   }
@@ -393,6 +478,7 @@ export default function GlazeStudio() {
 
           <label style={S.label}>Shape</label>
           <Slider label="Rim round"        value={rim}      min={0}   max={0.35} step={0.01} onChange={setRim}      fmt={v => v.toFixed(2)} />
+          <Slider label="Drip length"      value={drip}     min={0}   max={0.3}  step={0.01} onChange={setDrip}     fmt={v => v.toFixed(2)} />
 
           <label style={S.label}>Marble — the poured flow</label>
           <Slider label="Flow (band size)" value={flow}     min={0.5} max={6}   step={0.1}  onChange={setFlow}     fmt={v => v.toFixed(1)} />
@@ -433,7 +519,7 @@ export default function GlazeStudio() {
                     It faces the origin (default target), so orbiting sweeps the streak around the wall. */}
                 <Lightformer form="rect" intensity={2.4} position={[2.6, 4.2, 6]} scale={[2.6, 9, 1]} color="#ffffff" />
               </Environment>
-              <GlazedCake colors={colors} marbleParams={marbleParams} material={material} rim={rim} />
+              <GlazedCake colors={colors} marbleParams={marbleParams} material={material} rim={rim} drip={drip} />
               <OrbitControls target={[0, 1.1, 0]} makeDefault enablePan minPolarAngle={0.2} maxPolarAngle={Math.PI / 2.05} />
             </Canvas>
           </div>
