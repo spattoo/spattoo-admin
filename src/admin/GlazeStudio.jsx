@@ -166,13 +166,13 @@ function makeGradientEnvTexture() {
   // highlight streak where it catches that band. The sky stays moderately light so the flat top still reads
   // glossy (it mirrors straight up), without blowing out to white.
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0.00, '#c7d2db');   // sky — moderate (top sheen, not blown white)
-  g.addColorStop(0.40, '#a9b5bf');   // upper wall mirrors this — mid, lets pigment show
-  g.addColorStop(0.47, '#eef4f9');   // ramp into the highlight
-  g.addColorStop(0.50, '#ffffff');   // thin bright horizon = the wet streak the wall catches
-  g.addColorStop(0.53, '#eef4f9');
-  g.addColorStop(0.60, '#9caab4');   // below the highlight — mid-dark, pigment shows
-  g.addColorStop(1.00, '#6c7883');   // floor — dark, grounds the base of the pour
+  g.addColorStop(0.00, '#d4dee6');   // sky — moderate (top sheen, not blown white)
+  g.addColorStop(0.38, '#bcc7d1');   // upper wall mirrors this — lifted so the wall reads glossy, not matte
+  g.addColorStop(0.46, '#f1f6fb');   // ramp into the highlight
+  g.addColorStop(0.50, '#ffffff');   // bright horizon = the wet band the wall catches
+  g.addColorStop(0.54, '#f1f6fb');
+  g.addColorStop(0.62, '#a7b3bd');   // below the highlight — mid, pigment still shows
+  g.addColorStop(1.00, '#79848e');   // floor — grounds the base of the pour
   ctx.fillStyle = g; ctx.fillRect(0, 0, 8, H);
   return texFrom(cvs, THREE.ClampToEdgeWrapping);
 }
@@ -520,11 +520,15 @@ export default function GlazeStudio() {
                   <meshBasicMaterial map={envTex} side={THREE.BackSide} toneMapped={false} />
                 </mesh>
                 <Lightformer form="ring" intensity={2.2} position={[0, 10, 1]} rotation={[-Math.PI / 2, 0, 0]} scale={[16, 16, 1]} />
-                {/* ONE broad soft vertical softbox — the "window" a wet wall mirrors as a single bright
-                    streak running down it (the strongest wet-chocolate cue). Kept BROAD + SINGLE so it
-                    reads as one soft highlight, not the many-gap brushed-metal striping the ring avoids.
-                    It faces the origin (default target), so orbiting sweeps the streak around the wall. */}
-                <Lightformer form="rect" intensity={2.4} position={[2.6, 4.2, 6]} scale={[2.6, 9, 1]} color="#ffffff" />
+                {/* A RING of a few broad soft vertical softboxes — the wet vertical highlights a glossy
+                    glaze wall mirrors. The top gets its gloss from the overhead ring; the vertical wall
+                    can't see that, so it needs its own bright reflectors at several azimuths to read
+                    EQUALLY glossy. Kept broad + few (not many-gap) so they read as distinct wet streaks,
+                    not brushed-metal striping. Each faces the origin, so orbiting sweeps them around. */}
+                <Lightformer form="rect" intensity={2.6} position={[2.8, 4.2, 6]}   scale={[2.6, 10, 1]} color="#ffffff" />
+                <Lightformer form="rect" intensity={2.4} position={[-3.6, 4.2, 4.2]} scale={[2.3, 10, 1]} color="#ffffff" />
+                <Lightformer form="rect" intensity={2.2} position={[5, 3.8, -1.5]}   scale={[2.2, 10, 1]} color="#ffffff" />
+                <Lightformer form="rect" intensity={2.2} position={[-4.6, 3.8, -2.5]} scale={[2.2, 10, 1]} color="#ffffff" />
               </Environment>
               <GlazedCake colors={colors} marbleParams={marbleParams} material={material} rim={rim} drip={drip} />
               <OrbitControls target={[0, 1.1, 0]} makeDefault enablePan minPolarAngle={0.2} maxPolarAngle={Math.PI / 2.05} />
