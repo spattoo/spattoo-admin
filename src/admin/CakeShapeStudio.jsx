@@ -9,6 +9,7 @@ import {
   CakePreview, applyCakeShapeConfig, cakeShapeDef, cakeShapeList,
   TIER_RADII, BOTTOM_H, TIER_HEIGHT_STEP, SHEET_SIZES, SHEET_DEFAULT_KEY,
   shapeView, captureThumbnailBlob, CAMERA_FOV, CAMERA_POSITION,
+  NUMBER_COUNTS, NUMBER_SIZE_DEFAULTS,
 } from '@spattoo/designer';
 
 // ── Cake Shape Studio ──────────────────────────────────────────────────────────
@@ -35,8 +36,32 @@ const FAMILIES = {
   butterfly:    { label: 'Butterfly', params: [['Wing spread', 'wing', 0.4, 2, 0.05]] },
   polygon:      { label: 'Polygon',   params: [['Sides', 'sides', 3, 16, 1], ['Rotation', 'rotation', -180, 180, 1]] },
   oval:         { label: 'Oval',      params: [] },
-  number:       { label: 'Number',    params: [['Thickness', 'weight', 0, 0.04, 0.005], ['Corner rounding', 'cornerR', 0, 1, 0.05]] },   // + the typed digits (special-cased below)
+  // A number's sizing is NOT the generic Width/Height — it is authored PER DIGIT COUNT (see NumberSizing
+  // below). Only the two SHARED, count-independent knobs live here: how bold the strokes are and how round
+  // the corners get. Everything else about a number tier is special-cased.
+  number:       { label: 'Number',    params: [['Stroke weight', 'weight', 0, 0.04, 0.005], ['Corner rounding', 'cornerR', 0, 1, 0.05]] },
 };
+
+// A number cake sizes itself by HOW MANY DIGITS the customer types: a "1" and a "2027" are different cakes
+// that must each look right, so the admin authors a { height, thickness } PER COUNT (1–4). `height` is how
+// tall the digit stands (its real size — every number of that count comes out this tall); `thickness` is how
+// deep the slab is. `samples` is just a preview aid — a number to draw while tuning each count. All seeded
+// from core's NUMBER_SIZE_DEFAULTS so the studio and the designer size against ONE source.
+const NUMBER_SAMPLES = { 1: '1', 2: '21', 3: '100', 4: '2027' };
+function withNumberDefaults(config = {}, legacyThickness) {
+  const byCount = {}, samples = {};
+  for (const c of NUMBER_COUNTS) {
+    const d = NUMBER_SIZE_DEFAULTS[c];
+    byCount[c] = {
+      height:    +config.byCount?.[c]?.height    || d.height,
+      // Migrating a legacy number tier: its old "Height" slider WAS the extrusion depth — carry it in as
+      // the thickness so nothing changes visually, and let the (new) stand-height default per count.
+      thickness: +config.byCount?.[c]?.thickness || +legacyThickness || d.thickness,
+    };
+    samples[c] = config.samples?.[c] || NUMBER_SAMPLES[c];
+  }
+  return { ...config, byCount, samples };
+}
 
 // Where a tier's proportions START when you pick a family. Not an opinion about the shape — a legible
 // starting point to drag away from.
@@ -47,7 +72,7 @@ const NEW_CONFIG = {
   oval:      {},
   rounded_rect: { square: false },
   circle:    {},
-  number:    { digits: '1', weight: 0, cornerR: 0 },
+  number:    withNumberDefaults({ digits: '1', weight: 0, cornerR: 0 }),
 };
 
 // A tier stores its own shape KEY too (for cakeShapeOf + the legacy 'rect' checks); it follows the family.
@@ -82,9 +107,14 @@ function tiersFromDesign(design) {
   return arr.map((t, i) => {
     const family = t.shapeFamily ?? 'circle';
     const width = t.width ?? (t.radius != null ? t.radius * 2 : baseSize(family, i).width);
+    // A number tier is MIGRATED on load: seed all four count-configs so an older starter (no byCount) opens
+    // with a full editable set — its legacy tier height carries in as the thickness (see withNumberDefaults).
+    const config = family === 'number'
+      ? withNumberDefaults(t.shapeConfig ?? {}, t.height)
+      : { ...(t.shapeConfig ?? {}) };
     return {
       family,
-      config: { ...(t.shapeConfig ?? {}) },
+      config,
       width,
       depth: t.depth ?? width,
       height: t.height ?? (BOTTOM_H - i * TIER_HEIGHT_STEP),
@@ -104,6 +134,7 @@ export default function CakeShapeStudio() {
   const [selKey, setSelKey] = useState('round');   // selected starter key, or DRAFT_KEY
   const [name, setName]     = useState('');        // the edited name
   const [tiers, setTiers]   = useState(() => [newTier('circle', 0)]);
+  const [numCount, setNumCount] = useState(1);     // which digit-count a number tier is editing/previewing (1–4)
   const [dirty, setDirty]   = useState(false);     // unsaved edits to the current selection
   const [spin, setSpin]     = useState(false);     // turntable off by default: judge from a held angle
   const [lens, setLens]     = useState('customer');// 'customer' | 'silhouette' — see the preview comment
@@ -164,6 +195,10 @@ export default function CakeShapeStudio() {
   const editName = v => { setName(v); setDirty(true); };
   const setTierFamily = (i, family) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, family, config: { ...(NEW_CONFIG[family] ?? {}) } } : t)); setDirty(true); };
   const setTierConfig = (i, patch) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, config: { ...t.config, ...patch } } : t)); setDirty(true); };
+  // A number tier's per-count sizing + preview samples — nested under config.byCount / config.samples so the
+  // whole model saves in the one self-contained design (no parallel store).
+  const setCountSize = (i, count, patch) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, config: { ...t.config, byCount: { ...t.config?.byCount, [count]: { ...(t.config?.byCount?.[count] ?? NUMBER_SIZE_DEFAULTS[count]), ...patch } } } } : t)); setDirty(true); };
+  const setSample    = (i, count, digits) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, config: { ...t.config, samples: { ...t.config?.samples, [count]: digits } } } : t)); setDirty(true); };
   const setTierSize   = (i, patch) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, ...patch } : t)); setDirty(true); };
   const addTier = () => { setTiers(ts => ts.length >= MAX_TIERS ? ts : [...ts, newTier(ts[ts.length - 1]?.family ?? 'circle', ts.length)]); setDirty(true); };
   const removeTier = i => { setTiers(ts => ts.length <= 1 ? ts : ts.filter((_, j) => j !== i)); setDirty(true); };
@@ -173,10 +208,16 @@ export default function CakeShapeStudio() {
   const design = useMemo(() => ({
     tiers: tiers.map(t => {
       const square = t.family === 'rounded_rect' && t.config?.square;
+      // A number tier PREVIEWS the count currently being edited: feed the active count's sample as the
+      // digits, so tuning the "3 digit" sliders draws a 3-digit number. Its width/depth/height are ignored
+      // downstream (toCanvasConfig derives the true box from byCount), so no need to compute them here.
+      const config = t.family === 'number'
+        ? { ...t.config, digits: t.config?.samples?.[numCount] || NUMBER_SAMPLES[numCount] }
+        : (t.config ?? {});
       return {
         shape: keyForFamily(t.family),
         shapeFamily: t.family,
-        shapeConfig: t.config ?? {},
+        shapeConfig: config,
         width: t.width,
         depth: square ? t.width : t.depth,
         radius: t.width / 2,      // the round path is sized by radius; keep the two in step
@@ -185,7 +226,7 @@ export default function CakeShapeStudio() {
       };
     }),
     texts: [], ages: [], stickers: [], writing: null, piping: [],
-  }), [tiers]);
+  }), [tiers, numCount]);
 
   // The picture the customer's grid shows — captured off the HIDDEN stage below (a display:none canvas has
   // no WebGL frame to read back), framed by core's ONE shape camera so every tile is shot the same way. A
@@ -318,30 +359,29 @@ export default function CakeShapeStudio() {
                   </label>
                 )}
 
-                {t.family === 'number' && (
-                  <>
-                    <div style={s.mini}>Number (the customer edits this on their cake)</div>
-                    <input style={s.select} value={t.config?.digits ?? ''} placeholder="e.g. 4"
-                      inputMode="numeric" maxLength={4}
-                      onChange={e => setTierConfig(i, { digits: e.target.value.replace(/[^0-9]/g, '').slice(0, 4) })} />
-                  </>
-                )}
-
                 {fam.params.map(([label, key, min, max, step]) => (
                   <Slider key={key} label={label} min={min} max={max} step={step}
                     value={t.config?.[key] ?? NEW_CONFIG[t.family]?.[key] ?? min}
                     onChange={v => setTierConfig(i, { [key]: v })} />
                 ))}
 
-                <Slider label="Width" min={0.4} max={3.6} step={0.02} value={t.width} base={b.width}
-                  onChange={v => setTierSize(i, { width: v })} />
-                {/* A number's depth is set by the digit's own aspect (it must not distort), like a square rect. */}
-                {!square && t.family !== 'number' && (
-                  <Slider label="Depth" min={0.4} max={3.6} step={0.02} value={t.depth} base={b.depth}
-                    onChange={v => setTierSize(i, { depth: v })} />
+                {/* A number sizes PER DIGIT COUNT — not by Width/Height. The generic size sliders are replaced
+                    by the per-count editor; the customer types the actual number, core picks the matching count. */}
+                {t.family === 'number' ? (
+                  <NumberSizing tier={t} index={i} activeCount={numCount}
+                    onActiveCount={setNumCount} onSize={setCountSize} onSample={setSample} />
+                ) : (
+                  <>
+                    <Slider label="Width" min={0.4} max={3.6} step={0.02} value={t.width} base={b.width}
+                      onChange={v => setTierSize(i, { width: v })} />
+                    {!square && (
+                      <Slider label="Depth" min={0.4} max={3.6} step={0.02} value={t.depth} base={b.depth}
+                        onChange={v => setTierSize(i, { depth: v })} />
+                    )}
+                    <Slider label="Height" min={0.3} max={2.2} step={0.02} value={t.height} base={b.height}
+                      onChange={v => setTierSize(i, { height: v })} />
+                  </>
                 )}
-                <Slider label="Height" min={0.3} max={2.2} step={0.02} value={t.height} base={b.height}
-                  onChange={v => setTierSize(i, { height: v })} />
               </div>
             );
           })}
@@ -416,6 +456,45 @@ export default function CakeShapeStudio() {
   );
 }
 
+// The number cake's sizing editor. A number is really FOUR cakes — a 1-, 2-, 3- and 4-digit one — each with
+// its own stand-height and slab-thickness, because a "1" and a "2027" can't share a size and both look right.
+// Pick a digit count, type a sample to preview it, and size that count; the customer later types any number
+// and core renders it at the matching count's size (studio and cake read off ONE model). WIDTH is deliberately
+// absent — a "2027" is just a "1" made wider; the height is the size that stays honest across a count.
+function NumberSizing({ tier, index, activeCount, onActiveCount, onSize, onSample }) {
+  const cfg = tier.config ?? {};
+  const c = activeCount;
+  const bc = cfg.byCount?.[c] ?? NUMBER_SIZE_DEFAULTS[c];
+  const sample = cfg.samples?.[c] ?? '';
+  return (
+    <div style={s.numBox}>
+      <div style={s.mini}>Size per digit count</div>
+      <div style={s.countTabs}>
+        {NUMBER_COUNTS.map(n => (
+          <button key={n} type="button" style={{ ...s.countTab, ...(n === c ? s.countTabOn : null) }}
+            onClick={() => onActiveCount(n)}>{n} digit</button>
+        ))}
+      </div>
+
+      <div style={s.mini}>Sample number to preview{' '}
+        <span style={{ fontWeight: 400, color: '#8fae98' }}>· {c} digit{c > 1 ? 's' : ''}, tuning only</span>
+      </div>
+      <input style={s.select} value={sample} inputMode="numeric" maxLength={c} placeholder={NUMBER_SAMPLES[c]}
+        onChange={e => onSample(index, c, e.target.value.replace(/[^0-9]/g, '').slice(0, c))} />
+
+      <Slider label="Height — how tall the digit stands" min={0.8} max={3.4} step={0.05} value={bc.height}
+        onChange={v => onSize(index, c, { height: v })} />
+      <Slider label="Thickness — how deep the slab is" min={0.3} max={1.6} step={0.02} value={bc.thickness}
+        onChange={v => onSize(index, c, { thickness: v })} />
+
+      <div style={s.hint}>
+        <b>Height</b> is the real size — every number of this count comes out this tall; a longer number just
+        grows <i>wider</i>. Set each count so a <b>1</b>, a <b>21</b>, a <b>100</b> and a <b>2027</b> all look right.
+      </div>
+    </div>
+  );
+}
+
 // `base` = core's default for this control. Shown as a MULTIPLE, the comparison an operator can act on
 // ("a tenth bigger than the default cake"), where a raw world unit is not.
 function Slider({ label, min, max, step, value, onChange, base }) {
@@ -461,6 +540,10 @@ const s = {
   select:  { width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', fontSize: 13, fontFamily: 'inherit', background: '#fff' },
   cardHead:{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   tier:    { marginTop: 10, padding: '8px 10px', borderRadius: 10, border: '1.5px solid #E6D9BE', background: '#FBF7EF' },
+  numBox:  { marginTop: 10, padding: '8px 10px', borderRadius: 9, border: '1px dashed #D8C89A', background: '#FFFDF7' },
+  countTabs:{ display: 'flex', gap: 6, margin: '2px 0 6px' },
+  countTab: { flex: 1, padding: '6px 4px', borderRadius: 7, border: '1.5px solid #E0D3B2', background: '#fff', color: '#7A5E1F', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
+  countTabOn:{ border: '1.5px solid #3D5A44', background: '#EEF5F0', color: '#3D5A44' },
   check:   { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12, fontWeight: 700, color: '#2C4433' },
   canvas:  { width: '100%', height: 'min(78vh, 900px)', minHeight: 520, borderRadius: 12, border: '1.5px solid #C5D4C8', background: '#F7FAF8', overflow: 'hidden' },
   btn:     { marginTop: 12, padding: '11px 16px', borderRadius: 10, border: 'none', background: '#3D5A44', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', width: '100%' },
