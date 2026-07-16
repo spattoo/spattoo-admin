@@ -160,12 +160,19 @@ function makeGradientEnvTexture() {
   const ctx = cvs.getContext('2d');
   // v: 0 = straight up (sky) → 1 = straight down (floor). A bright band just above the horizon is what
   // a wet wall mirrors back as its sheen; the sky stays bright so the rim crest glows, the floor dims.
+  // A vertical glossy wall mirrors the mid/horizon elevations. A UNIFORMLY bright surround therefore turns
+  // the wall into white chrome that hides the marble at grazing angles. So keep the surround MID-DARK and
+  // put the brightness into a NARROW horizon band: the wall then shows its pigment, with just a thin wet
+  // highlight streak where it catches that band. The sky stays moderately light so the flat top still reads
+  // glossy (it mirrors straight up), without blowing out to white.
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0.00, '#eef3f7');   // sky — lifts the top + rim
-  g.addColorStop(0.34, '#f7fafc');   // upper wall — bright, the "just poured" crest
-  g.addColorStop(0.50, '#ffffff');   // horizon band — the wet highlight the wall mirrors
-  g.addColorStop(0.66, '#dfe7ee');   // lower wall — sheen fading as the glaze runs down
-  g.addColorStop(1.00, '#aeb9c2');   // floor — grounds the base of the pour
+  g.addColorStop(0.00, '#c7d2db');   // sky — moderate (top sheen, not blown white)
+  g.addColorStop(0.40, '#a9b5bf');   // upper wall mirrors this — mid, lets pigment show
+  g.addColorStop(0.47, '#eef4f9');   // ramp into the highlight
+  g.addColorStop(0.50, '#ffffff');   // thin bright horizon = the wet streak the wall catches
+  g.addColorStop(0.53, '#eef4f9');
+  g.addColorStop(0.60, '#9caab4');   // below the highlight — mid-dark, pigment shows
+  g.addColorStop(1.00, '#6c7883');   // floor — dark, grounds the base of the pour
   ctx.fillStyle = g; ctx.fillRect(0, 0, 8, H);
   return texFrom(cvs, THREE.ClampToEdgeWrapping);
 }
@@ -506,7 +513,7 @@ export default function GlazeStudio() {
                   the flat top mirrors the same bright sky. One world lights both, so the wall is no longer
                   a dead matte body under a shiny lid; top + side read as one continuous wet coat. A soft
                   overhead ring adds a crisp mirror highlight on the top. */}
-              <ambientLight intensity={0.25} />
+              <ambientLight intensity={0.42} />{/* lifts the marble pigment now the surround is darker */}
               <Environment resolution={256}>
                 <mesh scale={60}>
                   <sphereGeometry args={[1, 32, 32]} />
