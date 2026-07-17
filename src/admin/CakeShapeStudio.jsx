@@ -57,6 +57,9 @@ function withNumberDefaults(config = {}, legacyThickness) {
       // Migrating a legacy number tier: its old "Height" slider WAS the extrusion depth — carry it in as
       // the thickness so nothing changes visually, and let the (new) stand-height default per count.
       thickness: +config.byCount?.[c]?.thickness || +legacyThickness || d.thickness,
+      // Piping-shell size for THIS count (core: shellRadius = digit half-height × pipingScale). Per count
+      // because a wide 4-digit number wants smaller rosettes than a "1". Default 1.
+      pipingScale: +config.byCount?.[c]?.pipingScale || 1,
     };
     samples[c] = config.samples?.[c] || NUMBER_SAMPLES[c];
   }
@@ -488,6 +491,8 @@ function NumberSizing({ tier, index, activeCount, onActiveCount, onSize, onSampl
         onChange={v => onSize(index, c, { height: v })} />
       <Slider label="Thickness — how deep the slab is" min={0.3} max={1.6} step={0.02} value={bc.thickness}
         onChange={v => onSize(index, c, { thickness: v })} />
+      <Slider label="Piping size — rosettes on this count" min={0.3} max={1.5} step={0.05} value={bc.pipingScale ?? 1}
+        onChange={v => onSize(index, c, { pipingScale: v })} />
 
       <div style={s.hint}>
         <b>Height</b> is the real size — every number of this count comes out this tall; a longer number just
