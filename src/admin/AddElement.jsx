@@ -265,6 +265,9 @@ export default function AddElement() {
   // its presence is the gate that a GLB has been reviewed.
   const [glbStudioFile, setGlbStudioFile] = useState(null);
   const [optimizedStats, setOptimizedStats] = useState(null);
+  // Escape hatch: the GLB was ALREADY optimised outside the app (e.g. a Draco-compressed asset) — attesting
+  // this satisfies the review gate without re-opening GLB Studio. No cost stats are recorded in that case.
+  const [skipGlbReview, setSkipGlbReview] = useState(false);
   const [thumbnailBlob, setThumbnailBlob] = useState(null);
   const [placementConfig, setPlacementConfig] = useState({});
   const [placementScale, setPlacementScale]   = useState('');
@@ -445,9 +448,10 @@ export default function AddElement() {
       return;
     }
     // Every GLB passes through GLB Studio first so its cost is known (and optimizable) before it
-    // enters the library. Over-cap is allowed — it's flagged, not blocked — but the review is required.
-    if (assetType === '3D' && !isPatternType && !optimizedStats) {
-      setMsg({ ok: false, text: 'Review the GLB in GLB Studio first — open it, check the size, optimize if needed.' });
+    // enters the library. Over-cap is allowed — it's flagged, not blocked — but the review is required,
+    // UNLESS the author attests it's already optimised (skipGlbReview) — e.g. a pre-Draco'd asset.
+    if (assetType === '3D' && !isPatternType && !optimizedStats && !skipGlbReview) {
+      setMsg({ ok: false, text: 'Review the GLB in GLB Studio first — or tick "I’ve already optimised this" to skip.' });
       return;
     }
     if (applicableZones.length === 0) {
@@ -745,13 +749,20 @@ export default function AddElement() {
           {/* 3D preview + auto-capture */}
           {assetType === '3D' && assetFile && (
             <div style={s.field}>
-              {/* Mandatory GLB Studio review — shows the real cost; over-cap is flagged, not blocked. */}
+              {/* Mandatory GLB Studio review — shows the real cost; over-cap is flagged, not blocked.
+                  Escape hatch: an already-optimised asset (e.g. Draco-compressed outside the app) can skip it. */}
               <div style={{ marginBottom: 14 }}>
                 <GlbReviewBanner
                   reviewed={optimizedStats ? { stats: optimizedStats } : null}
                   onReview={() => setGlbStudioFile(assetFile)}
                   promptText="See its real cost on phones and optimize if needed — required for 3D elements."
                 />
+                {!optimizedStats && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12, color: '#6B8C74', fontWeight: 600, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={skipGlbReview} onChange={e => setSkipGlbReview(e.target.checked)} />
+                    I’ve already optimised this GLB — skip the GLB Studio review
+                  </label>
+                )}
               </div>
               <label style={s.label}>3D Preview</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
