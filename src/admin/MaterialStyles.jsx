@@ -13,6 +13,25 @@ import { fetchAdminTextures, fetchAdminMaterials, updateMaterial } from '../lib/
 // these rows onto the in-code frostings seed (applyMaterialConfig), same seed-in-code + DB-overlay
 // pattern as cake_textures.
 
+// The decoration-finish (config.surface) editor schema — maps 1:1 to MeshPhysicalMaterial. Kept in sync
+// with SURFACE_KEYS in the api and DECOR_MATERIALS in core. sheenColor is edited separately (a colour).
+const SURFACE_FIELDS = [
+  { k: 'roughness', min: 0, max: 1, step: 0.01 },
+  { k: 'metalness', min: 0, max: 1, step: 0.01 },
+  { k: 'anisotropy', min: 0, max: 1, step: 0.01 },
+  { k: 'anisotropyRotation', min: 0, max: 3.15, step: 0.01 },
+  { k: 'sheen', min: 0, max: 1, step: 0.01 },
+  { k: 'sheenRoughness', min: 0, max: 1, step: 0.01 },
+  { k: 'clearcoat', min: 0, max: 1, step: 0.01 },
+  { k: 'clearcoatRoughness', min: 0, max: 1, step: 0.01 },
+  { k: 'envMapIntensity', min: 0, max: 2, step: 0.05 },
+];
+// Seeded when a material is first marked usable on elements — the satin values (a sensible starting finish).
+const DEFAULT_SURFACE = {
+  roughness: 0.28, metalness: 0, anisotropy: 1, anisotropyRotation: 1.57,
+  sheen: 0.35, sheenColor: '#ffffff', sheenRoughness: 0.28, clearcoat: 0.12, clearcoatRoughness: 0.4, envMapIntensity: 0.45,
+};
+
 export default function MaterialStyles() {
   const [materials, setMaterials] = useState(null);   // [{ id, key, label, styles:[...] }]
   const [dbTextures, setDbTextures] = useState([]);
@@ -28,6 +47,10 @@ export default function MaterialStyles() {
     setMaterials((mats ?? []).map(m => ({
       id: m.id, key: m.key, label: m.label,
       styles: Array.isArray(m.config?.styles) ? m.config.styles : [],
+      // where the material may be used (body = cake frosting, element = placed decoration); surface = the
+      // MeshPhysical finish a decoration wears (only meaningful for element materials).
+      applies_to: Array.isArray(m.config?.applies_to) ? m.config.applies_to : ['body'],
+      surface: (m.config?.surface && typeof m.config.surface === 'object') ? m.config.surface : null,
     })));
   }
   useEffect(() => { load(); }, []);
@@ -61,12 +84,25 @@ export default function MaterialStyles() {
   const remove = (key, sk) => patch(key, m => ({ ...m, styles: m.styles.filter(x => x !== sk) }));
   const add = (key, sk) => patch(key, m => sk && !m.styles.includes(sk) ? { ...m, styles: [...m.styles, sk] } : m);
 
+  // Toggle a usage context; enabling 'element' the first time seeds a default surface so there's something
+  // to tune (the seed already renders satin even with an empty surface, but a starting finish is friendlier).
+  const toggleContext = (key, ctx) => patch(key, m => {
+    const has = m.applies_to.includes(ctx);
+    const applies_to = has ? m.applies_to.filter(c => c !== ctx) : [...m.applies_to, ctx];
+    const surface = (!has && ctx === 'element' && !m.surface) ? { ...DEFAULT_SURFACE } : m.surface;
+    return { ...m, applies_to, surface };
+  });
+  const setSurface = (key, field, val) => patch(key, m => ({ ...m, surface: { ...(m.surface ?? DEFAULT_SURFACE), [field]: val } }));
+
   async function save() {
     setBusy(true); setMsg(null);
     try {
-      // PATCH each material's style list. Small closed set — a handful of rows.
+      // PATCH each material's full config. Small closed set — a handful of rows. Only element materials carry
+      // a surface; body-only materials omit it. The api normalizes/gates (styles, applies_to, surface).
       for (const m of materials) {
-        await updateMaterial(m.id, { config: { styles: m.styles } });
+        const config = { styles: m.styles, applies_to: m.applies_to };
+        if (m.applies_to.includes('element') && m.surface) config.surface = m.surface;
+        await updateMaterial(m.id, { config });
       }
       await load();
       setMsg({ ok: true, text: 'Saved to materials table.' });
@@ -80,42 +116,75 @@ export default function MaterialStyles() {
   return (
     <div style={s.wrap}>
       <div style={s.head}>
-        <div style={s.title}>Material → Styles</div>
-        <div style={s.sub}>Each material owns an ordered list of the styles it offers. <b>Smooth</b> is always available and first. Empty list = smooth only.</div>
+        <div style={s.title}>Materials</div>
+        <div style={s.sub}>Each material declares where it can be used — <b>Cake body</b> (its cream styles) and/or <b>Decoration</b> (its surface finish, e.g. satin). Fondant can be both. <b>Smooth</b> is always available and first for body styles.</div>
       </div>
 
       <div style={s.grid}>
-        {materials.map(({ key: mat, label, styles: list }) => {
+        {materials.map(({ key: mat, label, styles: list, applies_to, surface }) => {
           const available = [...catalog.keys()].filter(k => !list.includes(k));
+          const isBody = applies_to.includes('body');
+          const isElement = applies_to.includes('element');
           return (
             <div key={mat} style={s.card}>
               <div style={s.cardTitle}>{label} <span style={s.code}>{mat}</span></div>
 
-              <div style={s.lockRow}>
-                <span style={s.lockChip}>Smooth</span>
-                <span style={s.lockNote}>always available · first</span>
+              {/* Usage context — a decoration finish (satin) is NOT a cake-body material, and vice versa */}
+              <div style={s.ctxRow}>
+                {['body', 'element'].map(ctx => (
+                  <button key={ctx} onClick={() => toggleContext(mat, ctx)} style={s.ctxChip(applies_to.includes(ctx))}>
+                    {ctx === 'body' ? 'Cake body' : 'Decoration'}
+                  </button>
+                ))}
               </div>
 
-              {list.length === 0 && <div style={s.empty}>No extra styles — smooth only.</div>}
-
-              {list.map((sk, i) => (
-                <div key={sk} style={s.row}>
-                  <span style={s.order}>{i + 2}</span>
-                  <span style={s.rowLabel}>{labelFor(sk)} <span style={s.code}>{sk}</span></span>
-                  <div style={s.rowBtns}>
-                    <button style={s.iconBtn} disabled={i === 0} onClick={() => move(mat, i, -1)}>↑</button>
-                    <button style={s.iconBtn} disabled={i === list.length - 1} onClick={() => move(mat, i, 1)}>↓</button>
-                    <button style={s.removeBtn} onClick={() => remove(mat, sk)}>✕</button>
-                  </div>
+              {/* BODY axis → cream styles */}
+              {isBody && <>
+                <div style={s.sectionLabel}>Styles</div>
+                <div style={s.lockRow}>
+                  <span style={s.lockChip}>Smooth</span>
+                  <span style={s.lockNote}>always available · first</span>
                 </div>
-              ))}
+                {list.length === 0 && <div style={s.empty}>No extra styles — smooth only.</div>}
+                {list.map((sk, i) => (
+                  <div key={sk} style={s.row}>
+                    <span style={s.order}>{i + 2}</span>
+                    <span style={s.rowLabel}>{labelFor(sk)} <span style={s.code}>{sk}</span></span>
+                    <div style={s.rowBtns}>
+                      <button style={s.iconBtn} disabled={i === 0} onClick={() => move(mat, i, -1)}>↑</button>
+                      <button style={s.iconBtn} disabled={i === list.length - 1} onClick={() => move(mat, i, 1)}>↓</button>
+                      <button style={s.removeBtn} onClick={() => remove(mat, sk)}>✕</button>
+                    </div>
+                  </div>
+                ))}
+                {available.length > 0 && (
+                  <select style={s.addSel} value="" onChange={e => { add(mat, e.target.value); e.target.value = ''; }}>
+                    <option value="">+ add style…</option>
+                    {available.map(k => <option key={k} value={k}>{labelFor(k)}</option>)}
+                  </select>
+                )}
+              </>}
 
-              {available.length > 0 && (
-                <select style={s.addSel} value="" onChange={e => { add(mat, e.target.value); e.target.value = ''; }}>
-                  <option value="">+ add style…</option>
-                  {available.map(k => <option key={k} value={k}>{labelFor(k)}</option>)}
-                </select>
-              )}
+              {/* ELEMENT axis → decoration surface finish (PBR), what a placed GLB decoration wears */}
+              {isElement && <>
+                <div style={s.sectionLabel}>Decoration finish</div>
+                <div style={s.surfGrid}>
+                  {SURFACE_FIELDS.map(({ k, min, max, step }) => (
+                    <label key={k} style={s.surfField}>
+                      <span style={s.surfKey}>{k}</span>
+                      <input type="number" min={min} max={max} step={step} style={s.surfInput}
+                        value={surface?.[k] ?? ''}
+                        onChange={e => setSurface(mat, k, e.target.value === '' ? undefined : Number(e.target.value))} />
+                    </label>
+                  ))}
+                  <label style={s.surfField}>
+                    <span style={s.surfKey}>sheenColor</span>
+                    <input type="color" style={s.surfColor}
+                      value={surface?.sheenColor ?? '#ffffff'} onChange={e => setSurface(mat, 'sheenColor', e.target.value)} />
+                  </label>
+                </div>
+                <div style={s.empty}>Anisotropy needs the GLB to carry a baked TANGENT attribute (the silk streak).</div>
+              </>}
             </div>
           );
         })}
@@ -139,6 +208,14 @@ const s = {
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 },
   card: { border: '1.5px solid #C5D4C8', borderRadius: 12, padding: 16, background: '#fff' },
   cardTitle: { fontSize: 16, fontWeight: 700, color: '#3D5A44', marginBottom: 12 },
+  ctxRow: { display: 'flex', gap: 6, marginBottom: 12 },
+  ctxChip: (on) => ({ padding: '5px 12px', borderRadius: 16, border: `1.5px solid ${on ? '#3D5A44' : '#C5D4C8'}`, background: on ? '#3D5A44' : '#fff', color: on ? '#fff' : '#6B8C74', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }),
+  sectionLabel: { fontSize: 11, fontWeight: 800, color: '#6B8C74', textTransform: 'uppercase', letterSpacing: 0.5, margin: '10px 0 6px' },
+  surfGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
+  surfField: { display: 'flex', flexDirection: 'column', gap: 2 },
+  surfKey: { fontSize: 10, color: '#9bb3a1', fontFamily: 'monospace' },
+  surfInput: { padding: '5px 8px', borderRadius: 6, border: '1px solid #C5D4C8', fontSize: 13, fontFamily: 'inherit', color: '#3D5A44', width: '100%' },
+  surfColor: { width: '100%', height: 30, padding: 0, border: '1px solid #C5D4C8', borderRadius: 6, background: '#fff', cursor: 'pointer' },
   lockRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 },
   lockChip: { padding: '4px 12px', borderRadius: 16, background: '#EDEAE2', color: '#6B8C74', fontSize: 13, fontWeight: 700 },
   lockNote: { fontSize: 11, color: '#9bb3a1' },
