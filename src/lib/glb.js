@@ -1,5 +1,6 @@
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 // ── GLB measurement & cap evaluation ────────────────────────────────────────────────────────────
 // The "real picture" on a 3D element's cost, surfaced at ingest so the admin decides with numbers in
@@ -96,7 +97,16 @@ export function measureForSave(root, sizeKB, assetClass) {
 // Measure an exported GLB ArrayBuffer (for paths that build a buffer rather than hold a live root —
 // RecomposeEditor, the procedural generators). Parses once, then measures like any root.
 let _loader;
-function bufLoader() { if (!_loader) _loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder); return _loader; }
+function bufLoader() {
+  if (!_loader) {
+    // Measure whatever compression the drei preview accepts — meshopt AND draco. A Draco-compressed asset
+    // (e.g. a pre-optimised GLB) must be MEASURABLE for the mobile budget, not just previewable. Same gstatic
+    // decoder version the drei preview's DRACOLoader uses (@react-three/drei Gltf.js).
+    const draco = new DRACOLoader().setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.5/');
+    _loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).setDRACOLoader(draco);
+  }
+  return _loader;
+}
 export async function measureGlbBuffer(buffer, sizeKB, assetClass) {
   const gltf = await bufLoader().parseAsync(buffer, '');
   return measureForSave(gltf.scene, sizeKB, assetClass);

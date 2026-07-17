@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { fetchElementTypes, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM } from '../lib/elementImage.js';
-import { toStatColumns } from '../lib/glb.js';
+import { toStatColumns, measureGlbBuffer, deriveAssetClass } from '../lib/glb.js';
 import { GlbReviewBanner } from './GlbStats.jsx';
 import GlbStudio from './GlbStudio.jsx';
 import CraftGuideFields, { RANKS } from './CraftGuideFields.jsx';
@@ -265,8 +265,9 @@ export default function AddElement() {
   // its presence is the gate that a GLB has been reviewed.
   const [glbStudioFile, setGlbStudioFile] = useState(null);
   const [optimizedStats, setOptimizedStats] = useState(null);
-  // Escape hatch: the GLB was ALREADY optimised outside the app (e.g. a Draco-compressed asset) — attesting
-  // this satisfies the review gate without re-opening GLB Studio. No cost stats are recorded in that case.
+  // Escape hatch: the GLB was ALREADY optimised outside the app (e.g. a Draco-compressed asset). Attesting
+  // this MEASURES the GLB (records the mobile-budget cost) but skips the Studio's OPTIMISE step — so the
+  // budget stats are preserved. `skipGlbReview` is the fallback that satisfies the gate if the measure fails.
   const [skipGlbReview, setSkipGlbReview] = useState(false);
   const [thumbnailBlob, setThumbnailBlob] = useState(null);
   const [placementConfig, setPlacementConfig] = useState({});
@@ -433,6 +434,22 @@ export default function AddElement() {
     setGlbStudioFile(null);
     setFrontConfirmed(false);
     setGlbRotation([0, 0, 0]);
+  }
+
+  // "Already optimised" attestation: MEASURE the current GLB (records the mobile-budget cost — tris/size/mem/
+  // class — same as the Studio would) but skip the optimise pass. Sets optimizedStats so the gate passes ON
+  // THE STATS, preserving the budget. If the measure fails (bad GLB), skipGlbReview alone still bypasses.
+  async function attestOptimised(checked) {
+    setSkipGlbReview(checked);
+    if (!checked || !assetFile || optimizedStats) return;
+    try {
+      const buffer = await assetFile.arrayBuffer();
+      const assetClass = deriveAssetClass({ placementConfig, zones: applicableZones });
+      const stats = await measureGlbBuffer(buffer, assetFile.size / 1024, assetClass);
+      setOptimizedStats(stats);
+    } catch {
+      setMsg({ ok: false, text: 'Could not measure the GLB — it will be created without cost stats.' });
+    }
   }
 
   async function handleSave() {
@@ -759,8 +776,8 @@ export default function AddElement() {
                 />
                 {!optimizedStats && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12, color: '#6B8C74', fontWeight: 600, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={skipGlbReview} onChange={e => setSkipGlbReview(e.target.checked)} />
-                    I’ve already optimised this GLB — skip the GLB Studio review
+                    <input type="checkbox" checked={skipGlbReview} onChange={e => attestOptimised(e.target.checked)} />
+                    I’ve already optimised this GLB — measure its cost &amp; skip the Studio
                   </label>
                 )}
               </div>
