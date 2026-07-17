@@ -445,7 +445,9 @@ export default function AddElement() {
     try {
       const buffer = await assetFile.arrayBuffer();
       const assetClass = deriveAssetClass({ placementConfig, zones: applicableZones });
-      const stats = await measureGlbBuffer(buffer, assetFile.size / 1024, assetClass);
+      // sizeKB must be an INTEGER — optimized_size_kb is an integer column, and the Studio rounds it too;
+      // a float here (assetFile.size / 1024) makes the element-create insert fail with a 500.
+      const stats = await measureGlbBuffer(buffer, Math.round(assetFile.size / 1024), assetClass);
       setOptimizedStats(stats);
     } catch {
       setMsg({ ok: false, text: 'Could not measure the GLB — it will be created without cost stats.' });
