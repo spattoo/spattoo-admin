@@ -277,7 +277,7 @@ export default function AddElement() {
   const [placementScaleStep, setPlacementScaleStep] = useState(''); // placement_config.scale.step
   const [singlePerSlot,  setSinglePerSlot]    = useState(false);
   const [canScatter,     setCanScatter]       = useState(false);
-  const [sideProud,      setSideProud]        = useState(false);
+  const [seatConfig,     setSeatConfig]       = useState({});   // per-zone seat override: { side: 'proud'|'flush', ... } — absent = auto (default)
   const [hugFill,        setHugFill]          = useState('');
   // Packed ball cluster (placement_config.cluster). A cluster element drops as a single ball the
   // customer can grow into a packed clump; these author the defaults. sizes = [largest, 2nd, 3rd,
@@ -547,9 +547,16 @@ export default function AddElement() {
           builtPlacementConfig.metalness = glbMetalness;
         }
         // Write the chosen mode for EVERY applicable zone explicitly (default 'hug') — no more
-        // "absent means hug"; the config states each zone's mode so the designer never guesses.
+        // "absent means hug"; the config states each zone's mode so the designer never guesses. A
+        // wall-hug zone with a NON-default seat is written as the per-zone OBJECT form { mode, seat }
+        // ('proud' = solid body stands off the wall, 'flush' = centred); otherwise the mode string.
+        // Auto seat is config-driven in core (scatter→flush, else proud) — see PLACEMENT_CONFIG.md.
         for (const zone of applicableZones) {
-          builtPlacementConfig[zone] = placementConfig[zone] || 'hug';
+          const mode = placementConfig[zone] || 'hug';
+          const seat = seatConfig[zone];
+          builtPlacementConfig[zone] = (mode === 'hug' && (seat === 'proud' || seat === 'flush'))
+            ? { mode, seat }
+            : mode;
         }
         if (placementScale !== '') builtPlacementConfig.r = parseFloat(placementScale);
         // Optional size-dial bounds in the designer: { min, max } (each independent). r is the
@@ -573,9 +580,6 @@ export default function AddElement() {
           builtPlacementConfig.cluster = cluster;
         } else if (effectiveCanScatter) builtPlacementConfig.scatter = true;  // sprinkles: density-driven, packed
         else if (singlePerSlot) builtPlacementConfig.single_per_slot = true;  // hero
-        // Side seating: default flush (true hug); proud = stands off the wall (deep toppers). A cluster
-        // ball is a sphere — the designer forces it proud on the side regardless of this flag.
-        if (sideProud) builtPlacementConfig.side_proud = true;
         // Hero side-hug size = this fraction of the tier wall height (designer derives it at
         // render time; r is the stand size only). Blank → designer default (0.7).
         if (hugFill !== '') builtPlacementConfig.hug_fill = parseFloat(hugFill);
@@ -685,7 +689,7 @@ export default function AddElement() {
       setPlacementScaleStep('');
       setSinglePerSlot(false);
       setCanScatter(false);
-      setSideProud(false);
+      setSeatConfig({});
       setCanCluster(false);
       setClusterMin('');
       setClusterMax('');
@@ -1000,12 +1004,24 @@ export default function AddElement() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {applicableZones.map(zone => {
                   const zoneLabel = CAKE_ZONES.find(z => z.value === zone)?.label ?? zone;
+                  const mode = placementConfig[zone] ?? 'hug';
+                  // Seat depth applies only to a WALL hug (side/middle_tier) — verge/stand/perch seat by
+                  // their own logic. Auto = config-driven default in core (scatter→flush, else proud).
+                  const showSeat = (zone === 'side' || zone === 'middle_tier') && mode === 'hug';
                   return (
                     <div key={zone} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>{zoneLabel}</span>
-                      <select style={{ ...s.select, flex: 1 }} value={placementConfig[zone] ?? 'hug'} onChange={e => setPlacementConfig(c => ({ ...c, [zone]: e.target.value }))}>
+                      <select style={{ ...s.select, flex: 1 }} value={mode} onChange={e => setPlacementConfig(c => ({ ...c, [zone]: e.target.value }))}>
                         {PLACEMENT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                       </select>
+                      {showSeat && (
+                        <select style={{ ...s.select, flex: 1 }} value={seatConfig[zone] ?? 'auto'} title="How a solid piece sits against the wall"
+                          onChange={e => setSeatConfig(c => ({ ...c, [zone]: e.target.value }))}>
+                          <option value="auto">seat: auto (default)</option>
+                          <option value="proud">seat: proud (stands off wall)</option>
+                          <option value="flush">seat: flush (into wall)</option>
+                        </select>
+                      )}
                     </div>
                   );
                 })}
@@ -1061,16 +1077,6 @@ export default function AddElement() {
                     </div>
                   </div>
                 )}
-                <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}
-                  title="Off = lies flat against the side (hugs the wall). On = raised off the wall — for deep 3D pieces that look half-buried when flattened.">
-                  <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={sideProud} onChange={e => setSideProud(e.target.checked)} />
-                  <div>
-                    <div style={s.checkLabel}>Stands out from the side wall</div>
-                    <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                      Off = lies flat against the side (hugs the wall). On = raised off the wall — for deep 3D pieces (e.g. a topper) that look half-buried when flattened.
-                    </div>
-                  </div>
-                </label>
                 <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4, opacity: (effectiveCanScatter || canCluster) ? 0.45 : 1 }}>
                   <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={singlePerSlot} disabled={effectiveCanScatter || canCluster} onChange={e => setSinglePerSlot(e.target.checked)} />
                   <div>
