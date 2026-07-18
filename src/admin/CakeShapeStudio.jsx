@@ -9,7 +9,7 @@ import {
   CakePreview, applyCakeShapeConfig, cakeShapeDef, cakeShapeList,
   TIER_RADII, BOTTOM_H, TIER_HEIGHT_STEP, SHEET_SIZES, SHEET_DEFAULT_KEY,
   shapeView, captureThumbnailBlob, CAMERA_FOV, CAMERA_POSITION,
-  NUMBER_COUNTS, NUMBER_SIZE_DEFAULTS,
+  NUMBER_COUNTS, NUMBER_SIZE_DEFAULTS, LETTER_COUNTS, LETTER_SIZE_DEFAULTS,
 } from '@spattoo/designer';
 
 // ── Cake Shape Studio ──────────────────────────────────────────────────────────
@@ -36,32 +36,43 @@ const FAMILIES = {
   butterfly:    { label: 'Butterfly', params: [['Wing spread', 'wing', 0.4, 2, 0.05]] },
   polygon:      { label: 'Polygon',   params: [['Sides', 'sides', 3, 16, 1], ['Rotation', 'rotation', -180, 180, 1]] },
   oval:         { label: 'Oval',      params: [] },
-  // A number's sizing is NOT the generic Width/Height — it is authored PER DIGIT COUNT (see NumberSizing
-  // below). Only the two SHARED, count-independent knobs live here: how bold the strokes are and how round
-  // the corners get. Everything else about a number tier is special-cased.
+  // A glyph family's sizing is NOT the generic Width/Height — it is authored PER CHARACTER COUNT (see
+  // GlyphSizing below). Only the two SHARED, count-independent knobs live here: how bold the strokes are
+  // and how round the corners get. Number (digits, up to 4) and Letter (A–Z, up to 3) share this shape.
   number:       { label: 'Number',    params: [['Stroke weight', 'weight', 0, 0.04, 0.005], ['Corner rounding', 'cornerR', 0, 1, 0.05]] },
+  letter:       { label: 'Letter',    params: [['Stroke weight', 'weight', 0, 0.04, 0.005], ['Corner rounding', 'cornerR', 0, 1, 0.05]] },
 };
 
-// A number cake sizes itself by HOW MANY DIGITS the customer types: a "1" and a "2027" are different cakes
-// that must each look right, so the admin authors a { height, thickness } PER COUNT (1–4). `height` is how
-// tall the digit stands (its real size — every number of that count comes out this tall); `thickness` is how
-// deep the slab is. `samples` is just a preview aid — a number to draw while tuning each count. All seeded
-// from core's NUMBER_SIZE_DEFAULTS so the studio and the designer size against ONE source.
-const NUMBER_SAMPLES = { 1: '1', 2: '21', 3: '100', 4: '2027' };
-function withNumberDefaults(config = {}, legacyThickness) {
+// The two GLYPH families — a cake shaped like the typed characters. Number and Letter are the SAME engine
+// on different charsets; everything the studio needs to differ (counts, size defaults, preview samples,
+// the config key + input charset, the starter string, the count noun) is gathered here so the sizing UI
+// and migration are written ONCE. counts/defaults come from core so studio and designer size off ONE source.
+const GLYPH_META = {
+  number: { textKey: 'digits',  counts: NUMBER_COUNTS, defaults: NUMBER_SIZE_DEFAULTS, samples: { 1: '1', 2: '21', 3: '100', 4: '2027' }, unit: 'digit',  keep: /[^0-9]/g,   upper: false, starter: '1' },
+  letter: { textKey: 'letters', counts: LETTER_COUNTS, defaults: LETTER_SIZE_DEFAULTS, samples: { 1: 'A', 2: 'AB', 3: 'ABC' },              unit: 'letter', keep: /[^A-Za-z]/g, upper: true,  starter: 'A' },
+};
+const isGlyphFamily = f => f === 'number' || f === 'letter';
+
+// A glyph cake sizes itself by HOW MANY CHARACTERS the customer types: a "1"/"A" and a "2027"/"MOM" are
+// different cakes that must each look right, so the admin authors a { height, thickness } PER COUNT.
+// `height` is how tall the glyph stands (its real size); `thickness` is how deep the slab is. `samples` is
+// a preview aid — a string to draw while tuning each count. Seeded from core's *_SIZE_DEFAULTS so the
+// studio and the designer size against ONE source.
+function withGlyphDefaults(family, config = {}, legacyThickness) {
+  const meta = GLYPH_META[family];
   const byCount = {}, samples = {};
-  for (const c of NUMBER_COUNTS) {
-    const d = NUMBER_SIZE_DEFAULTS[c];
+  for (const c of meta.counts) {
+    const d = meta.defaults[c];
     byCount[c] = {
       height:    +config.byCount?.[c]?.height    || d.height,
-      // Migrating a legacy number tier: its old "Height" slider WAS the extrusion depth — carry it in as
+      // Migrating a legacy glyph tier: its old "Height" slider WAS the extrusion depth — carry it in as
       // the thickness so nothing changes visually, and let the (new) stand-height default per count.
       thickness: +config.byCount?.[c]?.thickness || +legacyThickness || d.thickness,
       // Piping-shell size for THIS count (core: shellRadius = digit half-height × pipingScale). Per count
       // because a wide 4-digit number wants smaller rosettes than a "1". Default 1.
       pipingScale: +config.byCount?.[c]?.pipingScale || 1,
     };
-    samples[c] = config.samples?.[c] || NUMBER_SAMPLES[c];
+    samples[c] = config.samples?.[c] || meta.samples[c];
   }
   return { ...config, byCount, samples };
 }
@@ -75,7 +86,8 @@ const NEW_CONFIG = {
   oval:      {},
   rounded_rect: { square: false },
   circle:    {},
-  number:    withNumberDefaults({ digits: '1', weight: 0, cornerR: 0 }),
+  number:    withGlyphDefaults('number', { digits: '1', weight: 0, cornerR: 0 }),
+  letter:    withGlyphDefaults('letter', { letters: 'A', weight: 0, cornerR: 0 }),
 };
 
 // A tier stores its own shape KEY too (for cakeShapeOf + the legacy 'rect' checks); it follows the family.
@@ -98,8 +110,8 @@ const baseSize = (family, i) => (family === 'rounded_rect' ? sheetTier(i) : roun
 // A fresh tier of `family` at stack index `i`, at that family's default size + starting proportions.
 function newTier(family = 'circle', i = 0) {
   const b = baseSize(family, i);
-  // A number cake is a flat slab, not a tall block — default it thinner (the customer/admin can raise it).
-  const height = family === 'number' ? 0.7 : b.height;
+  // A glyph cake (number/letter) is a flat slab, not a tall block — default it thinner (raise it later).
+  const height = isGlyphFamily(family) ? 0.7 : b.height;
   return { family, config: { ...(NEW_CONFIG[family] ?? {}) }, width: b.width, depth: b.depth, height };
 }
 
@@ -110,10 +122,10 @@ function tiersFromDesign(design) {
   return arr.map((t, i) => {
     const family = t.shapeFamily ?? 'circle';
     const width = t.width ?? (t.radius != null ? t.radius * 2 : baseSize(family, i).width);
-    // A number tier is MIGRATED on load: seed all four count-configs so an older starter (no byCount) opens
-    // with a full editable set — its legacy tier height carries in as the thickness (see withNumberDefaults).
-    const config = family === 'number'
-      ? withNumberDefaults(t.shapeConfig ?? {}, t.height)
+    // A glyph tier (number/letter) is MIGRATED on load: seed all count-configs so an older starter (no
+    // byCount) opens with a full editable set — its legacy tier height carries in as the thickness.
+    const config = isGlyphFamily(family)
+      ? withGlyphDefaults(family, t.shapeConfig ?? {}, t.height)
       : { ...(t.shapeConfig ?? {}) };
     return {
       family,
@@ -137,7 +149,7 @@ export default function CakeShapeStudio() {
   const [selKey, setSelKey] = useState('round');   // selected starter key, or DRAFT_KEY
   const [name, setName]     = useState('');        // the edited name
   const [tiers, setTiers]   = useState(() => [newTier('circle', 0)]);
-  const [numCount, setNumCount] = useState(1);     // which digit-count a number tier is editing/previewing (1–4)
+  const [numCount, setNumCount] = useState(1);     // which char-count a glyph tier (number/letter) is editing/previewing
   const [dirty, setDirty]   = useState(false);     // unsaved edits to the current selection
   const [spin, setSpin]     = useState(false);     // turntable off by default: judge from a held angle
   const [lens, setLens]     = useState('customer');// 'customer' | 'silhouette' — see the preview comment
@@ -198,10 +210,10 @@ export default function CakeShapeStudio() {
   const editName = v => { setName(v); setDirty(true); };
   const setTierFamily = (i, family) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, family, config: { ...(NEW_CONFIG[family] ?? {}) } } : t)); setDirty(true); };
   const setTierConfig = (i, patch) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, config: { ...t.config, ...patch } } : t)); setDirty(true); };
-  // A number tier's per-count sizing + preview samples — nested under config.byCount / config.samples so the
-  // whole model saves in the one self-contained design (no parallel store).
-  const setCountSize = (i, count, patch) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, config: { ...t.config, byCount: { ...t.config?.byCount, [count]: { ...(t.config?.byCount?.[count] ?? NUMBER_SIZE_DEFAULTS[count]), ...patch } } } } : t)); setDirty(true); };
-  const setSample    = (i, count, digits) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, config: { ...t.config, samples: { ...t.config?.samples, [count]: digits } } } : t)); setDirty(true); };
+  // A glyph tier's (number/letter) per-count sizing + preview samples — nested under config.byCount /
+  // config.samples so the whole model saves in the one self-contained design (no parallel store).
+  const setCountSize = (i, count, patch) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, config: { ...t.config, byCount: { ...t.config?.byCount, [count]: { ...(t.config?.byCount?.[count] ?? GLYPH_META[t.family]?.defaults[count]), ...patch } } } } : t)); setDirty(true); };
+  const setSample    = (i, count, text)   => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, config: { ...t.config, samples: { ...t.config?.samples, [count]: text } } } : t)); setDirty(true); };
   const setTierSize   = (i, patch) => { setTiers(ts => ts.map((t, j) => j === i ? { ...t, ...patch } : t)); setDirty(true); };
   const addTier = () => { setTiers(ts => ts.length >= MAX_TIERS ? ts : [...ts, newTier(ts[ts.length - 1]?.family ?? 'circle', ts.length)]); setDirty(true); };
   const removeTier = i => { setTiers(ts => ts.length <= 1 ? ts : ts.filter((_, j) => j !== i)); setDirty(true); };
@@ -211,11 +223,14 @@ export default function CakeShapeStudio() {
   const design = useMemo(() => ({
     tiers: tiers.map(t => {
       const square = t.family === 'rounded_rect' && t.config?.square;
-      // A number tier PREVIEWS the count currently being edited: feed the active count's sample as the
-      // digits, so tuning the "3 digit" sliders draws a 3-digit number. Its width/depth/height are ignored
-      // downstream (toCanvasConfig derives the true box from byCount), so no need to compute them here.
-      const config = t.family === 'number'
-        ? { ...t.config, digits: t.config?.samples?.[numCount] || NUMBER_SAMPLES[numCount] }
+      // A glyph tier (number/letter) PREVIEWS the count currently being edited: feed the active count's
+      // sample as the family's text (digits/letters), so tuning the "3 digit"/"3 letter" sliders draws a
+      // 3-char string. Its width/depth/height are ignored downstream (toCanvasConfig derives the true box
+      // from byCount). numCount is clamped to the family's counts (letters top out at 3, numbers at 4).
+      const gm = GLYPH_META[t.family];
+      const config = gm
+        ? (() => { const c = gm.counts.includes(numCount) ? numCount : gm.counts[0];
+                   return { ...t.config, [gm.textKey]: t.config?.samples?.[c] || gm.samples[c] }; })()
         : (t.config ?? {});
       return {
         shape: keyForFamily(t.family),
@@ -368,10 +383,11 @@ export default function CakeShapeStudio() {
                     onChange={v => setTierConfig(i, { [key]: v })} />
                 ))}
 
-                {/* A number sizes PER DIGIT COUNT — not by Width/Height. The generic size sliders are replaced
-                    by the per-count editor; the customer types the actual number, core picks the matching count. */}
-                {t.family === 'number' ? (
-                  <NumberSizing tier={t} index={i} activeCount={numCount}
+                {/* A glyph cake (number/letter) sizes PER CHARACTER COUNT — not by Width/Height. The generic
+                    size sliders are replaced by the per-count editor; the customer types the actual string,
+                    core picks the matching count. */}
+                {isGlyphFamily(t.family) ? (
+                  <GlyphSizing family={t.family} tier={t} index={i} activeCount={numCount}
                     onActiveCount={setNumCount} onSize={setCountSize} onSample={setSample} />
                 ) : (
                   <>
@@ -461,33 +477,37 @@ export default function CakeShapeStudio() {
   );
 }
 
-// The number cake's sizing editor. A number is really FOUR cakes — a 1-, 2-, 3- and 4-digit one — each with
-// its own stand-height and slab-thickness, because a "1" and a "2027" can't share a size and both look right.
-// Pick a digit count, type a sample to preview it, and size that count; the customer later types any number
-// and core renders it at the matching count's size (studio and cake read off ONE model). WIDTH is deliberately
-// absent — a "2027" is just a "1" made wider; the height is the size that stays honest across a count.
-function NumberSizing({ tier, index, activeCount, onActiveCount, onSize, onSample }) {
+// The glyph cake's sizing editor (number OR letter). A glyph cake is really N cakes — one per character
+// count — each with its own stand-height and slab-thickness, because a "1"/"A" and a "2027"/"MOM" can't
+// share a size and both look right. Pick a count, type a sample to preview it, and size that count; the
+// customer later types any string and core renders it at the matching count's size (studio and cake read
+// off ONE model). WIDTH is deliberately absent — a longer string is just made wider; the height is the size
+// that stays honest across a count. `family` supplies the counts, defaults, samples, charset and noun.
+function GlyphSizing({ family, tier, index, activeCount, onActiveCount, onSize, onSample }) {
+  const meta = GLYPH_META[family];
   const cfg = tier.config ?? {};
-  const c = activeCount;
-  const bc = cfg.byCount?.[c] ?? NUMBER_SIZE_DEFAULTS[c];
+  const c = meta.counts.includes(activeCount) ? activeCount : meta.counts[0];   // clamp when switching family
+  const bc = cfg.byCount?.[c] ?? meta.defaults[c];
   const sample = cfg.samples?.[c] ?? '';
+  const noun = meta.unit;                              // 'digit' | 'letter'
+  const sanitize = raw => { let v = String(raw).replace(meta.keep, ''); if (meta.upper) v = v.toUpperCase(); return v.slice(0, c); };
   return (
     <div style={s.numBox}>
-      <div style={s.mini}>Size per digit count</div>
+      <div style={s.mini}>Size per {noun} count</div>
       <div style={s.countTabs}>
-        {NUMBER_COUNTS.map(n => (
+        {meta.counts.map(n => (
           <button key={n} type="button" style={{ ...s.countTab, ...(n === c ? s.countTabOn : null) }}
-            onClick={() => onActiveCount(n)}>{n} digit</button>
+            onClick={() => onActiveCount(n)}>{n} {noun}</button>
         ))}
       </div>
 
-      <div style={s.mini}>Sample number to preview{' '}
-        <span style={{ fontWeight: 400, color: '#8fae98' }}>· {c} digit{c > 1 ? 's' : ''}, tuning only</span>
+      <div style={s.mini}>Sample {noun === 'digit' ? 'number' : 'word'} to preview{' '}
+        <span style={{ fontWeight: 400, color: '#8fae98' }}>· {c} {noun}{c > 1 ? 's' : ''}, tuning only</span>
       </div>
-      <input style={s.select} value={sample} inputMode="numeric" maxLength={c} placeholder={NUMBER_SAMPLES[c]}
-        onChange={e => onSample(index, c, e.target.value.replace(/[^0-9]/g, '').slice(0, c))} />
+      <input style={s.select} value={sample} inputMode={meta.upper ? 'text' : 'numeric'} maxLength={c} placeholder={meta.samples[c]}
+        onChange={e => onSample(index, c, sanitize(e.target.value))} />
 
-      <Slider label="Height — how tall the digit stands" min={0.8} max={3.4} step={0.05} value={bc.height}
+      <Slider label={`Height — how tall the ${noun} stands`} min={0.8} max={3.4} step={0.05} value={bc.height}
         onChange={v => onSize(index, c, { height: v })} />
       <Slider label="Thickness — how deep the slab is" min={0.3} max={1.6} step={0.02} value={bc.thickness}
         onChange={v => onSize(index, c, { thickness: v })} />
@@ -495,8 +515,8 @@ function NumberSizing({ tier, index, activeCount, onActiveCount, onSize, onSampl
         onChange={v => onSize(index, c, { pipingScale: v })} />
 
       <div style={s.hint}>
-        <b>Height</b> is the real size — every number of this count comes out this tall; a longer number just
-        grows <i>wider</i>. Set each count so a <b>1</b>, a <b>21</b>, a <b>100</b> and a <b>2027</b> all look right.
+        <b>Height</b> is the real size — every {noun === 'digit' ? 'number' : 'word'} of this count comes out this
+        tall; a longer one just grows <i>wider</i>. Set each count so short and long {noun}s all look right.
       </div>
     </div>
   );
