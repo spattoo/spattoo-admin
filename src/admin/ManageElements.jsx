@@ -448,6 +448,7 @@ export default function ManageElements() {
   const [placementScaleStep,  setPlacementScaleStep]  = useState('');   // placement_config.scale.step
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
+  const [scatterCount,       setScatterCount]       = useState('');   // placement_config.scatter_count (blank = designer default 12)
   const [sideProud,          setSideProud]          = useState(false);
   const [useFondant,         setUseFondant]         = useState(false);   // placement_config.useSharedFondantTexture
   const [hugFill,            setHugFill]            = useState('');
@@ -560,6 +561,7 @@ export default function ManageElements() {
     setSinglePerSlot(pc.single_per_slot === true);
     setUseFondant(pc.useSharedFondantTexture === true);
     setCanScatter(pc.scatter === true);
+    setScatterCount(pc.scatter_count != null ? String(pc.scatter_count) : '');
     setSideProud(pc.side_proud === true);
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
@@ -675,6 +677,7 @@ export default function ManageElements() {
     setSinglePerSlot(pc.single_per_slot === true);
     setUseFondant(pc.useSharedFondantTexture === true);
     setCanScatter(pc.scatter === true);
+    setScatterCount(pc.scatter_count != null ? String(pc.scatter_count) : '');
     setSideProud(pc.side_proud === true);
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
@@ -768,8 +771,12 @@ export default function ManageElements() {
     // Scatter STYLE: many packed instances driven by a density control (sprinkles), vs. discrete
     // decor placed/duplicated by hand. Config-driven; the designer reads placement_config.scatter,
     // never the element type. Mutually exclusive with single_per_slot.
-    if (canScatter) { parsedConfig.scatter = true; delete parsedConfig.single_per_slot; }
-    else delete parsedConfig.scatter;
+    if (canScatter) {
+      parsedConfig.scatter = true; delete parsedConfig.single_per_slot;
+      // Admin-authored default instance count (core reads placement_config.scatter_count, else 12).
+      if (scatterCount !== '' && parseInt(scatterCount, 10) > 0) parsedConfig.scatter_count = parseInt(scatterCount, 10);
+      else delete parsedConfig.scatter_count;
+    } else { delete parsedConfig.scatter; delete parsedConfig.scatter_count; }
     // Side seating: default flush (true hug); proud = stands off the wall.
     if (sideProud) parsedConfig.side_proud = true;
     else delete parsedConfig.side_proud;
@@ -1809,7 +1816,7 @@ export default function ManageElements() {
                             setCanScatter(on);
                             // Scatter and single-per-slot are mutually exclusive.
                             if (on) { setSinglePerSlot(false); patchPc({ scatter: true, single_per_slot: null }); }
-                            else patchPc({ scatter: null });
+                            else { setScatterCount(''); patchPc({ scatter: null, scatter_count: null }); }
                           }} />
                         <div>
                           <div style={s.checkLabel}>Can scatter (density)</div>
@@ -1818,6 +1825,17 @@ export default function ManageElements() {
                           </div>
                         </div>
                       </label>
+                      {canScatter && (
+                        <div style={{ marginTop: 6, marginLeft: 26 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', marginBottom: 3 }}>Default scatter count</div>
+                          <input type="number" min="1" step="1" style={{ ...s.input, width: 120 }}
+                            value={scatterCount} placeholder="e.g. 12"
+                            onChange={e => { const v = e.target.value; setScatterCount(v); patchPc({ scatter_count: v === '' ? '' : parseInt(v, 10) }); }} />
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 2 }}>
+                            How many instances a scatter seeds with per surface (top and side). Blank = 12. Capped to what fits the cake; the customer adjusts with the density slider.
+                          </div>
+                        </div>
+                      )}
                       <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 6, opacity: (canScatter || singlePerSlot) ? 0.45 : 1 }}
                         title="A packed clump of mixed-size balls. Drops as a single ball the customer grows into a cluster; mixed colours from a palette.">
                         <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}

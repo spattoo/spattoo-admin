@@ -277,6 +277,7 @@ export default function AddElement() {
   const [placementScaleStep, setPlacementScaleStep] = useState(''); // placement_config.scale.step
   const [singlePerSlot,  setSinglePerSlot]    = useState(false);
   const [canScatter,     setCanScatter]       = useState(false);
+  const [scatterCount,   setScatterCount]     = useState('');   // placement_config.scatter_count — default instances a scatter seeds with (blank = designer default 12)
   const [seatConfig,     setSeatConfig]       = useState({});   // per-zone seat override: { side: 'proud'|'flush', ... } — absent = auto (default)
   const [hugFill,        setHugFill]          = useState('');
   // Packed ball cluster (placement_config.cluster). A cluster element drops as a single ball the
@@ -578,7 +579,11 @@ export default function AddElement() {
           const palette = clusterPalette.split(',').map(s => s.trim()).filter(Boolean);
           if (palette.length) cluster.palette = palette;
           builtPlacementConfig.cluster = cluster;
-        } else if (effectiveCanScatter) builtPlacementConfig.scatter = true;  // sprinkles: density-driven, packed
+        } else if (effectiveCanScatter) {
+          builtPlacementConfig.scatter = true;  // sprinkles: density-driven, packed
+          // Admin-authored default instance count (core reads placement_config.scatter_count, else 12).
+          if (scatterCount !== '' && parseInt(scatterCount, 10) > 0) builtPlacementConfig.scatter_count = parseInt(scatterCount, 10);
+        }
         else if (singlePerSlot) builtPlacementConfig.single_per_slot = true;  // hero
         // Hero side-hug size = this fraction of the tier wall height (designer derives it at
         // render time; r is the stand size only). Blank → designer default (0.7).
@@ -689,6 +694,7 @@ export default function AddElement() {
       setPlacementScaleStep('');
       setSinglePerSlot(false);
       setCanScatter(false);
+      setScatterCount('');
       setSeatConfig({});
       setCanCluster(false);
       setClusterMin('');
@@ -1047,6 +1053,17 @@ export default function AddElement() {
                     </div>
                   </div>
                 </label>
+                {effectiveCanScatter && (
+                  <div style={{ marginTop: 6, marginLeft: 26 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', marginBottom: 3 }}>Default scatter count</div>
+                    <input type="number" min="1" step="1" style={{ ...s.input, width: 120 }}
+                      value={scatterCount} placeholder="e.g. 12"
+                      onChange={e => setScatterCount(e.target.value)} />
+                    <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 2 }}>
+                      How many instances a scatter seeds with per surface (top and side). Blank = 12. Capped to what fits the cake; the customer adjusts with the density slider.
+                    </div>
+                  </div>
+                )}
                 <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4, opacity: (effectiveCanScatter || singlePerSlot) ? 0.45 : 1 }}
                   title="A packed clump of mixed-size balls. Drops as a single ball the customer grows into a cluster; mixed colours from a palette.">
                   <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={canCluster} disabled={effectiveCanScatter || singlePerSlot} onChange={e => setCanCluster(e.target.checked)} />
