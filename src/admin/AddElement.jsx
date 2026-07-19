@@ -29,6 +29,7 @@ const PLACEMENT_MODES = [
   { value: 'stand',           label: 'stand' },
   { value: 'perch',           label: 'perch (sit on edge)' },  // figure seated on the rim, legs over
   { value: 'verge',           label: 'verge (lean over edge)' }, // rests on the rim lip, reclines outward
+  { value: 'insert',          label: 'insert (buried, angled into cake)' }, // chocolate bars etc. — base sunk into the surface
 ];
 
 const s = {
@@ -294,6 +295,11 @@ export default function AddElement() {
   const [vergeAngle,     setVergeAngle]       = useState('');   // placement_config.verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]     = useState('');   // placement_config.verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset]   = useState('');   // placement_config.verge.edge_inset (blank = 0)
+  // Insert (base sunk into the surface, standing at an angle — chocolate bars, sparklers). placement_config.insert
+  // object — written when any zone uses the `insert` mode; the zone drives which surface it's buried into.
+  const [insertDepth,   setInsertDepth]    = useState('');   // insert.depth: 0–1 fraction of element length buried (blank = default)
+  const [insertLean,    setInsertLean]     = useState('');   // insert.lean_deg: base tilt from the surface normal (blank = 0, straight in)
+  const [insertJitter,  setInsertJitter]   = useState('');   // insert.jitter_deg: random ± spread per instance (blank = 0)
   // Folded sticker (2D only): a flat decal splits at the body spine into two hinged wings.
   const [foldable,   setFoldable]   = useState(false);
   const [foldAngle,  setFoldAngle]  = useState('');   // placement_config.fold (deg, blank = default 30)
@@ -598,6 +604,16 @@ export default function AddElement() {
           if (vergeYOffset   !== '') verge.y_offset   = parseFloat(vergeYOffset);
           if (vergeEdgeInset !== '') verge.edge_inset = parseFloat(vergeEdgeInset);
           builtPlacementConfig.verge = verge;
+        }
+        // Insert calibration (base sunk into the surface, standing at an angle) — written whenever any
+        // zone uses the `insert` mode. One shared object across zones (the zone drives which surface it's
+        // buried into); only non-blank fields set, the designer supplies defaults. See PLACEMENT_CONFIG.md.
+        if (applicableZones.some(zone => builtPlacementConfig[zone] === 'insert')) {
+          const insert = {};
+          if (insertDepth  !== '') insert.depth      = parseFloat(insertDepth);
+          if (insertLean   !== '') insert.lean_deg   = parseFloat(insertLean);
+          if (insertJitter !== '') insert.jitter_deg = parseFloat(insertJitter);
+          builtPlacementConfig.insert = insert;
         }
         // Folded sticker (2D image only): split at the spine into two hinged wings. fold (deg) /
         // spine (0–1) are optional — the designer falls back to its defaults. See spattoo-core
@@ -1128,6 +1144,19 @@ export default function AddElement() {
                       Verge reclines the element radially outward over the rim edge (butterflies, flowers). Seat = center (mid-spine rests on the lip, body drapes over) or base (body base on the top surface). Lean angle in degrees (blank = 35) is the default Tilt, plus an optional height nudge and edge inset (+ pulls in from the rim, − pushes out over it). All optional.
                     </div>
                   </>
+                )}
+                {applicableZones.some(zone => (placementConfig[zone] ?? 'hug') === 'insert') && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Insert</span>
+                      <input type="number" min="0" max="1" step="0.05" style={{ ...s.input, flex: 1 }} value={insertDepth} placeholder="depth 0–1 — e.g. 0.3 (blank = default)" onChange={e => setInsertDepth(e.target.value)} />
+                      <input type="number" min="-89" max="89" step="1" style={{ ...s.input, flex: 1 }} value={insertLean} placeholder="lean° — e.g. 15 (blank = 0)" onChange={e => setInsertLean(e.target.value)} />
+                      <input type="number" min="0" max="89" step="1" style={{ ...s.input, flex: 1 }} value={insertJitter} placeholder="jitter° — e.g. 20 (blank = 0)" onChange={e => setInsertJitter(e.target.value)} />
+                    </div>
+                    <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                      Insert buries the element's base into the surface at an angle (chocolate bars, sparklers). The zone chosen above decides which surface — top (stands up) or side (pokes out). Depth = fraction of the element's length sunk in (blank = default). Lean = tilt from the surface normal in degrees (0 = straight in). Jitter = random ± spread per instance, so scattered pieces fan out instead of all leaning the same way. All optional.
+                    </div>
+                  </div>
                 )}
                 {assetType === '2D' && (
                   <>

@@ -27,6 +27,7 @@ const PLACEMENT_MODES = [
   { value: 'stand',            label: 'stand' },
   { value: 'perch',            label: 'perch (sit on edge)' },  // figure seated on the rim, legs over
   { value: 'verge',            label: 'verge (lean over edge)' }, // rests on the rim lip, reclines outward
+  { value: 'insert',           label: 'insert (buried, angled into cake)' }, // base sunk into the surface
 ];
 
 // Default placement_config for cream_piping elements. When an element has no
@@ -463,6 +464,10 @@ export default function ManageElements() {
   const [vergeAngle,     setVergeAngle]     = useState('');   // verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]   = useState('');   // verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset] = useState('');   // verge.edge_inset (blank = 0)
+  // Insert (base sunk into the surface at an angle — chocolate bars, sparklers) — placement_config.insert object.
+  const [insertDepth,   setInsertDepth]    = useState('');   // insert.depth: 0–1 fraction buried (blank = default)
+  const [insertLean,    setInsertLean]     = useState('');   // insert.lean_deg: tilt from surface normal (blank = 0)
+  const [insertJitter,  setInsertJitter]   = useState('');   // insert.jitter_deg: random ± spread (blank = 0)
   // Folded sticker (2D) + pixel-recolour region — config-driven capabilities (see spattoo-core).
   const [foldable,      setFoldable]      = useState(false);
   const [foldAngle,     setFoldAngle]     = useState('');
@@ -570,6 +575,9 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    setInsertDepth(pc.insert?.depth != null ? String(pc.insert.depth) : '');
+    setInsertLean(pc.insert?.lean_deg != null ? String(pc.insert.lean_deg) : '');
+    setInsertJitter(pc.insert?.jitter_deg != null ? String(pc.insert.jitter_deg) : '');
     setFoldable(pc.foldable === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
@@ -686,6 +694,9 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    setInsertDepth(pc.insert?.depth != null ? String(pc.insert.depth) : '');
+    setInsertLean(pc.insert?.lean_deg != null ? String(pc.insert.lean_deg) : '');
+    setInsertJitter(pc.insert?.jitter_deg != null ? String(pc.insert.jitter_deg) : '');
     setFoldable(pc.foldable === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
@@ -734,6 +745,15 @@ export default function ManageElements() {
     if (a  !== '') v.angle_deg  = parseFloat(a);
     if (y  !== '') v.y_offset   = parseFloat(y);
     if (ei !== '') v.edge_inset = parseFloat(ei);
+    return Object.keys(v).length ? v : '';
+  };
+  // The insert descriptor (base sunk into the surface at an angle) — only non-blank fields; all blank →
+  // '' so patchPc drops the key and the designer uses its defaults.
+  const insertDesc = (d = insertDepth, l = insertLean, j = insertJitter) => {
+    const v = {};
+    if (d !== '') v.depth      = parseFloat(d);
+    if (l !== '') v.lean_deg   = parseFloat(l);
+    if (j !== '') v.jitter_deg = parseFloat(j);
     return Object.keys(v).length ? v : '';
   };
   // Build the placement_config.scale patch from the min/max inputs: an object with only the set
@@ -1931,6 +1951,25 @@ export default function ManageElements() {
                           </div>
                           <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
                             Verge reclines radially outward over the rim (butterflies, flowers). Seat = center (mid-spine on the lip, body drapes over) or base (body base on the top). Lean angle° (blank = 35) is the default Tilt, plus an optional height nudge and edge inset (+ pulls in, − pushes out over the lip).
+                          </div>
+                        </>
+                      )}
+                      {applicableZones.some(z => (placementZoneConfig[z] ?? 'hug') === 'insert') && (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Insert</span>
+                            <input type="number" min="0" max="1" step="0.05" style={{ ...s.input, flex: 1 }} value={insertDepth}
+                              placeholder="depth 0–1 — e.g. 0.3 (blank = default)"
+                              onChange={e => { setInsertDepth(e.target.value); patchPc({ insert: insertDesc(e.target.value) }); }} />
+                            <input type="number" min="-89" max="89" step="1" style={{ ...s.input, flex: 1 }} value={insertLean}
+                              placeholder="lean° — e.g. 15 (blank = 0)"
+                              onChange={e => { setInsertLean(e.target.value); patchPc({ insert: insertDesc(insertDepth, e.target.value) }); }} />
+                            <input type="number" min="0" max="89" step="1" style={{ ...s.input, flex: 1 }} value={insertJitter}
+                              placeholder="jitter° — e.g. 20 (blank = 0)"
+                              onChange={e => { setInsertJitter(e.target.value); patchPc({ insert: insertDesc(insertDepth, insertLean, e.target.value) }); }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            Insert buries the base into the surface at an angle (chocolate bars, sparklers). The zone above picks the surface — top (stands up) or side (pokes out). Depth = fraction of length sunk in (blank = default). Lean = tilt from the surface normal° (0 = straight in). Jitter = random ± spread per instance so scattered pieces fan out.
                           </div>
                         </>
                       )}
