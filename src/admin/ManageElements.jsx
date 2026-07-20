@@ -13,6 +13,8 @@ import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 import { statsFromElement } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
+import { serializeZone, zoneValueMode, zoneValueSeat, zoneShowsSeat } from '../lib/placementSeat.js';
+import PlacementZoneRow from './PlacementZoneRow.jsx';
 
 const CAKE_ZONES = [
   { value: 'top_surface', label: 'Top Surface' },
@@ -442,7 +444,8 @@ export default function ManageElements() {
   const [glbEnvPreset,     setGlbEnvPreset]     = useState('none');
 
   const [placementConfig,    setPlacementConfig]    = useState('{}');
-  const [placementZoneConfig, setPlacementZoneConfig] = useState({});
+  const [placementZoneConfig, setPlacementZoneConfig] = useState({});   // per-zone MODE string
+  const [seatConfig,          setSeatConfig]          = useState({});   // per-zone seat override: { side: 'proud'|'flush', ... } — 'auto'/absent = default
   const [placementScale,      setPlacementScale]      = useState('');
   const [placementScaleMin,   setPlacementScaleMin]   = useState('');   // placement_config.scale.min
   const [placementScaleMax,   setPlacementScaleMax]   = useState('');   // placement_config.scale.max
@@ -450,7 +453,6 @@ export default function ManageElements() {
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
   const [scatterCount,       setScatterCount]       = useState('');   // placement_config.scatter_count (blank = designer default 12)
-  const [sideProud,          setSideProud]          = useState(false);
   const [useFondant,         setUseFondant]         = useState(false);   // placement_config.useSharedFondantTexture
   const [hugFill,            setHugFill]            = useState('');
   // Packed ball cluster (placement_config.cluster) — see AddElement. sizes = [largest,2nd,3rd,small].
@@ -556,9 +558,7 @@ export default function ManageElements() {
     setPlacementConfig(JSON.stringify(pc, null, 2));
     setGlbRoughness(pc.roughness ?? 0.6);
     setGlbMetalness(pc.metalness ?? 0.15);
-    const zoneConf = {};
-    (el.allowed_zones ?? []).forEach(z => { if (pc[z]) zoneConf[z] = pc[z]; });
-    setPlacementZoneConfig(zoneConf);
+    loadZonesFromPc(pc, el.allowed_zones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
@@ -567,7 +567,6 @@ export default function ManageElements() {
     setUseFondant(pc.useSharedFondantTexture === true);
     setCanScatter(pc.scatter === true);
     setScatterCount(pc.scatter_count != null ? String(pc.scatter_count) : '');
-    setSideProud(pc.side_proud === true);
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
     loadPrintFinishFromPc(pc);
@@ -644,6 +643,35 @@ export default function ManageElements() {
       return JSON.stringify(cur, null, 2);
     });
   }
+  // Split a placement_config's per-zone values (string OR { mode, seat }) into the mode + seat
+  // control maps. Used by both element-load and JSON-edit sync so they can't drift. Migrates the
+  // legacy global `side_proud` flag → a per-zone 'proud' seat when no explicit seat is authored.
+  function loadZonesFromPc(pc, zones) {
+    const modeConf = {}, seatConf = {};
+    (zones ?? []).forEach(z => {
+      const raw = pc[z];
+      const mode = zoneValueMode(raw);
+      if (raw != null) modeConf[z] = mode;
+      let seat = zoneValueSeat(raw);
+      if (seat === 'auto' && pc.side_proud === true && zoneShowsSeat(z, mode)) seat = 'proud';
+      if (seat !== 'auto') seatConf[z] = seat;
+    });
+    setPlacementZoneConfig(modeConf);
+    setSeatConfig(seatConf);
+  }
+  // Write a zone's mode + seat back into both control maps AND the placement_config JSON (one path,
+  // used by both selects). Seat only sticks on a wall hug; the JSON stores the string-or-object form.
+  function writeZone(zone, mode, seat) {
+    const effSeat = zoneShowsSeat(zone, mode) ? seat : 'auto';
+    setPlacementZoneConfig(c => ({ ...c, [zone]: mode }));
+    setSeatConfig(c => {
+      const next = { ...c };
+      if (effSeat === 'proud' || effSeat === 'flush') next[zone] = effSeat;
+      else delete next[zone];
+      return next;
+    });
+    patchPc({ [zone]: serializeZone(mode, effSeat), side_proud: null });
+  }
   // Reflect placement_config.print_finish into its controls (used by both load + JSON-edit sync — one
   // helper, so the two paths can't drift). Blank when absent: the designer's defaults then apply.
   function loadPrintFinishFromPc(pc) {
@@ -675,9 +703,7 @@ export default function ManageElements() {
     patchPc({ cluster: c });
   }
   function syncStructuredFromPc(pc) {
-    const zoneConf = {};
-    (applicableZones ?? []).forEach(z => { if (pc[z]) zoneConf[z] = pc[z]; });
-    setPlacementZoneConfig(zoneConf);
+    loadZonesFromPc(pc, applicableZones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
@@ -686,7 +712,6 @@ export default function ManageElements() {
     setUseFondant(pc.useSharedFondantTexture === true);
     setCanScatter(pc.scatter === true);
     setScatterCount(pc.scatter_count != null ? String(pc.scatter_count) : '');
-    setSideProud(pc.side_proud === true);
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
     loadPrintFinishFromPc(pc);
@@ -775,8 +800,12 @@ export default function ManageElements() {
     catch (e) { throw new Error(`placement_config is not valid JSON — fix it before saving (${e.message}).`); }
     // Merge zone config — write the chosen mode for EVERY applicable zone, explicitly (default
     // 'hug'). No more "absent means hug": the saved config states the mode for each zone, so the
-    // designer never has to guess. (Existing config still wins via the designer's spread/backfill.)
-    applicableZones.forEach(z => { parsedConfig[z] = placementZoneConfig[z] || 'hug'; });
+    // designer never has to guess. A wall-hug zone with a non-default seat serializes to the
+    // { mode, seat } object form; otherwise the plain mode string (shared serializeZone).
+    applicableZones.forEach(z => {
+      const mode = placementZoneConfig[z] || 'hug';
+      parsedConfig[z] = serializeZone(mode, zoneShowsSeat(z, mode) ? seatConfig[z] : undefined);
+    });
     if (placementScale !== '') parsedConfig.r = parseFloat(placementScale);
     else delete parsedConfig.r;
     // Optional size-dial bounds { min, max, step } (each independent). r is the default WITHIN this
@@ -797,9 +826,8 @@ export default function ManageElements() {
       if (scatterCount !== '' && parseInt(scatterCount, 10) > 0) parsedConfig.scatter_count = parseInt(scatterCount, 10);
       else delete parsedConfig.scatter_count;
     } else { delete parsedConfig.scatter; delete parsedConfig.scatter_count; }
-    // Side seating: default flush (true hug); proud = stands off the wall.
-    if (sideProud) parsedConfig.side_proud = true;
-    else delete parsedConfig.side_proud;
+    // Legacy global side_proud is superseded by the per-zone seat written above — never persist it.
+    delete parsedConfig.side_proud;
     // Hero side-hug size = fraction of tier wall height (designer derives at render; r = stand size).
     if (hugFill !== '') parsedConfig.hug_fill = parseFloat(hugFill);
     else delete parsedConfig.hug_fill;
@@ -1760,18 +1788,21 @@ export default function ManageElements() {
                   <div style={s.field}>
                     <label style={s.label}>Placement Config</label>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {/* Seat depth (side/middle_tier hug) supersedes the old global "Stands out from
+                          the side wall" checkbox — see PlacementZoneRow. */}
                       {applicableZones.map(zone => {
-                        const zoneLabel = CAKE_ZONES.find(z => z.value === zone)?.label ?? zone;
+                        const mode = placementZoneConfig[zone] ?? 'hug';
                         return (
-                          <div key={zone} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>{zoneLabel}</span>
-                            <select
-                              style={{ ...s.select, flex: 1 }}
-                              value={placementZoneConfig[zone] ?? 'hug'}
-                              onChange={e => { const v = e.target.value; setPlacementZoneConfig(c => ({ ...c, [zone]: v })); patchPc({ [zone]: v }); }}>
-                              {PLACEMENT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                            </select>
-                          </div>
+                          <PlacementZoneRow
+                            key={zone}
+                            zone={zone}
+                            zoneLabel={CAKE_ZONES.find(z => z.value === zone)?.label ?? zone}
+                            mode={mode}
+                            seat={seatConfig[zone]}
+                            modes={PLACEMENT_MODES}
+                            selectStyle={s.select}
+                            onModeChange={v => writeZone(zone, v, seatConfig[zone])}
+                            onSeatChange={v => writeZone(zone, mode, v)} />
                         );
                       })}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -1894,18 +1925,6 @@ export default function ManageElements() {
                           </div>
                         </div>
                       )}
-                      <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 6 }}
-                        title="Off = lies flat against the side (hugs the wall). On = raised off the wall — for deep 3D pieces that look half-buried when flattened.">
-                        <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
-                          checked={sideProud}
-                          onChange={e => { setSideProud(e.target.checked); patchPc({ side_proud: e.target.checked ? true : null }); }} />
-                        <div>
-                          <div style={s.checkLabel}>Stands out from the side wall</div>
-                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                            Off = lies flat against the side (hugs the wall). On = raised off the wall — for deep 3D pieces (e.g. a topper) that look half-buried when flattened.
-                          </div>
-                        </div>
-                      </label>
                       <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 6 }}>
                         <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
                           checked={patternOnly}

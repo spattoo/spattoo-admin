@@ -10,6 +10,8 @@ import { toStatColumns, measureGlbBuffer, deriveAssetClass } from '../lib/glb.js
 import { GlbReviewBanner } from './GlbStats.jsx';
 import GlbStudio from './GlbStudio.jsx';
 import CraftGuideFields, { RANKS } from './CraftGuideFields.jsx';
+import { serializeZone } from '../lib/placementSeat.js';
+import PlacementZoneRow from './PlacementZoneRow.jsx';
 
 const ASSET_TYPES = [
   { value: '2D',      label: '2D Image',       folder: 'elements/files/2D' },
@@ -559,11 +561,7 @@ export default function AddElement() {
         // ('proud' = solid body stands off the wall, 'flush' = centred); otherwise the mode string.
         // Auto seat is config-driven in core (scatter→flush, else proud) — see PLACEMENT_CONFIG.md.
         for (const zone of applicableZones) {
-          const mode = placementConfig[zone] || 'hug';
-          const seat = seatConfig[zone];
-          builtPlacementConfig[zone] = (mode === 'hug' && (seat === 'proud' || seat === 'flush'))
-            ? { mode, seat }
-            : mode;
+          builtPlacementConfig[zone] = serializeZone(placementConfig[zone] || 'hug', seatConfig[zone]);
         }
         if (placementScale !== '') builtPlacementConfig.r = parseFloat(placementScale);
         // Optional size-dial bounds in the designer: { min, max } (each independent). r is the
@@ -1024,29 +1022,18 @@ export default function AddElement() {
             <div style={s.field}>
               <label style={s.label}>Placement Config</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {applicableZones.map(zone => {
-                  const zoneLabel = CAKE_ZONES.find(z => z.value === zone)?.label ?? zone;
-                  const mode = placementConfig[zone] ?? 'hug';
-                  // Seat depth applies only to a WALL hug (side/middle_tier) — verge/stand/perch seat by
-                  // their own logic. Auto = config-driven default in core (scatter→flush, else proud).
-                  const showSeat = (zone === 'side' || zone === 'middle_tier') && mode === 'hug';
-                  return (
-                    <div key={zone} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>{zoneLabel}</span>
-                      <select style={{ ...s.select, flex: 1 }} value={mode} onChange={e => setPlacementConfig(c => ({ ...c, [zone]: e.target.value }))}>
-                        {PLACEMENT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                      </select>
-                      {showSeat && (
-                        <select style={{ ...s.select, flex: 1 }} value={seatConfig[zone] ?? 'auto'} title="How a solid piece sits against the wall"
-                          onChange={e => setSeatConfig(c => ({ ...c, [zone]: e.target.value }))}>
-                          <option value="auto">seat: auto (default)</option>
-                          <option value="proud">seat: proud (stands off wall)</option>
-                          <option value="flush">seat: flush (into wall)</option>
-                        </select>
-                      )}
-                    </div>
-                  );
-                })}
+                {applicableZones.map(zone => (
+                  <PlacementZoneRow
+                    key={zone}
+                    zone={zone}
+                    zoneLabel={CAKE_ZONES.find(z => z.value === zone)?.label ?? zone}
+                    mode={placementConfig[zone] ?? 'hug'}
+                    seat={seatConfig[zone]}
+                    modes={PLACEMENT_MODES}
+                    selectStyle={s.select}
+                    onModeChange={v => setPlacementConfig(c => ({ ...c, [zone]: v }))}
+                    onSeatChange={v => setSeatConfig(c => ({ ...c, [zone]: v }))} />
+                ))}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Default scale (r)</span>
                   <input type="number" min="0.1" step="0.1" style={{ ...s.input, flex: 1 }} value={placementScale} placeholder="e.g. 2.5 — leave blank for auto" onChange={e => setPlacementScale(e.target.value)} />
