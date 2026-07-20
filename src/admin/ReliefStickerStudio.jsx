@@ -8,7 +8,7 @@ import { fetchGlobalElement } from '../lib/api.js';
 // Solid-slab geometry — the SAME builder the designer renders for placement_config.relief.solid, so the
 // studio preview is WYSIWYG (one builder in spattoo-core, no mirrored copy to drift). `corsUrl` is the
 // designer's own R2 qualifier — a plain fetch of an element image can otherwise hit a non-CORS cache entry.
-import { buildSolidReliefGeometry, dominantColorOfImage, buildSolidWallMaterial, corsUrl, RECOLOR_METHODS, SOLID_FINISHES, SOLID_FINISH_ORDER } from '@spattoo/designer';
+import { buildSolidReliefGeometry, dominantColorOfImage, buildSolidWallMaterial, corsUrl, RECOLOR_METHODS, SOLID_FINISHES, SOLID_FINISH_ORDER, printExposure, PRINT_NEUTRAL } from '@spattoo/designer';
 
 // method → which param it thresholds on ('sat' | 'guard' | null). Straight from the renderer's own registry,
 // so a method added in core can't leave this studio authoring the wrong key.
@@ -331,12 +331,15 @@ export default function ReliefStickerStudio() {
   const [sheen, setSheen] = useState(0);
   const [envIntensity, setEnvIntensity] = useState(0.4);
   const [toneMapped, setToneMapped] = useState(false);
-  // PRINT FINISH — top-level placement_config.print_finish { saturation, emissive }, NOT nested under relief:
-  // it applies to BOTH the flat and the relief 2D-sticker material paths in the designer. `emissive` is the
-  // decal's self-illumination (brightens + re-saturates without touching the cake); `saturation` is an albedo
-  // chroma pre-boost so the print survives the lit-render wash. Absent → the renderer's defaults (1.12 / 0.22).
-  const [printEmissive, setPrintEmissive] = useState(0.22);
-  const [printSaturation, setPrintSaturation] = useState(1.12);
+  // PRINT FINISH — top-level placement_config.print_finish { saturation, gain, shading }, NOT nested under
+  // relief: it applies to BOTH the flat and the relief 2D-sticker material paths. These are now OPTIONAL
+  // ARTISTIC overrides: the designer renders a print at exactly 1× its artwork by construction (spattoo-core
+  // shared/printExposure.js), so nothing needs calibrating per element. They default to the neutral values
+  // and are OMITTED from the exported config unless the author actually moves them — the old studio stamped
+  // its defaults into every element it touched, which is how {emissive:0.22, saturation:1.12} got frozen onto
+  // 7 elements and the 1.4× overshoot was baked across the library. `emissive` is gone (the renderer ignores it).
+  const [printSaturation, setPrintSaturation] = useState(PRINT_NEUTRAL.saturation);
+  const [printGain, setPrintGain] = useState(PRINT_NEUTRAL.gain);
   const [zone, setZone] = useState('side');
   const [mode, setMode] = useState('hug');
   const [size, setSize] = useState(0.95);
@@ -448,7 +451,8 @@ export default function ReliefStickerStudio() {
     set(b.flattenThin, setFlattenThin);
     set(b.flatTop, setFlatTop);
     set(pc?.print_finish?.saturation, setPrintSaturation);
-    set(pc?.print_finish?.emissive, setPrintEmissive);
+    set(pc?.print_finish?.gain, setPrintGain);
+    // `print_finish.emissive` is the LEGACY key: the designer ignores it and re-saving drops it.
     // `recolor`'s PRESENCE is the toggle; its METHOD is authored on the element (AddElement /
     // ManageElements), so carry it through untouched rather than re-stamping this studio's default.
     // Take the recolor object WHOLE — method, sat, guard, default, maxRegions. Its presence is the toggle.
@@ -607,6 +611,15 @@ export default function ReliefStickerStudio() {
   // The relief recipe to drop into the element's placement_config (see core bake plan): runtime
   // material knobs + a `bake` block (the params the ingest step rebuilds the normal/displacement maps
   // from). Placement (zone/size/position) is set per-element in the designer, so it's not included.
+  // print_finish, built from ONLY the sliders the author actually moved off neutral — `null` (→ the key is
+  // omitted entirely) in the common case. A print renders as its artwork with no config at all, so writing
+  // a "default" print_finish is never right: it freezes the element against the exposure model.
+  const printFinishCfg = useMemo(() => {
+    const p = {};
+    if (+printSaturation.toFixed(2) !== PRINT_NEUTRAL.saturation) p.saturation = +printSaturation.toFixed(2);
+    if (+printGain.toFixed(2) !== PRINT_NEUTRAL.gain) p.gain = +printGain.toFixed(2);
+    return Object.keys(p).length ? p : null;
+  }, [printSaturation, printGain]);
   const reliefConfig = useMemo(() => ({
     // Recolour enabled → mark the element multi-colour recolourable in the designer (also set
     // allowed_actions.color:true on the element). The per-region colours are chosen per instance.
@@ -654,12 +667,12 @@ export default function ReliefStickerStudio() {
       ...(maskPainted && maskRef.current ? { flatMask: maskToDataURL(maskRef.current) } : {}),
     },
     // Per-element print finish — TOP-LEVEL (applies to flat AND relief 2D stickers), not under `relief`.
-    print_finish: {
-      saturation: +printSaturation.toFixed(2),
-      emissive: +printEmissive.toFixed(2),
-    },
+    // ONLY written when the author actually moved a slider off neutral. A print already renders as its
+    // artwork, so the common case must write NOTHING: a stamped "default" freezes the element against the
+    // exposure model and is exactly how the old overshoot got baked into the library.
+    ...(printFinishCfg ? { print_finish: printFinishCfg } : {}),
     // roughness/sheen intentionally absent from the deps — they no longer affect the exported config.
-  }), [recolor, recolorCfg, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, solidWallColor, solidColor, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printSaturation, printEmissive]);
+  }), [recolor, recolorCfg, recolorGuard, lift, normalScale, envIntensity, toneMapped, solid, solidEdge, solidFinish, solidWallColor, solidColor, puff, blur, edgeRound, detail, grain, delit, flipY, flattenThin, flatTop, maskVersion, maskPainted, printFinishCfg]);
   const configText = useMemo(() => JSON.stringify(reliefConfig, null, 2), [reliefConfig]);
   function copyConfig() { navigator.clipboard?.writeText(configText); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
@@ -688,12 +701,17 @@ export default function ReliefStickerStudio() {
   // on the front cap. `material={[front, wall]}` sets the array directly (mirrors core CakeCanvas).
   const solidMats = useMemo(() => {
     if (!solid || !albedoTex || !maps) return null;
+    // Print exposure from the SHARED model (@spattoo/designer), never re-derived here — a studio that
+    // computes its own print brightness drifts from the cake, and that drift IS the original "vivid in the
+    // studio, dull on the cake" bug. Same two albedo multipliers the designer sets.
+    const px = printExposure({ saturation: printSaturation, gain: printGain });
     const front = new THREE.MeshPhysicalMaterial({
       map: albedoTex, normalMap: maps.normal, normalScale: nScale,
+      color: new THREE.Color(px.diffuse, px.diffuse, px.diffuse),
       roughness, metalness: 0,
       sheen, sheenColor: new THREE.Color('#ffffff'), sheenRoughness: 0.85,
       envMapIntensity: envIntensity, toneMapped, side: THREE.DoubleSide,
-      emissive: new THREE.Color('#ffffff'), emissiveMap: albedoTex, emissiveIntensity: printEmissive,
+      emissive: new THREE.Color(px.selfLit, px.selfLit, px.selfLit), emissiveMap: albedoTex, emissiveIntensity: 1,
     });
     // Side/back walls, resolved EXACTLY as the designer does (CakeCanvas solidMats): a recolourable element
     // always auto-samples the final albedo so the walls track the customer's hue; otherwise the authored
@@ -703,10 +721,10 @@ export default function ReliefStickerStudio() {
     // samples the print per-point (trunk brown, leaves green) via the geometry's uv1; an authored flat
     // solidColor overrides it. Cloned grain normal + print map are disposed in the cleanup below.
     const flatOverride = !recolor && !!solidColor;
-    const wall = buildSolidWallMaterial(solidFinish, wallHex, printEmissive,
+    const wall = buildSolidWallMaterial(solidFinish, wallHex, printExposure({ gain: printGain }).selfLit,
       { printMap: (solidWallColor === 'print' && !flatOverride) ? albedoTex : null });
     return [front, wall];
-  }, [solid, albedoTex, maps, nScale, roughness, sheen, envIntensity, toneMapped, printEmissive, solidFinish, solidColor, solidWallColor, recolor, autoWallHex]);
+  }, [solid, albedoTex, maps, nScale, roughness, sheen, envIntensity, toneMapped, printSaturation, printGain, solidFinish, solidColor, solidWallColor, recolor, autoWallHex]);
   // Dispose the wall's CLONES (index 1): its fondant normal and, in `local` mode, its print-map clone.
   // Never the front's shared maps.normal / albedoTex. `map === emissiveMap` on the wall, so dispose once.
   useEffect(() => () => {
@@ -794,9 +812,11 @@ export default function ReliefStickerStudio() {
                       alphaTest={0.5} alphaToCoverage roughness={roughness} metalness={0}
                       sheen={sheen} sheenColor={'#ffffff'} sheenRoughness={0.85}
                       envMapIntensity={envIntensity} toneMapped={toneMapped} side={THREE.DoubleSide}
-                      // Preview the print_finish "Brightness" slider so authoring is WYSIWYG — same emissive
-                      // lift core applies (emissiveMap = the albedo). Saturation is previewed in albedoTex.
-                      emissive={'#ffffff'} emissiveMap={albedoTex} emissiveIntensity={printEmissive}
+                      // Print exposure from the SHARED model, so the preview cannot drift from the cake
+                      // (that drift is the original "vivid here, dull there" bug). Saturation rides albedoTex.
+                      color={new THREE.Color(...Array(3).fill(printExposure({ gain: printGain }).diffuse))}
+                      emissive={new THREE.Color(...Array(3).fill(printExposure({ gain: printGain }).selfLit))}
+                      emissiveMap={albedoTex} emissiveIntensity={1}
                     />
                   </mesh>
                   )}
@@ -1062,9 +1082,9 @@ export default function ReliefStickerStudio() {
             {/* PRINT FINISH — exported as top-level placement_config.print_finish (flat AND relief 2D stickers). */}
             <div style={S.group}>
             <div style={S.groupTitle}>Print finish</div>
-            <Slider label="Brightness" value={printEmissive} set={setPrintEmissive} min={0} max={0.5} step={0.01} />
-            <Slider label="Saturation" value={printSaturation} set={setPrintSaturation} min={1} max={1.5} step={0.01} />
-            <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>Decal self-illumination + albedo chroma pre-boost so the print survives the cake&rsquo;s lit-render wash. Absent → designer defaults (1.12 / 0.22).</div>
+            <Slider label="Exposure" value={printGain} set={setPrintGain} min={0.2} max={1.5} step={0.01} />
+            <Slider label="Saturation" value={printSaturation} set={setPrintSaturation} min={0.5} max={1.5} step={0.01} />
+            <div style={{ fontSize: 10.5, color: '#9BB5A2', fontWeight: 600, marginBottom: 6 }}>Leave these at 1. A print now renders as <b>exactly its artwork</b> on the cake — no per-element calibration. Move them only for a deliberate look; anything left at 1 is omitted from the config.</div>
             </div>{/* /Print finish */}
 
             <div style={S.group}>
