@@ -13,7 +13,7 @@ import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 import { statsFromElement } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
-import { serializeZone, zoneValueMode, zoneValueSeat, zoneShowsSeat } from '../lib/placementSeat.js';
+import { serializeZone, zoneValueMode, zoneValueSeat, zoneShowsSeat, zoneShowsInsert, splitZoneValue } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
 
 const CAKE_ZONES = [
@@ -24,12 +24,13 @@ const CAKE_ZONES = [
   { value: 'board',       label: 'Board' },
 ];
 
+// Positions only. `insert` is NO LONGER a position — it's a per-zone MODIFIER (a checkbox on the
+// stand/hug poses, see PlacementZoneRow + zoneShowsInsert), so it stays out of this list.
 const PLACEMENT_MODES = [
   { value: 'hug',              label: 'hug (default)' },   // explicit — saved as "hug", not omitted
   { value: 'stand',            label: 'stand' },
   { value: 'perch',            label: 'perch (sit on edge)' },  // figure seated on the rim, legs over
   { value: 'verge',            label: 'verge (lean over edge)' }, // rests on the rim lip, reclines outward
-  { value: 'insert',           label: 'insert (buried, angled into cake)' }, // base sunk into the surface
 ];
 
 // Default placement_config for cream_piping elements. When an element has no
@@ -466,10 +467,10 @@ export default function ManageElements() {
   const [vergeAngle,     setVergeAngle]     = useState('');   // verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]   = useState('');   // verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset] = useState('');   // verge.edge_inset (blank = 0)
-  // Insert (base sunk into the surface at an angle — chocolate bars, sparklers) — placement_config.insert object.
-  const [insertDepth,   setInsertDepth]    = useState('');   // insert.depth: 0–1 fraction buried (blank = default)
-  const [insertLean,    setInsertLean]     = useState('');   // insert.lean_deg: tilt from surface normal (blank = 0)
-  const [insertJitter,  setInsertJitter]   = useState('');   // insert.jitter_deg: random ± spread (blank = 0)
+  // Insert (base sunk into the surface at an angle — chocolate bars, sparklers) is a per-zone
+  // MODIFIER now (rides `placement_config[zone].insert`, like `seat`), NOT a global position. One
+  // entry per zone that has it on: { [zone]: { depth?, lean_deg?, jitter_deg? } } ({} = on, defaults).
+  const [insertConfig,  setInsertConfig]   = useState({});
   // Folded sticker (2D) + pixel-recolour region — config-driven capabilities (see spattoo-core).
   const [foldable,      setFoldable]      = useState(false);
   const [foldAngle,     setFoldAngle]     = useState('');
@@ -574,9 +575,7 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
-    setInsertDepth(pc.insert?.depth != null ? String(pc.insert.depth) : '');
-    setInsertLean(pc.insert?.lean_deg != null ? String(pc.insert.lean_deg) : '');
-    setInsertJitter(pc.insert?.jitter_deg != null ? String(pc.insert.jitter_deg) : '');
+    // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
@@ -643,26 +642,34 @@ export default function ManageElements() {
       return JSON.stringify(cur, null, 2);
     });
   }
-  // Split a placement_config's per-zone values (string OR { mode, seat }) into the mode + seat
-  // control maps. Used by both element-load and JSON-edit sync so they can't drift. Migrates the
-  // legacy global `side_proud` flag → a per-zone 'proud' seat when no explicit seat is authored.
+  // Split a placement_config's per-zone values (string OR { mode, seat, insert }) into the mode +
+  // seat + insert control maps. Used by both element-load and JSON-edit sync so they can't drift.
+  // `splitZoneValue` promotes the legacy `insert` POSITION (mode:"insert" + shared global insert)
+  // into { mode:<stand|hug>, insert:{…} }. Migrates the legacy global `side_proud` flag → a per-zone
+  // 'proud' seat when no explicit seat is authored.
   function loadZonesFromPc(pc, zones) {
-    const modeConf = {}, seatConf = {};
+    const modeConf = {}, seatConf = {}, insertConf = {};
     (zones ?? []).forEach(z => {
       const raw = pc[z];
-      const mode = zoneValueMode(raw);
+      const { mode, insert } = splitZoneValue(raw, z, pc.insert);
       if (raw != null) modeConf[z] = mode;
       let seat = zoneValueSeat(raw);
       if (seat === 'auto' && pc.side_proud === true && zoneShowsSeat(z, mode)) seat = 'proud';
       if (seat !== 'auto') seatConf[z] = seat;
+      if (insert != null && zoneShowsInsert(mode)) insertConf[z] = insert;
     });
     setPlacementZoneConfig(modeConf);
     setSeatConfig(seatConf);
+    setInsertConfig(insertConf);
   }
-  // Write a zone's mode + seat back into both control maps AND the placement_config JSON (one path,
-  // used by both selects). Seat only sticks on a wall hug; the JSON stores the string-or-object form.
-  function writeZone(zone, mode, seat) {
+  // Write a zone's mode + seat + insert modifier back into all three control maps AND the
+  // placement_config JSON (ONE path, used by every zone control). A seat only sticks on a wall hug;
+  // an insert modifier only on a pose that supports it (stand/hug). `insert` is null (off) or a params
+  // object (on; {} = defaults). Also clears the LEGACY global `side_proud`/`insert` keys — they're
+  // per-zone now, so any zone edit migrates them away. The JSON stores the string-or-object form.
+  function commitZone(zone, mode, seat, insert) {
     const effSeat = zoneShowsSeat(zone, mode) ? seat : 'auto';
+    const effInsert = zoneShowsInsert(mode) ? (insert ?? null) : null;
     setPlacementZoneConfig(c => ({ ...c, [zone]: mode }));
     setSeatConfig(c => {
       const next = { ...c };
@@ -670,7 +677,21 @@ export default function ManageElements() {
       else delete next[zone];
       return next;
     });
-    patchPc({ [zone]: serializeZone(mode, effSeat), side_proud: null });
+    setInsertConfig(c => {
+      const next = { ...c };
+      if (effInsert) next[zone] = effInsert; else delete next[zone];
+      return next;
+    });
+    patchPc({ [zone]: serializeZone(mode, effSeat, effInsert), side_proud: null, insert: null });
+  }
+  // A single insert param field edit for a zone: blank removes the key, else parse. Passing {} (all
+  // blank) keeps insert ON with defaults.
+  function setZoneInsertField(zone, mode, field, value) {
+    const cur = insertConfig[zone] ?? {};
+    const next = { ...cur };
+    if (value === '' || value == null) delete next[field];
+    else next[field] = parseFloat(value);
+    commitZone(zone, mode, seatConfig[zone], next);
   }
   // Reflect placement_config.print_finish into its controls (used by both load + JSON-edit sync — one
   // helper, so the two paths can't drift). Blank when absent: the designer's defaults then apply.
@@ -719,9 +740,7 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
-    setInsertDepth(pc.insert?.depth != null ? String(pc.insert.depth) : '');
-    setInsertLean(pc.insert?.lean_deg != null ? String(pc.insert.lean_deg) : '');
-    setInsertJitter(pc.insert?.jitter_deg != null ? String(pc.insert.jitter_deg) : '');
+    // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
@@ -772,15 +791,6 @@ export default function ManageElements() {
     if (ei !== '') v.edge_inset = parseFloat(ei);
     return Object.keys(v).length ? v : '';
   };
-  // The insert descriptor (base sunk into the surface at an angle) — only non-blank fields; all blank →
-  // '' so patchPc drops the key and the designer uses its defaults.
-  const insertDesc = (d = insertDepth, l = insertLean, j = insertJitter) => {
-    const v = {};
-    if (d !== '') v.depth      = parseFloat(d);
-    if (l !== '') v.lean_deg   = parseFloat(l);
-    if (j !== '') v.jitter_deg = parseFloat(j);
-    return Object.keys(v).length ? v : '';
-  };
   // Build the placement_config.scale patch from the min/max inputs: an object with only the set
   // keys, or '' so patchPc removes `scale` entirely when all are blank. The sibling fields' current
   // strings are passed through so editing one (min/max/step) keeps the others.
@@ -800,12 +810,18 @@ export default function ManageElements() {
     catch (e) { throw new Error(`placement_config is not valid JSON — fix it before saving (${e.message}).`); }
     // Merge zone config — write the chosen mode for EVERY applicable zone, explicitly (default
     // 'hug'). No more "absent means hug": the saved config states the mode for each zone, so the
-    // designer never has to guess. A wall-hug zone with a non-default seat serializes to the
-    // { mode, seat } object form; otherwise the plain mode string (shared serializeZone).
+    // designer never has to guess. Per-zone modifiers (`seat` on a wall hug, `insert` on a stand/hug
+    // pose) serialize into the { mode, … } object form; otherwise the plain mode string (shared
+    // serializeZone). The legacy GLOBAL `insert` key is dropped — insert is per-zone now.
     applicableZones.forEach(z => {
       const mode = placementZoneConfig[z] || 'hug';
-      parsedConfig[z] = serializeZone(mode, zoneShowsSeat(z, mode) ? seatConfig[z] : undefined);
+      parsedConfig[z] = serializeZone(
+        mode,
+        zoneShowsSeat(z, mode) ? seatConfig[z] : undefined,
+        zoneShowsInsert(mode) ? insertConfig[z] : undefined,
+      );
     });
+    delete parsedConfig.insert;
     if (placementScale !== '') parsedConfig.r = parseFloat(placementScale);
     else delete parsedConfig.r;
     // Optional size-dial bounds { min, max, step } (each independent). r is the default WITHIN this
@@ -1799,10 +1815,14 @@ export default function ManageElements() {
                             zoneLabel={CAKE_ZONES.find(z => z.value === zone)?.label ?? zone}
                             mode={mode}
                             seat={seatConfig[zone]}
+                            insert={insertConfig[zone] ?? null}
                             modes={PLACEMENT_MODES}
                             selectStyle={s.select}
-                            onModeChange={v => writeZone(zone, v, seatConfig[zone])}
-                            onSeatChange={v => writeZone(zone, mode, v)} />
+                            inputStyle={s.input}
+                            onModeChange={v => commitZone(zone, v, seatConfig[zone], insertConfig[zone])}
+                            onSeatChange={v => commitZone(zone, mode, v, insertConfig[zone])}
+                            onInsertToggle={on => commitZone(zone, mode, seatConfig[zone], on ? (insertConfig[zone] ?? {}) : null)}
+                            onInsertField={(field, val) => setZoneInsertField(zone, mode, field, val)} />
                         );
                       })}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -1973,25 +1993,8 @@ export default function ManageElements() {
                           </div>
                         </>
                       )}
-                      {applicableZones.some(z => (placementZoneConfig[z] ?? 'hug') === 'insert') && (
-                        <>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Insert</span>
-                            <input type="number" min="0" max="1" step="0.05" style={{ ...s.input, flex: 1 }} value={insertDepth}
-                              placeholder="depth 0–1 — e.g. 0.3 (blank = default)"
-                              onChange={e => { setInsertDepth(e.target.value); patchPc({ insert: insertDesc(e.target.value) }); }} />
-                            <input type="number" min="-89" max="89" step="1" style={{ ...s.input, flex: 1 }} value={insertLean}
-                              placeholder="lean° — e.g. 15 (blank = 0)"
-                              onChange={e => { setInsertLean(e.target.value); patchPc({ insert: insertDesc(insertDepth, e.target.value) }); }} />
-                            <input type="number" min="0" max="89" step="1" style={{ ...s.input, flex: 1 }} value={insertJitter}
-                              placeholder="jitter° — e.g. 20 (blank = 0)"
-                              onChange={e => { setInsertJitter(e.target.value); patchPc({ insert: insertDesc(insertDepth, insertLean, e.target.value) }); }} />
-                          </div>
-                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                            Insert buries the base into the surface at an angle (chocolate bars, sparklers). The zone above picks the surface — top (stands up) or side (pokes out). Depth = fraction of length sunk in (blank = default). Lean = tilt from the surface normal° (0 = straight in). Jitter = random ± spread per instance so scattered pieces fan out.
-                          </div>
-                        </>
-                      )}
+                      {/* Insert is now a per-zone MODIFIER — its depth/lean/jitter live in each zone's
+                          row above (PlacementZoneRow, gated by zoneShowsInsert). No global block. */}
                       {selectedEl?.image_url && !isGlb && (
                         <>
                           <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}>
