@@ -30,6 +30,22 @@ export function zoneShowsInsert(mode) {
   return mode === 'stand' || mode === 'hug';
 }
 
+// Zones whose placement can repeat the element around the perimeter (a "full ring"): the round rim
+// (top edge) and board (base). The ONE predicate for "offer the Full ring toggle", shared by both
+// authoring screens — the same capability pattern as zoneShowsSeat / zoneShowsInsert. The ring is
+// stored as the FLAT top_/bottom_ ring keys (arrangement + ring_finish), NOT the per-zone object, so
+// the checkbox wiring writes those directly (see ringZonePrefix). Mirrors core's symmetric top_/bottom_
+// piping namespaces (spattoo-core pipingLayer.js).
+export function zoneShowsFullRing(zone) {
+  return zone === 'rim' || zone === 'board';
+}
+
+// The config KEY prefix a ring zone writes to: rim → top_ (top edge), board → bottom_ (base) — the same
+// symmetric namespaces core reads. null for any non-ring zone.
+export function ringZonePrefix(zone) {
+  return zone === 'rim' ? 'top' : zone === 'board' ? 'bottom' : null;
+}
+
 // Read the placement mode from a stored zone value (string or { mode, seat }).
 export function zoneValueMode(value, fallback = 'hug') {
   if (value && typeof value === 'object') return value.mode ?? fallback;

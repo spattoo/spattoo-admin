@@ -13,7 +13,7 @@ import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 import { statsFromElement } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
-import { serializeZone, zoneValueMode, zoneValueSeat, zoneShowsSeat, zoneShowsInsert, splitZoneValue } from '../lib/placementSeat.js';
+import { serializeZone, zoneValueMode, zoneValueSeat, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
 
 const CAKE_ZONES = [
@@ -471,6 +471,7 @@ export default function ManageElements() {
   // MODIFIER now (rides `placement_config[zone].insert`, like `seat`), NOT a global position. One
   // entry per zone that has it on: { [zone]: { depth?, lean_deg?, jitter_deg? } } ({} = on, defaults).
   const [insertConfig,  setInsertConfig]   = useState({});
+  const [fullRingConfig, setFullRingConfig] = useState({});   // per ring-zone { rim, board } — mirrors top_/bottom_ring_finish==='element'
   // Folded sticker (2D) + pixel-recolour region — config-driven capabilities (see spattoo-core).
   const [foldable,      setFoldable]      = useState(false);
   const [foldAngle,     setFoldAngle]     = useState('');
@@ -661,6 +662,20 @@ export default function ManageElements() {
     setPlacementZoneConfig(modeConf);
     setSeatConfig(seatConf);
     setInsertConfig(insertConf);
+    // Full ring is a FLAT top_/bottom_ config, not a per-zone value — read it straight off the pc.
+    setFullRingConfig({ rim: pc.top_ring_finish === 'element', board: pc.bottom_ring_finish === 'element' });
+  }
+
+  // Toggle the "full ring" for a rim/board zone. Stored as the FLAT top_/bottom_ ring keys the designer
+  // reads (arrangement:'ring' + ring_finish:'element' so any decoration keeps its real materials), NOT
+  // the per-zone object. rim → top_, board → bottom_ (ringZonePrefix). Clearing removes the keys.
+  function setZoneFullRing(zone, on) {
+    const ns = ringZonePrefix(zone);
+    if (!ns) return;
+    setFullRingConfig(c => ({ ...c, [zone]: on }));
+    patchPc(on
+      ? { [`${ns}_ring_finish`]: 'element', [`${ns}_arrangement`]: 'ring', [`${ns}_arrangements_allowed`]: ['ring', 'single'] }
+      : { [`${ns}_ring_finish`]: null, [`${ns}_arrangement`]: null, [`${ns}_arrangements_allowed`]: null });
   }
   // Write a zone's mode + seat + insert modifier back into all three control maps AND the
   // placement_config JSON (ONE path, used by every zone control). A seat only sticks on a wall hug;
@@ -1816,13 +1831,15 @@ export default function ManageElements() {
                             mode={mode}
                             seat={seatConfig[zone]}
                             insert={insertConfig[zone] ?? null}
+                            fullRing={fullRingConfig[zone] ?? false}
                             modes={PLACEMENT_MODES}
                             selectStyle={s.select}
                             inputStyle={s.input}
                             onModeChange={v => commitZone(zone, v, seatConfig[zone], insertConfig[zone])}
                             onSeatChange={v => commitZone(zone, mode, v, insertConfig[zone])}
                             onInsertToggle={on => commitZone(zone, mode, seatConfig[zone], on ? (insertConfig[zone] ?? {}) : null)}
-                            onInsertField={(field, val) => setZoneInsertField(zone, mode, field, val)} />
+                            onInsertField={(field, val) => setZoneInsertField(zone, mode, field, val)}
+                            onFullRingToggle={on => setZoneFullRing(zone, on)} />
                         );
                       })}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>

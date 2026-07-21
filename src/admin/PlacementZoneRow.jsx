@@ -1,4 +1,4 @@
-import { zoneShowsSeat, zoneShowsInsert } from '../lib/placementSeat.js';
+import { zoneShowsSeat, zoneShowsInsert, zoneShowsFullRing } from '../lib/placementSeat.js';
 
 // One zone's placement controls — a mode (position) select plus, for a wall-hug zone
 // (side/middle_tier), a seat-depth select (auto/proud/flush), plus an INSERT modifier (base sunk into
@@ -7,7 +7,7 @@ import { zoneShowsSeat, zoneShowsInsert } from '../lib/placementSeat.js';
 // ManageElements (edit) render the IDENTICAL row through their own wiring. Which zones/modes show
 // each control lives once in `zoneShowsSeat` / `zoneShowsInsert`. `insert` is null (off) or an object
 // of params (on; {} = on with defaults). See spattoo-core PLACEMENT_CONFIG.md for the semantics.
-export default function PlacementZoneRow({ zone, zoneLabel, mode, seat, insert, modes, selectStyle, inputStyle, onModeChange, onSeatChange, onInsertToggle, onInsertField }) {
+export default function PlacementZoneRow({ zone, zoneLabel, mode, seat, insert, fullRing, modes, selectStyle, inputStyle, onModeChange, onSeatChange, onInsertToggle, onInsertField, onFullRingToggle }) {
   const sel = { ...selectStyle, flex: 1 };
   const num = { ...inputStyle, flex: 1 };
   const showInsert = zoneShowsInsert(mode);
@@ -28,6 +28,13 @@ export default function PlacementZoneRow({ zone, zoneLabel, mode, seat, insert, 
           </select>
         )}
       </div>
+      {zoneShowsFullRing(zone) && onFullRingToggle && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 110, fontSize: 12, fontWeight: 600, color: '#2C4433', cursor: 'pointer' }}
+          title="Repeat this decoration all the way around the perimeter, keeping its real materials">
+          <input type="checkbox" checked={!!fullRing} onChange={e => onFullRingToggle(e.target.checked)} />
+          Show full ring (repeat around the {zoneLabel.toLowerCase()})
+        </label>
+      )}
       {showInsert && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 110 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: '#2C4433', cursor: 'pointer' }}>
