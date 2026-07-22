@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { Captcha, captchaConfigured } from './Captcha.jsx';
 import logo from '../images/spattoo-green.png';
 
 const s = {
@@ -49,13 +50,24 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [captchaToken, setCaptchaToken] = useState(null);
+  const captchaRef = useRef(null);
 
   async function handleLogin(e) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setError(error.message);
+    // captchaToken flows to Supabase only when captcha is configured; it's ignored until the
+    // Supabase dashboard toggle is on, and undefined when no widget is present (no behaviour change).
+    const { error } = await supabase.auth.signInWithPassword({
+      email, password,
+      options: { captchaToken: captchaToken ?? undefined },
+    });
+    if (error) {
+      setError(error.message);
+      captchaRef.current?.reset();   // single-use token — fresh one for the retry
+      setCaptchaToken(null);
+    }
     setLoading(false);
   }
 
@@ -89,7 +101,11 @@ export default function Login() {
                 required
               />
             </div>
-            <button style={{ ...s.btn, opacity: loading ? 0.6 : 1 }} disabled={loading}>
+            <Captcha ref={captchaRef} onVerify={setCaptchaToken} onExpire={() => setCaptchaToken(null)}
+              style={{ marginTop: 8 }} />
+            <button
+              style={{ ...s.btn, opacity: loading || (captchaConfigured && !captchaToken) ? 0.6 : 1 }}
+              disabled={loading || (captchaConfigured && !captchaToken)}>
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
             {error && <div style={s.error}>{error}</div>}
