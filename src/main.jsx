@@ -1,5 +1,15 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
+// SEC-WEB-7 — @spattoo/designer NAMES its UI font but no longer LOADS it (it used to
+// @import Google Fonts from 17 places, putting a third-party origin in every consumer
+// and leaking the visitor's IP to Google). Each host app now self-hosts the families
+// the library declares in REQUIRED_FONT_FAMILIES. These @fontsource packages ship the
+// woff2 files locally, so Vite bundles them and nothing is fetched from a CDN.
+// Quicksand = the whole admin/designer chrome; Playfair Display = the CreateTemplate
+// screen only. If these imports are removed, the UI silently falls back to a system
+// font — the library's warnIfFontsMissing() will say so in the console.
+import '@fontsource-variable/quicksand';
+import '@fontsource/playfair-display/700.css';
 import { supabase } from './lib/supabase.js';
 import Login from './auth/Login.jsx';
 import logo from './images/spattoo-green.png';

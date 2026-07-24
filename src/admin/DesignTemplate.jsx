@@ -147,7 +147,6 @@ export default function DesignTemplate() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={s.page}>
         <div style={s.header}>
           <span style={s.title}>Design Template</span>

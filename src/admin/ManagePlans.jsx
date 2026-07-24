@@ -315,7 +315,6 @@ export default function ManagePlans() {
 
   return (
     <div style={s.page}>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
         <div style={s.title}>Subscription Plans</div>
         <button onClick={() => setShowAdd(true)} style={{ ...s.btn, background: '#2C4433', color: '#fff', marginLeft: 'auto' }}>

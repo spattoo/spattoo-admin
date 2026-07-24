@@ -459,7 +459,6 @@ export default function GenerateModel() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={s.page}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={s.title}>Generate 3D Model</div>

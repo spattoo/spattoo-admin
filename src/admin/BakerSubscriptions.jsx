@@ -425,7 +425,6 @@ export default function BakerSubscriptions() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#EDEAE2', fontFamily: "'Quicksand', sans-serif", padding: 32 }}>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
         <div style={{ fontSize: 20, fontWeight: 800, color: '#2C4433' }}>Baker Subscriptions</div>

@@ -972,7 +972,6 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={s.page}>
         <div style={{ maxWidth: 1140, margin: '0 auto' }}>
           <div style={s.title}>GLB Studio</div>

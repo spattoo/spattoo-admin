@@ -1235,7 +1235,6 @@ export default function ManageElements() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div style={s.page}>
         <div style={s.title}>Manage Elements</div>

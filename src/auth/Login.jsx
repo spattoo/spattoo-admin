@@ -73,7 +73,6 @@ export default function Login() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={s.page}>
         <div style={s.card}>
           <img src={logo} alt="Spattoo" style={s.logo} />

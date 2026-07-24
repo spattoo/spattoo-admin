@@ -775,7 +775,6 @@ export default function ReliefStickerStudio() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={S.page}>
         <div style={{ maxWidth: 1400, margin: '0 auto' }}>
           <div style={S.title}>Relief Sticker Studio</div>
