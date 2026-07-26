@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { fetchDietaryRequirements, fetchFlavourDietaryConflicts, updateFlavourDietaryConflicts } from '../lib/api.js';
 
 export default function ManageFlavours({ supabase }) {
   const [flavours, setFlavours]   = useState([]);
@@ -8,6 +9,43 @@ export default function ManageFlavours({ supabase }) {
   const [editingId, setEditingId] = useState(null);
 
   const [form, setForm] = useState({ name: '', description: '' });
+
+  // ── The global dietary baseline ─────────────────────────────────────────────
+  // What a flavour cannot be made as, for EVERY baker. Authored here so it is stated
+  // once instead of 25,000 times — "hazelnut praline is not nut-free" is a fact about
+  // the flavour, not about anyone's kitchen. Whether a given baker does an eggless
+  // version of their tiramisu is theirs to say, in their own settings, and their answer
+  // always wins over this one.
+  //
+  // Via the API (not the direct supabase client the rest of this screen still uses),
+  // because it is authored master data and the resolution rule lives server-side.
+  const [diet,     setDiet]     = useState([]);
+  const [baseline, setBaseline] = useState({});   // { [flavourId]: ['nut_free', ...] }
+  const [busyKey,  setBusyKey]  = useState(null); // `${flavourId}|${key}` while in flight
+
+  useEffect(() => {
+    fetchDietaryRequirements().then(setDiet).catch(() => {});
+    fetchFlavourDietaryConflicts().then(setBaseline).catch(() => {});
+  }, []);
+
+  // Saved on click, one flavour at a time — no Save button to forget. The chip shows
+  // the truth only once the server has accepted it, so a failed write cannot leave the
+  // screen claiming a default that was never stored.
+  async function toggleBaseline(flavourId, key) {
+    const id = `${flavourId}|${key}`;
+    if (busyKey) return;
+    const current = baseline[flavourId] ?? [];
+    const next = current.includes(key) ? current.filter(k => k !== key) : [...current, key];
+    setBusyKey(id); setMsg(null);
+    try {
+      await updateFlavourDietaryConflicts(flavourId, next);
+      setBaseline(b => ({ ...b, [flavourId]: next }));
+    } catch (e) {
+      setMsg(e.message || 'Could not save that.');
+    } finally {
+      setBusyKey(null);
+    }
+  }
 
   function toTitleCase(str) {
     return str.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
@@ -143,7 +181,7 @@ export default function ManageFlavours({ supabase }) {
             <div style={s.empty}>No flavours yet. Add one above.</div>
           )}
           {flavours.map(f => (
-            <div key={f.id} style={{ ...s.row, opacity: f.is_active ? 1 : 0.45 }}>
+            <div key={f.id} style={{ ...s.row, opacity: f.is_active ? 1 : 0.45, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={s.rowName}>{f.name}</div>
                 {f.description && <div style={s.rowDesc}>{f.description}</div>}
@@ -159,6 +197,32 @@ export default function ManageFlavours({ supabase }) {
                 </button>
                 <button style={{ ...s.actionBtn, color: '#C0392B' }} onClick={() => handleDelete(f.id)} title="Delete">Delete</button>
               </div>
+
+              {/* Worded as a DEFAULT, not a verdict — a baker can overturn any of these,
+                  and the label has to say so or an admin will read it as a ruling. */}
+              {diet.length > 0 && (
+                <div style={s.dietRow}>
+                  <span style={s.dietLabel}>USUALLY CAN'T BE MADE</span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {diet.map(d => {
+                      const on   = (baseline[f.id] ?? []).includes(d.key);
+                      const busy = busyKey === `${f.id}|${d.key}`;
+                      return (
+                        <button
+                          key={d.key}
+                          type="button"
+                          onClick={() => toggleBaseline(f.id, d.key)}
+                          disabled={!!busyKey}
+                          style={{ ...s.dietChip, ...(on ? s.dietChipOn : null), opacity: busy ? 0.5 : 1 }}
+                          title={`Default for every baker — each can override "${d.label}" for ${f.name}`}
+                        >
+                          {d.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -179,6 +243,14 @@ const s = {
     border: '1.5px solid #C5D4C8', padding: '24px 28px',
   },
   cardTitle: { fontSize: 14, fontWeight: 800, color: '#2C4433', marginBottom: 20, letterSpacing: 0.3 },
+  dietRow:   { width: '100%', display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' },
+  dietLabel: { fontSize: 9, fontWeight: 800, color: '#9BB5A2', letterSpacing: 0.6, flexShrink: 0 },
+  dietChip: {
+    padding: '4px 10px', borderRadius: 9, cursor: 'pointer',
+    border: '1.5px solid #C5D4C8', background: 'transparent',
+    fontSize: 11, fontWeight: 700, color: '#6B8C74', fontFamily: 'inherit',
+  },
+  dietChipOn: { borderColor: '#2C4433', background: '#EDF3EE', color: '#2C4433' },
   field:  { marginBottom: 16 },
   label: {
     display: 'block', fontSize: 11, fontWeight: 700,

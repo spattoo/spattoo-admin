@@ -59,7 +59,35 @@ export async function patch(path, body) {
   return res.json();
 }
 
+export async function put(path, body) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'PUT',
+    headers: await authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export { get };
+
+// ── Flavour ↔ dietary baseline ────────────────────────────────────────────────
+// The GLOBAL default: what a flavour cannot be made as, for every baker ("hazelnut
+// praline is not nut-free"). Per-kitchen facts ("we don't do eggless tiramisu") are the
+// baker's to state in their own settings, never authored here.
+//
+// It is a DEFAULT, not a verdict — any baker can overturn any row, which is what keeps
+// it consistent with ToS §3.4 (Spattoo records, and verifies nothing). It drives a
+// warning that points the customer at the baker; it never blocks an order.
+export async function fetchFlavourDietaryConflicts() {
+  return get('/api/admin/flavours/dietary-conflicts');
+}
+export async function updateFlavourDietaryConflicts(flavourId, requirementKeys) {
+  return put(`/api/admin/flavours/${flavourId}/dietary-conflicts`, { requirementKeys });
+}
+export async function fetchDietaryRequirements() {
+  return get('/api/dietary-requirements');
+}
 
 export async function fetchElementTypes() {
   return get('/api/element-types');
