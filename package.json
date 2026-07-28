@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "check:dup": "jscpd src",
+    "check:feature-docs": "node ../spattoo-docs/bin/check-feature-docs.mjs --repo spattoo-admin",
     "verify": "npm run check:dup"
   },
   "dependencies": {
