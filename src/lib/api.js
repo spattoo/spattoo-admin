@@ -381,8 +381,11 @@ export async function getDecorationGuide(elementId) {
 // Build or rebuild it. UNMETERED — this is our catalogue, and its guides were never a baker's to
 // pay for. `force` replaces an existing guide; without it an existing one returns 409, so nobody
 // silently overwrites a guide a human has already read and approved.
-export async function buildDecorationGuide(elementId, { force = false } = {}) {
-  return post(`/api/admin/elements/${elementId}/decoration-guide`, { force });
+// `quality` overrides the image quality for THIS call only — 'low' | 'medium' | 'high'. The
+// catalogue default is low because it is legible and a quarter of the cost; medium is for the
+// occasional decoration too intricate to read at low, without quadrupling the cost of every guide.
+export async function buildDecorationGuide(elementId, { force = false, quality } = {}) {
+  return post(`/api/admin/elements/${elementId}/decoration-guide`, { force, quality });
 }
 
 // Remove a decoration guide entirely — for a decoration that should NOT have one, where a rebuild

@@ -43,6 +43,10 @@ export default function DecorationGuidePanel({ elementId }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]       = useState(false);
   const [msg, setMsg]         = useState(null);
+  // Low is the catalogue default and is legible for almost everything — see spattoo-api config.js.
+  // Kept per-panel rather than remembered, so a one-off medium rebuild does not quietly become the
+  // setting for every element touched afterwards.
+  const [quality, setQuality] = useState('low');
 
   useEffect(() => {
     let alive = true;
@@ -74,7 +78,7 @@ export default function DecorationGuidePanel({ elementId }) {
     if (busy) return;
     setBusy(true); setMsg(null);
     try {
-      const res = await buildDecorationGuide(elementId, { force });
+      const res = await buildDecorationGuide(elementId, { force, quality });
       // Not a failure: the model looked and judged this printed or pre-made. Worth saying plainly,
       // because it usually means the MEDIUM is wrong rather than that anything broke.
       if (res?.notModelled) {
@@ -169,7 +173,19 @@ export default function DecorationGuidePanel({ elementId }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* The cost multiple is on the option itself. A quality picker with no price attached
+            invites "higher must be better", when higher is four times the cost for a sheet whose
+            information is shape rather than texture. */}
+        <label style={{ fontSize: 11, fontWeight: 700, color: '#8B7C99' }}>
+          Image
+          <select value={quality} onChange={e => setQuality(e.target.value)} disabled={busy}
+            style={{ marginLeft: 6, padding: '7px 8px', borderRadius: 8, border: '1.5px solid #D9CFE0', background: '#fff', fontSize: 12, fontFamily: "'Quicksand', sans-serif", color: '#5B4A6B' }}>
+            <option value="low">Low — default, ~₹1.4</option>
+            <option value="medium">Medium — ~₹5.7</option>
+            <option value="high">High — ~₹22</option>
+          </select>
+        </label>
         {!guide && policy.modelling !== false && (
           <button type="button" style={c.btn(busy)} disabled={busy} onClick={() => build(false)}>
             {busy ? 'Generating…' : 'Generate guide'}
