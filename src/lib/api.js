@@ -363,6 +363,28 @@ export async function saveCraftGuide(elementId, payload) {
   return res.json();
 }
 
+// ── Decoration guide (X-Ray "how do I make this") ─────────────────────────────
+
+// The MODELLING guide for one element: steps, colours, and the build-sequence picture.
+//
+// Separate from getCraftGuide, which reads the NOZZLE guide. They are two rows on the same
+// sidecar table (element_craft_guide, keyed by guide_type) answering different questions —
+// which tip pipes this, versus how do I make this by hand.
+//
+// Also returns `policy` — what X-Ray WOULD offer for this decoration — so an absent guide can be
+// explained rather than shown as an empty panel. "This is a printed sheet" and "nobody has
+// generated one yet" look identical otherwise, and only one is worth acting on.
+export async function getDecorationGuide(elementId) {
+  return get(`/api/admin/elements/${elementId}/decoration-guide`);
+}
+
+// Build or rebuild it. UNMETERED — this is our catalogue, and its guides were never a baker's to
+// pay for. `force` replaces an existing guide; without it an existing one returns 409, so nobody
+// silently overwrites a guide a human has already read and approved.
+export async function buildDecorationGuide(elementId, { force = false } = {}) {
+  return post(`/api/admin/elements/${elementId}/decoration-guide`, { force });
+}
+
 // ── Tags ──────────────────────────────────────────────────────────────────────
 
 export async function fetchAllTags() {

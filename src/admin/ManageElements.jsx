@@ -9,6 +9,7 @@ import {
 } from '../lib/api.js';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
+import DecorationGuidePanel from './DecorationGuidePanel.jsx';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 import { statsFromElement } from '../lib/glb.js';
@@ -413,6 +414,10 @@ export default function ManageElements() {
   const [parentOptions,    setParentOptions]    = useState([]);
   const [capabilities,     setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
   const [defaultColor,     setDefaultColor]     = useState('#F0DEB8');
+  // WHAT IT IS MADE OF. Technique already lives in the element TYPE (Cream Piping vs Palette knife
+  // art), so this is material only — and it decides what X-Ray offers: fondant gets a modelling
+  // guide AND printing, a printed sheet gets only printing, acrylic gets neither.
+  const [medium,           setMedium]           = useState('');
   const [isActive,         setIsActive]         = useState(true);
 
   // Pattern thumbnail regeneration (piping_pattern elements have no GLB to capture from —
@@ -541,6 +546,7 @@ export default function ManageElements() {
     setParentId(el.parent_id ?? '');
     setCapabilities(el.allowed_actions ?? { resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
     setDefaultColor(el.default_color ?? '#F0DEB8');
+    setMedium(el.medium ?? '');
     setPreviewColor(el.default_color ?? '#f5e6c8');   // seed pattern-thumbnail cream from default
     setIsActive(el.is_active ?? true);
     setNewAssetFile(null);
@@ -885,6 +891,9 @@ export default function ManageElements() {
       allowed_zones:    applicableZones,
       allowed_actions:  capabilities,
       default_color:    defaultColor || null,
+      // '' means "not stated" and must reach the API as null, not as an empty string the CHECK
+      // constraint would reject.
+      medium:           medium || null,
       is_active:        isActive,
       description,
       placement_config: parsedConfig,
@@ -1798,6 +1807,34 @@ export default function ManageElements() {
                   </div>
                 )}
 
+                {/* ── Made of ──
+                    MATERIAL only. How it is worked is already the element TYPE — 'Cream Piping'
+                    and 'Palette knife art' are the same material, and that is exactly why this
+                    column does not carry technique.
+
+                    It decides WHAT X-RAY OFFERS, which is why it is worth setting even though it
+                    is optional: fondant gets both a modelling guide and printing at actual size
+                    (bakers substitute one for the other constantly — time, budget, a cake that has
+                    to travel); a printed sheet gets only printing, because there is no hand-made
+                    version of one; acrylic gets neither, being bought rather than made.
+
+                    Blank is safe: X-Ray offers both and the model self-reports when something is
+                    not hand-made, which costs at most one generation. */}
+                {!isPipingConfig && (
+                  <div style={s.field}>
+                    <label style={s.label}>Made of</label>
+                    <select value={medium} onChange={e => setMedium(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2F4A38' }}>
+                      <option value="">Not stated — X-Ray offers both</option>
+                      <option value="fondant">Fondant / gumpaste — guide + print</option>
+                      <option value="chocolate">Modelling chocolate — print only for now</option>
+                      <option value="edible_paper">Edible paper (printed sheet) — print only</option>
+                      <option value="acrylic">Acrylic / non-edible — neither</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                )}
+
                 {/* ── Default color ── */}
                 <div style={s.field}>
                   <label style={s.label}>Default Color</label>
@@ -2141,6 +2178,13 @@ export default function ManageElements() {
                     description={selectedEl.description}
                     thumbnailUrl={selectedEl.thumbnail_url}
                   />
+                )}
+
+                {/* The other half of the same rail: how a decoration is MADE, for the flat
+                    placeables. Piping is excluded because its answer is the nozzle guide above —
+                    the two are never both right for one element. */}
+                {!isPipingConfig && !cloneMode && (
+                  <DecorationGuidePanel key={selectedEl.id} elementId={selectedEl.id} />
                 )}
 
                 {cloneMode ? (
