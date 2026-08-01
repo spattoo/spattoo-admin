@@ -28,8 +28,13 @@ const c = {
   label: { fontSize: 10, fontWeight: 800, color: '#8B7C99', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 5 },
   step: { fontSize: 12.5, color: '#2C2A26', marginBottom: 8, lineHeight: 1.5 },
   swatch: (hex) => ({ width: 16, height: 16, borderRadius: 4, background: hex, border: '1px solid rgba(0,0,0,0.15)', display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }),
-  stepRow: { display: 'flex', gap: 10, alignItems: 'flex-start', padding: 8, borderRadius: 8, background: '#fff', border: '1px solid #EFE9F4' },
-  cell: (bg) => ({ width: 96, height: 96, flexShrink: 0, borderRadius: 6, border: '1px solid #E5DEEC', ...bg }),
+  // auto-fill rather than a fixed column count: the panel sits in a narrow admin sidebar and in a
+  // wide one, and a hardcoded 3-up would be unreadable in the first and wasteful in the second.
+  stepGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 },
+  stepCard: { borderRadius: 10, background: '#fff', border: '1px solid #EFE9F4', overflow: 'hidden' },
+  // Square, because stageSize asks the model for a size that makes each CELL square. A different
+  // aspect here would crop or stretch the very panel it is meant to show.
+  cell: (bg) => ({ width: '100%', aspectRatio: '1 / 1', ...bg }),
   tag: { display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: '#EFE9F4', color: '#5B4A6B', fontSize: 11, fontWeight: 700, marginRight: 6 },
 };
 
@@ -148,22 +153,27 @@ export default function DecorationGuidePanel({ elementId }) {
           )}
 
           <div style={c.label}>Steps</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* CARDS, not a list with thumbnails. The picture is the part that carries a shape — a
+              baker checks "is mine supposed to look like that yet" against the image, not the
+              prose — so it gets the width, and the words sit under it. Side by side, the way the
+              step-by-step sheets bakers actually share are laid out. */}
+          <div style={c.stepGrid}>
             {(guide.steps ?? []).map((st, i) => (
-              <div key={st.n ?? i} style={c.stepRow}>
-                {/* This step's OWN cell of the one generated grid image. Not a separate file and
-                    not a crop we made — background-position simply frames the cell, so there is no
-                    slicing, no second asset, and nothing to keep in sync with the guide. */}
+              <div key={st.n ?? i} style={c.stepCard}>
+                {/* This step's OWN cell of the single generated grid image. background-position
+                    frames the cell — no slicing, no second asset, nothing to keep in sync. */}
                 {stagesUrl && <div style={c.cell(cellStyle(stagesUrl, grid, i))} />}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: '#2C2A26', marginBottom: 3 }}>
+                <div style={{ padding: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#2C2A26', marginBottom: 4 }}>
                     {i + 1}. {readable(st.title)}
                   </div>
                   {(st.instructions ?? []).map((line, j) => (
-                    <div key={j} style={{ fontSize: 12.5, color: '#2C2A26', lineHeight: 1.5 }}>{readable(line)}</div>
+                    <div key={j} style={{ fontSize: 12.5, color: '#2C2A26', lineHeight: 1.5, marginBottom: 2 }}>
+                      {readable(line)}
+                    </div>
                   ))}
                   {st.tools?.length > 0 && (
-                    <div style={{ fontSize: 11.5, color: '#8B7C99', marginTop: 3 }}>{st.tools.join(' · ')}</div>
+                    <div style={{ fontSize: 11.5, color: '#8B7C99', marginTop: 5 }}>{st.tools.join(' · ')}</div>
                   )}
                 </div>
               </div>
