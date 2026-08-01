@@ -385,6 +385,18 @@ export async function buildDecorationGuide(elementId, { force = false } = {}) {
   return post(`/api/admin/elements/${elementId}/decoration-guide`, { force });
 }
 
+// Remove a decoration guide entirely — for a decoration that should NOT have one, where a rebuild
+// would only produce a better wrong answer. The picture is archived under deleted/ rather than
+// destroyed: it cost money to generate and the model will not return the same image twice.
+export async function deleteDecorationGuide(elementId) {
+  const res = await fetch(`${BASE_URL}/api/admin/elements/${elementId}/decoration-guide`, {
+    method: 'DELETE',
+    headers: await authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 // ── Tags ──────────────────────────────────────────────────────────────────────
 
 export async function fetchAllTags() {

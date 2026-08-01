@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getDecorationGuide, buildDecorationGuide } from '../lib/api.js';
+import { getDecorationGuide, buildDecorationGuide, deleteDecorationGuide } from '../lib/api.js';
 
 // ── The decoration guide, as an admin sees it ───────────────────────────────────────
 // The "how do I make this by hand" guide for a flat decoration — steps, colours, and the generated
@@ -23,6 +23,7 @@ const c = {
     fontSize: 12, fontWeight: 800, fontFamily: "'Quicksand', sans-serif",
     cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
   }),
+  danger: { padding: '9px 14px', borderRadius: 10, border: '1.5px solid #E0C4C4', background: '#fff', color: '#A33', fontSize: 12, fontWeight: 800, fontFamily: "'Quicksand', sans-serif", cursor: 'pointer' },
   ghost: { padding: '9px 14px', borderRadius: 10, border: '1.5px solid #D9CFE0', background: '#fff', color: '#5B4A6B', fontSize: 12, fontWeight: 800, fontFamily: "'Quicksand', sans-serif", cursor: 'pointer' },
   msg: (ok) => ({ fontSize: 12, fontWeight: 600, color: ok ? '#5B4A6B' : '#c00', marginTop: 10 }),
   label: { fontSize: 10, fontWeight: 800, color: '#8B7C99', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 5 },
@@ -52,6 +53,22 @@ export default function DecorationGuidePanel({ elementId }) {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [elementId]);
+
+  async function remove() {
+    if (busy) return;
+    // The guide is not recoverable from here — the picture goes to the bin, the row does not.
+    // Worth a confirm, and worth saying where the picture goes so this does not feel destructive
+    // when it is not.
+    if (!window.confirm('Delete this guide? The row is removed and the picture is moved to the deleted/ folder in storage, not destroyed.')) return;
+    setBusy(true); setMsg(null);
+    try {
+      await deleteDecorationGuide(elementId);
+      setData(d => ({ ...(d ?? {}), guide: null }));
+      setMsg({ ok: true, text: 'Deleted. The picture is in deleted/ if you need it back.' });
+    } catch (e) {
+      setMsg({ ok: false, text: e.message });
+    } finally { setBusy(false); }
+  }
 
   async function build(force) {
     if (busy) return;
@@ -162,8 +179,13 @@ export default function DecorationGuidePanel({ elementId }) {
             confirming here as well because the old one is not recoverable. */}
         {guide && (
           <button type="button" style={c.ghost} disabled={busy} onClick={() => {
-            if (window.confirm('Replace this guide with a freshly generated one? The current one is not kept.')) build(true);
+            if (window.confirm('Replace this guide with a freshly generated one? The current picture moves to the deleted/ folder.')) build(true);
           }}>{busy ? 'Generating…' : 'Rebuild'}</button>
+        )}
+        {/* Delete is for a decoration that should have NO guide — the medium was wrong, or nobody
+            models this. Rebuilding such a thing only produces a better wrong answer. */}
+        {guide && (
+          <button type="button" style={c.danger} disabled={busy} onClick={remove}>Delete guide</button>
         )}
       </div>
 
