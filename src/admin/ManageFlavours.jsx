@@ -1,6 +1,33 @@
 import { useState, useEffect } from 'react';
 import { fetchDietaryRequirements, fetchFlavourDietaryConflicts, updateFlavourDietaryConflicts } from '../lib/api.js';
 
+// ── The slice ────────────────────────────────────────────────────────────────
+// A wedge seen from the side: sponge, filling, sponge, filling, sponge. Deliberately
+// the same stack the storefront will draw, because a colour approved against a
+// different picture is a colour approved against nothing.
+//
+// Falls back to a neutral sponge for an unset or malformed value — the same thing the
+// storefront does with null, so an empty field previews honestly rather than showing
+// black and reading as a bug in the cake.
+const HEX = /^#[0-9a-f]{6}$/i;
+function SlicePreview({ sponge, filling }) {
+  const sp = HEX.test(sponge  || '') ? sponge  : '#EFE5D2';
+  const fl = HEX.test(filling || '') ? filling : '#F3EDE1';
+  // Bottom-up, so the wedge reads as a slice standing on a plate.
+  const layers = [
+    { c: sp, h: 26 }, { c: fl, h: 9 },
+    { c: sp, h: 26 }, { c: fl, h: 9 },
+    { c: sp, h: 22 },
+  ];
+  return (
+    <div style={{ width: 96, borderRadius: '3px 3px 5px 5px', overflow: 'hidden',
+                  border: '1px solid rgba(0,0,0,0.10)', boxShadow: '0 1px 3px rgba(0,0,0,0.10)',
+                  display: 'flex', flexDirection: 'column-reverse', flexShrink: 0 }}>
+      {layers.map((l, i) => <div key={i} style={{ height: l.h, background: l.c }} />)}
+    </div>
+  );
+}
+
 export default function ManageFlavours({ supabase }) {
   const [flavours, setFlavours]   = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -8,7 +35,7 @@ export default function ManageFlavours({ supabase }) {
   const [msg, setMsg]             = useState(null);
   const [editingId, setEditingId] = useState(null);
 
-  const [form, setForm] = useState({ name: '', description: '' });
+  const [form, setForm] = useState({ name: '', description: '', sponge_color: '', filling_color: '' });
 
   // ── The global dietary baseline ─────────────────────────────────────────────
   // What a flavour cannot be made as, for EVERY baker. Authored here so it is stated
@@ -61,7 +88,7 @@ export default function ManageFlavours({ supabase }) {
     setLoading(true);
     const { data, error } = await supabase
       .from('flavours')
-      .select('id, name, description, sort_order, is_active')
+      .select('id, name, description, sort_order, is_active, sponge_color, filling_color')
       .order('sort_order')
       .order('name');
     if (!error) setFlavours(data ?? []);
@@ -70,15 +97,24 @@ export default function ManageFlavours({ supabase }) {
 
   function startEdit(f) {
     setEditingId(f.id);
-    setForm({ name: toTitleCase(f.name), description: f.description ?? '' });
+    setForm({ name: toTitleCase(f.name), description: f.description ?? '',
+              sponge_color: f.sponge_color ?? '', filling_color: f.filling_color ?? '' });
     setMsg(null);
   }
 
   function cancelEdit() {
     setEditingId(null);
-    setForm({ name: '', description: '' });
+    setForm({ name: '', description: '', sponge_color: '', filling_color: '' });
     setMsg(null);
   }
+
+  // Empty means "not authored", which is NULL — never '' and never a guessed colour. The
+  // storefront draws a neutral sponge for null, and that honest fallback is only reachable
+  // if the column actually holds null.
+  const colorPatch = () => ({
+    sponge_color:  form.sponge_color.trim()  || null,
+    filling_color: form.filling_color.trim() || null,
+  });
 
   async function handleSave() {
     if (!form.name.trim()) { setMsg({ ok: false, text: 'Name is required.' }); return; }
@@ -88,21 +124,21 @@ export default function ManageFlavours({ supabase }) {
     if (editingId) {
       const { error } = await supabase
         .from('flavours')
-        .update({ name: form.name.trim(), description: form.description.trim() || null })
+        .update({ name: form.name.trim(), description: form.description.trim() || null, ...colorPatch() })
         .eq('id', editingId);
       setSaving(false);
       if (error) { setMsg({ ok: false, text: error.message }); return; }
       setMsg({ ok: true, text: 'Flavour updated.' });
       setEditingId(null);
-      setForm({ name: '', description: '' });
+      setForm({ name: '', description: '', sponge_color: '', filling_color: '' });
     } else {
       const { error } = await supabase
         .from('flavours')
-        .insert({ name: form.name.trim(), description: form.description.trim() || null });
+        .insert({ name: form.name.trim(), description: form.description.trim() || null, ...colorPatch() });
       setSaving(false);
       if (error) { setMsg({ ok: false, text: error.message }); return; }
       setMsg({ ok: true, text: 'Flavour added.' });
-      setForm({ name: '', description: '' });
+      setForm({ name: '', description: '', sponge_color: '', filling_color: '' });
     }
 
     await loadFlavours();
@@ -154,6 +190,51 @@ export default function ManageFlavours({ supabase }) {
             />
           </div>
 
+          {/* ── What it looks like ────────────────────────────────────────────────
+              The storefront's taste facet sells a flavour with a SLICE, not a name —
+              the crumb and the filling in cross-section, which is the one view that
+              shows what a flavour actually is (a chocolate cake and a vanilla one under
+              fondant look identical from outside).
+
+              Authored here rather than per baker because Red Velvet is crimson in every
+              kitchen. Both may be left empty: the storefront then draws a neutral sponge
+              rather than inventing a colour from the name, which fails on the first
+              "Belgian Dark" it meets.
+
+              The preview is the point of this block. A hex code is unjudgeable as text —
+              #8E2436 is either Red Velvet or it isn't, and the only way to know is to
+              look at it stacked against its filling. */}
+          <div style={s.field}>
+            <label style={s.label}>Slice colours <span style={{ fontWeight: 500, color: '#9CA3AF' }}>— optional</span></label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <SlicePreview sponge={form.sponge_color} filling={form.filling_color} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[
+                  { key: 'sponge_color',  label: 'Sponge',  fallback: '#EFE5D2' },
+                  { key: 'filling_color', label: 'Filling', fallback: '#F3EDE1' },
+                ].map(({ key, label, fallback }) => (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="color"
+                      aria-label={`${label} colour`}
+                      value={/^#[0-9a-f]{6}$/i.test(form[key]) ? form[key] : fallback}
+                      onChange={e => setField(key, e.target.value)}
+                      style={{ width: 34, height: 30, padding: 0, border: '1px solid #E5E7EB',
+                               borderRadius: 6, background: 'none', cursor: 'pointer' }}
+                    />
+                    <input
+                      style={{ ...s.input, width: 118, marginBottom: 0, fontFamily: 'ui-monospace, monospace' }}
+                      placeholder={label}
+                      value={form[key]}
+                      onChange={e => setField(key, e.target.value)}
+                    />
+                    <span style={{ fontSize: 12, color: '#9CA3AF', fontWeight: 600 }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {msg && (
             <div style={{ fontSize: 13, fontWeight: 700, color: msg.ok ? '#2C7A4B' : '#C0392B', marginBottom: 12 }}>
               {msg.text}
@@ -183,7 +264,24 @@ export default function ManageFlavours({ supabase }) {
           {flavours.map(f => (
             <div key={f.id} style={{ ...s.row, opacity: f.is_active ? 1 : 0.45, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={s.rowName}>{f.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={s.rowName}>{f.name}</div>
+                  {/* Two dots, so "which of the 26 still need painting" is answerable by
+                      scanning rather than by opening each one. Hollow = not authored. */}
+                  <span style={{ display: 'inline-flex', gap: 3 }} title={
+                    f.sponge_color || f.filling_color
+                      ? `sponge ${f.sponge_color ?? '—'} · filling ${f.filling_color ?? '—'}`
+                      : 'No slice colours yet'
+                  }>
+                    {[f.sponge_color, f.filling_color].map((c, i) => (
+                      <i key={i} style={{
+                        width: 9, height: 9, borderRadius: '50%', display: 'inline-block',
+                        background: c || 'transparent',
+                        border: c ? '1px solid rgba(0,0,0,0.15)' : '1px dashed #C9CEC9',
+                      }} />
+                    ))}
+                  </span>
+                </div>
                 {f.description && <div style={s.rowDesc}>{f.description}</div>}
               </div>
               <div style={s.rowActions}>
