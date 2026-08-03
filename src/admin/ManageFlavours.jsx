@@ -35,7 +35,7 @@ export default function ManageFlavours({ supabase }) {
   const [msg, setMsg]             = useState(null);
   const [editingId, setEditingId] = useState(null);
 
-  const [form, setForm] = useState({ name: '', description: '', sponge_color: '', filling_color: '' });
+  const [form, setForm] = useState({ name: '', description: '', sponge_color: '', filling_color: '', taste_family: '', crowd_pleaser: '' });
 
   // ── The global dietary baseline ─────────────────────────────────────────────
   // What a flavour cannot be made as, for EVERY baker. Authored here so it is stated
@@ -88,7 +88,7 @@ export default function ManageFlavours({ supabase }) {
     setLoading(true);
     const { data, error } = await supabase
       .from('flavours')
-      .select('id, name, description, sort_order, is_active, sponge_color, filling_color')
+      .select('id, name, description, sort_order, is_active, sponge_color, filling_color, taste_family, crowd_pleaser')
       .order('sort_order')
       .order('name');
     if (!error) setFlavours(data ?? []);
@@ -98,13 +98,19 @@ export default function ManageFlavours({ supabase }) {
   function startEdit(f) {
     setEditingId(f.id);
     setForm({ name: toTitleCase(f.name), description: f.description ?? '',
-              sponge_color: f.sponge_color ?? '', filling_color: f.filling_color ?? '' });
+              sponge_color: f.sponge_color ?? '', filling_color: f.filling_color ?? '',
+              taste_family: f.taste_family ?? '',
+              // A tri-state in a form: '' unset, 'yes', 'no'. A checkbox cannot say "nobody
+              // has decided", and the suggester needs that distinction to skip a flavour
+              // rather than assume it divides a room.
+              crowd_pleaser: f.crowd_pleaser === null || f.crowd_pleaser === undefined
+                ? '' : (f.crowd_pleaser ? 'yes' : 'no') });
     setMsg(null);
   }
 
   function cancelEdit() {
     setEditingId(null);
-    setForm({ name: '', description: '', sponge_color: '', filling_color: '' });
+    setForm({ name: '', description: '', sponge_color: '', filling_color: '', taste_family: '', crowd_pleaser: '' });
     setMsg(null);
   }
 
@@ -114,6 +120,8 @@ export default function ManageFlavours({ supabase }) {
   const colorPatch = () => ({
     sponge_color:  form.sponge_color.trim()  || null,
     filling_color: form.filling_color.trim() || null,
+    taste_family:  form.taste_family || null,
+    crowd_pleaser: form.crowd_pleaser === '' ? null : form.crowd_pleaser === 'yes',
   });
 
   async function handleSave() {
@@ -130,7 +138,7 @@ export default function ManageFlavours({ supabase }) {
       if (error) { setMsg({ ok: false, text: error.message }); return; }
       setMsg({ ok: true, text: 'Flavour updated.' });
       setEditingId(null);
-      setForm({ name: '', description: '', sponge_color: '', filling_color: '' });
+      setForm({ name: '', description: '', sponge_color: '', filling_color: '', taste_family: '', crowd_pleaser: '' });
     } else {
       const { error } = await supabase
         .from('flavours')
@@ -138,7 +146,7 @@ export default function ManageFlavours({ supabase }) {
       setSaving(false);
       if (error) { setMsg({ ok: false, text: error.message }); return; }
       setMsg({ ok: true, text: 'Flavour added.' });
-      setForm({ name: '', description: '', sponge_color: '', filling_color: '' });
+      setForm({ name: '', description: '', sponge_color: '', filling_color: '', taste_family: '', crowd_pleaser: '' });
     }
 
     await loadFlavours();
@@ -232,6 +240,44 @@ export default function ManageFlavours({ supabase }) {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* ── What it tastes like ────────────────────────────────────────────────
+              The storefront's suggester answers "help me pick" with a real recommendation
+              AND the reason for it. Two fields carry nearly all of that: what the flavour
+              is, and whether it divides a room.
+
+              Authored here, globally, because "Belgian Dark is chocolate" is true in every
+              kitchen. Per-baker difference comes from the CATALOGUE — the same rule over a
+              different baker's flavours gives a different answer.
+
+              Both may be left unset, and unset means the suggester cannot score this
+              flavour. That is the honest outcome: guessing a family from the name fails on
+              the first "White Forest", and a confident wrong suggestion is worse than none. */}
+          <div style={s.field}>
+            <label style={s.label}>Taste <span style={{ fontWeight: 500, color: '#9CA3AF' }}>— for the suggester</span></label>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <select
+                value={form.taste_family}
+                onChange={e => setField('taste_family', e.target.value)}
+                style={{ ...s.input, width: 170, marginBottom: 0 }}
+              >
+                <option value="">Family — not set</option>
+                {['chocolate','fruit','classic','nut','caramel','coffee','tea','indian'].map(f => (
+                  <option key={f} value={f}>{f[0].toUpperCase() + f.slice(1)}</option>
+                ))}
+              </select>
+
+              <select
+                value={form.crowd_pleaser}
+                onChange={e => setField('crowd_pleaser', e.target.value)}
+                style={{ ...s.input, width: 210, marginBottom: 0 }}
+              >
+                <option value="">Crowd-pleaser — not set</option>
+                <option value="yes">Safe bet — pleases a room</option>
+                <option value="no">Divides people</option>
+              </select>
             </div>
           </div>
 
