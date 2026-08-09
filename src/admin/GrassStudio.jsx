@@ -78,7 +78,7 @@ function CakeMesh({ shapeKey, cakeColor }) {
 export default function GrassStudio() {
   const [p, setP] = useState({ ...GRASS_DEFAULTS, color: '#4caf3d' });
   const [shapeKey, setShapeKey] = useState('round');
-  const [band, setBand] = useState(false);
+  const [bandInner, setBandInner] = useState(null);
   const [cakeColor, setCakeColor] = useState('#fdfdfd');
   const [bg, setBg] = useState('#e8b4a8');
   const [stats, setStats] = useState({ tufts: 0, blades: 0 });
@@ -86,9 +86,6 @@ export default function GrassStudio() {
   const set = k => v => setP(o => ({ ...o, [k]: v }));
   const onStats = useCallback(s => setStats(s), []);
   const shape = SHAPES[shapeKey];
-  // A band leaves the middle clear — the football cake, where the design shows through and the grass
-  // hugs the rim. Memoised: GrassPatch keys its seat list on this object.
-  const region = useMemo(() => (band ? { from: 0.5, to: 1 } : null), [band]);
 
   // Cost, honestly. One draw call however dense it gets, but a phone still rasterises the triangles.
   const tris = grassTriangleCount(stats.tufts, p.strands);
@@ -111,10 +108,14 @@ export default function GrassStudio() {
           {Object.keys(SHAPES).map(k => <Btn key={k} on={shapeKey === k} onClick={() => setShapeKey(k)}>{k}</Btn>)}
         </Row>
         <Row label="Coverage">
-          <Btn on={!band} onClick={() => setBand(false)}>whole top</Btn>
-          <Btn on={band}  onClick={() => setBand(true)}>rim band</Btn>
+          <Btn on={bandInner == null} onClick={() => setBandInner(null)}>whole top</Btn>
+          <Btn on={bandInner != null} onClick={() => setBandInner(0.55)}>rim band</Btn>
         </Row>
 
+        {bandInner != null && (
+          <Sl label="Band width" v={1 - bandInner} min={0.12} max={0.9} step={0.02}
+            on={v => setBandInner(+(1 - v).toFixed(2))} />
+        )}
         <Sl label="Density"          v={p.spacing}    min={0.04}  max={0.20}  step={0.002} on={set('spacing')} inv />
         <Sl label="Blade height"     v={p.height}     min={0.05}  max={0.45}  step={0.005} on={set('height')} />
         <Sl label="Strands per tuft" v={p.strands}    min={4}     max={20}    step={1}     on={set('strands')} int />
@@ -171,7 +172,7 @@ export default function GrassStudio() {
             shape={shape} topY={TOP_Y} color={p.color}
             strands={p.strands} height={p.height} spacing={p.spacing} jitter={p.jitter}
             splay={p.splay} droop={p.droop} thickness={p.thickness} lengthVary={p.lengthVary}
-            region={region} onStats={onStats}
+            bandInner={bandInner} onStats={onStats}
           />
           <OrbitControls target={[0, TOP_Y * 0.75, 0]} />
         </Canvas>
