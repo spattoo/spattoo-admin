@@ -16,6 +16,7 @@ import { statsFromElement } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
 import { serializeZone, zoneValueMode, zoneValueSeat, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
+import ElementPreviewPanel from './ElementPreviewPanel.jsx';
 
 const CAKE_ZONES = [
   { value: 'top_surface', label: 'Top Surface' },
@@ -401,6 +402,9 @@ export default function ManageElements() {
   const [overCapOnly,  setOverCapOnly]  = useState(false);   // filter: only elements over their §3 budget
   const [selectedId,   setSelectedId]   = useState(null);
   const [cloneMode,    setCloneMode]    = useState(false);   // "create a NEW element from these settings"
+  // Bumped on every successful save. The preview renders the SAVED row, so this is its cue to
+  // re-fetch — which is what makes "save, then look" a loop instead of a page reload.
+  const [savedAt,      setSavedAt]      = useState(0);
 
   // Derive selected element from list (auto-updates after reload)
   const selectedEl = elements.find(e => e.id === selectedId) ?? null;
@@ -972,6 +976,7 @@ export default function ManageElements() {
       }
 
       setMsg({ ok: true, text: savedText });
+      setSavedAt(n => n + 1);
       setNewAssetFile(null);
       setAltAssetFile(null);
       setNewThumbBlob(null);
@@ -2076,6 +2081,14 @@ export default function ManageElements() {
                       )}
                     </div>
                   </div>
+                )}
+
+                {/* ── Preview ─────────────────────────────────────────────────────────────────
+                    Directly under the placement editor because that is what it verifies. It is also
+                    the only way to see a decoration on a cake without signing in as a baker, which
+                    an admin cannot do. Renders the SAVED row — see ElementPreviewPanel. */}
+                {selectedId && !cloneMode && (
+                  <ElementPreviewPanel elementId={selectedId} savedAt={savedAt} />
                 )}
 
                 {/* ── placement_config JSON editor (+ calibrator paste side-by-side for piping) ── */}

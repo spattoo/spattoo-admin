@@ -228,6 +228,14 @@ export async function fetchGlobalElement(id) {
   return get(`/api/admin/elements/${id}`);
 }
 
+// The same element as the DESIGNER receives it — public URLs for the top-level image columns AND
+// for the keys nested inside placement_config (a photo frame's mask, alternate piping GLBs). The
+// plain fetch above deliberately returns raw keys, because the edit form has to write them back;
+// the renderer needs URLs. Two shapes of one row, one for each job.
+export async function fetchElementForPreview(id) {
+  return get(`/api/admin/elements/${id}/preview`);
+}
+
 export async function createGlobalElement(payload) {
   return post('/api/admin/elements', payload);
 }
