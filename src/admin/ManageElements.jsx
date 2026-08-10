@@ -124,6 +124,21 @@ const s = {
     border: '1.5px solid #C5D4C8',
     overflow: 'hidden',
   },
+  recencyRow: { display: 'flex', gap: 4, marginTop: 8 },
+  recencyChip: {
+    flex: 1, padding: '5px 0', borderRadius: 8, cursor: 'pointer',
+    borderWidth: 1.5, borderStyle: 'solid', borderColor: '#C5D4C8',
+    background: '#fff', color: '#6B8C74', fontSize: 11, fontWeight: 700,
+    fontFamily: "'Quicksand',sans-serif",
+  },
+  recencyChipOn: { background: '#2C4433', borderColor: '#2C4433', color: '#fff' },
+  selectAllBtn: {
+    marginTop: 8, width: '100%', padding: '6px 0', borderRadius: 8, cursor: 'pointer',
+    borderWidth: 1.5, borderStyle: 'solid', borderColor: '#C5D4C8',
+    background: '#fff', color: '#2C4433', fontSize: 12, fontWeight: 700,
+    fontFamily: "'Quicksand',sans-serif",
+  },
+
   // Appears only when something is picked — a permanently visible bar for an occasional action is
   // chrome the other 99% of visits pay for.
   exportBar: {
@@ -416,6 +431,10 @@ export default function ManageElements() {
   const [loading,      setLoading]      = useState(true);
   const [query,        setQuery]        = useState('');
   const [overCapOnly,  setOverCapOnly]  = useState(false);   // filter: only elements over their §3 budget
+  // Filter: how recently an element was added. "The ones I added today" is how a promotion is
+  // actually thought about, and ticking ten boxes from memory is how one gets missed — a missing
+  // element does not error in prod, it is simply absent until somebody notices.
+  const [addedWithin, setAddedWithin] = useState(0);   // days; 0 = any time
   const [selectedId,   setSelectedId]   = useState(null);
   const [cloneMode,    setCloneMode]    = useState(false);   // "create a NEW element from these settings"
   // Bumped on every successful save. The preview renders the SAVED row, so this is its cue to
@@ -1115,16 +1134,40 @@ export default function ManageElements() {
   // Filter + group elements
   const lowerQuery = query.toLowerCase();
   const overCapCount = elements.filter(el => el.over_cap).length;
+  // Cut once per render, not per element: `new Date()` inside the filter would make every row's
+  // comparison a slightly different "now".
+  const addedSince = addedWithin ? Date.now() - addedWithin * 864e5 : null;
+
   const grouped = elementTypes
     .map(et => ({
       type: et,
       items: elements.filter(el =>
         el.element_type_id === et.id &&
         (lowerQuery === '' || (el.name ?? '').toLowerCase().includes(lowerQuery)) &&
-        (!overCapOnly || el.over_cap)
+        (!overCapOnly || el.over_cap) &&
+        // No created_at (older rows predate the column being populated) → treated as OLD rather
+        // than recent. A filter that quietly includes unknowns is worse than one that excludes
+        // them: you would promote something you did not mean to and never see it in the list.
+        (!addedSince || (el.created_at ? new Date(el.created_at).getTime() >= addedSince : false))
       ),
     }))
     .filter(g => g.items.length > 0);
+
+  // Select-all works on what is VISIBLE — the same filtered set the list renders, so "today" plus
+  // "select all" means exactly the ten added today. Anything else would be a button that lies.
+  const visibleIds = grouped.flatMap(g => g.items.map(el => el.id));
+  const allVisiblePicked = visibleIds.length > 0 && visibleIds.every(id => picked.has(id));
+
+  function toggleAllVisible() {
+    setPicked(prev => {
+      const next = new Set(prev);
+      // Deselecting removes only the visible ones, leaving a selection built up under another
+      // filter intact — the picked set is deliberately cumulative across filter changes.
+      if (allVisiblePicked) visibleIds.forEach(id => next.delete(id));
+      else visibleIds.forEach(id => next.add(id));
+      return next;
+    });
+  }
 
   // Resolve everything needed to re-render a pattern's thumbnail: the referenced building
   // block's GLB url (part A, and part B if different) plus a calibrator-shaped cfg rebuilt
@@ -1324,6 +1367,21 @@ export default function ManageElements() {
                   color: overCapOnly ? '#8a6d1a' : '#6B8C74', fontFamily: "'Quicksand',sans-serif", fontSize: 12, fontWeight: 700 }}>
                 {overCapOnly ? '⚠ Showing over-budget only' : `⚠ Over budget (${overCapCount})`}
               </button>
+
+              <div style={s.recencyRow}>
+                {[[0, 'Any time'], [1, 'Today'], [7, '7 days'], [30, '30 days']].map(([days, label]) => (
+                  <button key={days} onClick={() => setAddedWithin(days)}
+                          style={{ ...s.recencyChip, ...(addedWithin === days ? s.recencyChipOn : {}) }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {visibleIds.length > 0 && (
+                <button onClick={toggleAllVisible} style={s.selectAllBtn}>
+                  {allVisiblePicked ? `Deselect these ${visibleIds.length}` : `Select all ${visibleIds.length} shown`}
+                </button>
+              )}
             </div>
             {picked.size > 0 && (
               <div style={s.exportBar}>
