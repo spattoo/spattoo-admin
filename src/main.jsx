@@ -34,6 +34,7 @@ const ImageTo3DWizard  = lazy(() => import('./admin/ImageTo3DWizard.jsx'));
 const BuildFromInspiration = lazy(() => import('./admin/BuildFromInspiration.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
+const ImportElements   = lazy(() => import('./admin/ImportElements.jsx'));
 const ManageFlavours        = lazy(() => import('./admin/ManageFlavours.jsx'));
 const ManagePlans           = lazy(() => import('./admin/ManagePlans.jsx'));
 const ManageTags            = lazy(() => import('./admin/ManageTags.jsx'));
@@ -77,6 +78,7 @@ const ROUTES = {
   '/templates':           ManageTemplates,
   '/elements/add':        AddElement,
   '/elements/manage':     ManageElements,
+  '/elements/import':     ImportElements,
   '/elements/generate':   GenerateShape,
   '/elements/generate-model': GenerateModel,
   '/glb-studio':          GlbStudio,
@@ -123,6 +125,7 @@ const NAV_GROUPS = [
   { title: 'Elements', items: [
     { href: '/elements/add',    label: 'Add Element' },
     { href: '/elements/manage', label: 'Manage Elements' },
+    { href: '/elements/import', label: 'Import Elements' },
     { href: '/elements/types',  label: 'Element Types' },
     { href: '/elements/material-styles', label: 'Material → Styles' },
   ] },

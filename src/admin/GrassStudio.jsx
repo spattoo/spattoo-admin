@@ -79,6 +79,9 @@ export default function GrassStudio() {
   const [p, setP] = useState({ ...GRASS_DEFAULTS, color: '#4caf3d' });
   const [shapeKey, setShapeKey] = useState('round');
   const [bandInner, setBandInner] = useState(null);
+  // Strands spilling over the rim — the football cake's edge. Its own state rather than a param on
+  // `p` because it is a PLACEMENT of the tufts, not a property of one.
+  const [overhang, setOverhang] = useState(0);
   const [cakeColor, setCakeColor] = useState('#fdfdfd');
   const [bg, setBg] = useState('#e8b4a8');
   const [stats, setStats] = useState({ tufts: 0, blades: 0 });
@@ -116,6 +119,7 @@ export default function GrassStudio() {
           <Sl label="Band width" v={1 - bandInner} min={0.12} max={0.9} step={0.02}
             on={v => setBandInner(+(1 - v).toFixed(2))} />
         )}
+        <Sl label="Overhang (over the rim)" v={overhang} min={0} max={1} step={0.02} on={setOverhang} />
         <Sl label="Density"          v={p.spacing}    min={0.04}  max={0.20}  step={0.002} on={set('spacing')} inv />
         <Sl label="Blade height"     v={p.height}     min={0.05}  max={0.45}  step={0.005} on={set('height')} />
         <Sl label="Strands per tuft" v={p.strands}    min={4}     max={20}    step={1}     on={set('strands')} int />
@@ -172,7 +176,7 @@ export default function GrassStudio() {
             shape={shape} topY={TOP_Y} color={p.color}
             strands={p.strands} height={p.height} spacing={p.spacing} jitter={p.jitter}
             splay={p.splay} droop={p.droop} thickness={p.thickness} lengthVary={p.lengthVary}
-            bandInner={bandInner} onStats={onStats}
+            bandInner={bandInner} overhang={overhang} onStats={onStats}
           />
           <OrbitControls target={[0, TOP_Y * 0.75, 0]} />
         </Canvas>

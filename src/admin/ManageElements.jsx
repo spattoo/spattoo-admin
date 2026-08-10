@@ -5,7 +5,7 @@ import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
   fetchAdminElementTypes, fetchAllElements, fetchParentElements,
-  uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object,
+  uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
 } from '../lib/api.js';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
@@ -123,6 +123,22 @@ const s = {
     background: '#fff', borderRadius: 16,
     border: '1.5px solid #C5D4C8',
     overflow: 'hidden',
+  },
+  // Appears only when something is picked — a permanently visible bar for an occasional action is
+  // chrome the other 99% of visits pay for.
+  exportBar: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '8px 12px', borderBottom: '1px solid #C5D4C8',
+    background: '#F3F7F4', fontSize: 12, color: '#2C4433', fontFamily: "'Quicksand',sans-serif",
+  },
+  exportBtn: {
+    marginLeft: 'auto', padding: '5px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
+    background: '#2C4433', color: '#fff', fontSize: 12, fontWeight: 700, fontFamily: "'Quicksand',sans-serif",
+  },
+  exportClear: {
+    padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
+    borderWidth: 1.5, borderStyle: 'solid', borderColor: '#C5D4C8',
+    background: '#fff', color: '#6B8C74', fontSize: 12, fontWeight: 700, fontFamily: "'Quicksand',sans-serif",
   },
   listSearch: {
     padding: '10px 12px',
@@ -405,6 +421,42 @@ export default function ManageElements() {
   // Bumped on every successful save. The preview renders the SAVED row, so this is its cue to
   // re-fetch — which is what makes "save, then look" a loop instead of a page reload.
   const [savedAt,      setSavedAt]      = useState(0);
+  // ── Picked for export ─────────────────────────────────────────────────────────────────────────
+  // Separate from `selectedId`, which is "the element being edited". Ticking a row must not load it
+  // into the form, and editing one must not change what is about to be promoted.
+  const [picked, setPicked] = useState(() => new Set());
+  const [exporting, setExporting] = useState(false);
+
+  const togglePicked = (id) => setPicked(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  async function handleExport() {
+    if (!picked.size) return;
+    setExporting(true);
+    try {
+      const bundle = await exportElements([...picked]);
+      // The server resolves the CLOSURE, so what comes back is routinely more than what was ticked —
+      // element types, parent elements, tags. Say so, because silently exporting a parent nobody
+      // chose is a surprise best had here rather than in prod.
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `elements-${new Date().toISOString().slice(0, 10)}-${bundle.elements.length}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg({ ok: true, text:
+        `Exported ${bundle.elements.length} element(s) — plus ${bundle.element_types.length} type(s), ` +
+        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s).` });
+    } catch (e) {
+      setMsg({ ok: false, text: e?.message ?? 'Export failed' });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   // Derive selected element from list (auto-updates after reload)
   const selectedEl = elements.find(e => e.id === selectedId) ?? null;
@@ -1273,6 +1325,15 @@ export default function ManageElements() {
                 {overCapOnly ? '⚠ Showing over-budget only' : `⚠ Over budget (${overCapCount})`}
               </button>
             </div>
+            {picked.size > 0 && (
+              <div style={s.exportBar}>
+                <span style={{ fontWeight: 700 }}>{picked.size} picked</span>
+                <button onClick={handleExport} disabled={exporting} style={s.exportBtn}>
+                  {exporting ? 'Exporting…' : 'Export'}
+                </button>
+                <button onClick={() => setPicked(new Set())} style={s.exportClear}>Clear</button>
+              </div>
+            )}
             <div style={s.listScroll}>
               {loading && (
                 <div style={{ padding: 20, textAlign: 'center', fontSize: 12, color: '#9BB5A2' }}>Loading…</div>
@@ -1287,6 +1348,15 @@ export default function ManageElements() {
                     <div key={el.id}
                       style={s.elementRow(el.id === selectedId)}
                       onClick={() => selectElement(el)}>
+                      {/* stopPropagation: ticking a row picks it for export, it does not load it
+                          into the editor. Two different intents on one row. */}
+                      <input
+                        type="checkbox"
+                        checked={picked.has(el.id)}
+                        onClick={e => e.stopPropagation()}
+                        onChange={() => togglePicked(el.id)}
+                        title="Pick for export"
+                        style={{ width: 15, height: 15, flexShrink: 0, cursor: 'pointer', accentColor: '#2C4433' }} />
                       {el.thumbnail_url
                         ? <img src={el.thumbnail_url} alt="" style={s.elementThumb} />
                         : <div style={s.elementThumb} />

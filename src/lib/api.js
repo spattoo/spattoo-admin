@@ -236,6 +236,20 @@ export async function fetchElementForPreview(id) {
   return get(`/api/admin/elements/${id}/preview`);
 }
 
+// ── Promotion: dev → prod ────────────────────────────────────────────────────────────────────────
+// See spattoo-docs/plans/element-preview-and-publish.md. The bundle is JSON: rows verbatim (ids
+// included — that is what makes template/shape designs keep resolving) plus each R2 object named by
+// KEY and a URL to fetch it from. Asset bytes are never in the file.
+export async function exportElements(ids) {
+  return get(`/api/admin/elements/export?ids=${ids.map(encodeURIComponent).join(',')}`);
+}
+
+// dryRun reports create-vs-update per table and writes nothing — the mode to use first, because the
+// number worth seeing is how many rows an import is about to overwrite.
+export async function importElements(bundle, { dryRun = false } = {}) {
+  return post(`/api/admin/elements/import${dryRun ? '?dryRun=true' : ''}`, bundle);
+}
+
 export async function createGlobalElement(payload) {
   return post('/api/admin/elements', payload);
 }
