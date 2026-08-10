@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, saveTemplateTags, saveTemplateAttrs } from '../lib/api.js';
+import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, saveTemplateTags, saveTemplateAttrs, exportTemplates } from '../lib/api.js';
 
 const SHAPES = [
   { value: 'round',      label: 'Round' },
@@ -64,6 +64,31 @@ function CakeTier({ shape, scale, yCenter, color }) {
   const h       = shapeHeight(shape);
   const topY    = isHeart ? yCenter + h : yCenter + h / 2;
   const col     = color || '#F5E6C8';
+  async function handleExport() {
+    if (!picked.size) return;
+    setExporting(true);
+    try {
+      const bundle = await exportTemplates([...picked]);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `templates-${new Date().toISOString().slice(0, 10)}-${bundle.cake_templates.length}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      // The element count is the number worth showing: a template bundle carries the elements its
+      // design references, so it is routinely far larger than the templates ticked — and those
+      // elements are what stops the templates misbehaving silently at the other end.
+      setMsg({ ok: true, text:
+        `Exported ${bundle.cake_templates.length} template(s) — plus ${bundle.elements.length} element(s), ` +
+        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s). Import under Elements → Import Elements.` });
+    } catch (e) {
+      setMsg({ ok: false, text: e?.message ?? 'Export failed' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <group
       position={isHeart ? [0, yCenter + h / 2, 0] : [0, yCenter, 0]}
@@ -146,6 +171,20 @@ function CakePreview({ shape, tierCount, tierColors, canvasRef, onCapture }) {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const s = {
+  exportBar: {
+    display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+    padding: '8px 12px', borderRadius: 10, background: '#F3F7F4',
+    fontSize: 12, color: '#2C4433', fontFamily: "'Quicksand',sans-serif",
+  },
+  exportBtn: {
+    marginLeft: 'auto', padding: '5px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
+    background: '#2C4433', color: '#fff', fontSize: 12, fontWeight: 700, fontFamily: "'Quicksand',sans-serif",
+  },
+  exportGhost: {
+    padding: '5px 12px', borderRadius: 8, cursor: 'pointer',
+    borderWidth: 1.5, borderStyle: 'solid', borderColor: '#C5D4C8',
+    background: '#fff', color: '#6B8C74', fontSize: 12, fontWeight: 700, fontFamily: "'Quicksand',sans-serif",
+  },
   page:  { minHeight: '100vh', background: '#EDEAE2', fontFamily: "'Quicksand', sans-serif", padding: '40px 0' },
   inner: { maxWidth: 860, margin: '0 auto', padding: '0 24px' },
   header:{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 },
@@ -175,6 +214,10 @@ const s = {
 const DEFAULT_TIER_COLOR = '#fefbea';
 
 function TemplateForm({ onSaved, onCancel }) {
+  // Picked for export — separate from anything the editor holds, for the same reason as elements:
+  // ticking a template is not opening it.
+  const [picked, setPicked]           = useState(() => new Set());
+  const [exporting, setExporting]     = useState(false);
   const [name, setName]               = useState('');
   const [shape, setShape]             = useState('round');
   const [tierCount, setTierCount]     = useState(1);
@@ -461,6 +504,21 @@ export default function ManageTemplates() {
 
           {msg && <div style={s.msg(msg.ok)}>{msg.text}</div>}
 
+          {templates.length > 0 && (
+            <div style={s.exportBar}>
+              <button onClick={() => setPicked(p2 => p2.size === templates.length ? new Set() : new Set(templates.map(t => t.id)))}
+                      style={s.exportGhost}>
+                {picked.size === templates.length ? 'Deselect all' : `Select all ${templates.length}`}
+              </button>
+              {picked.size > 0 && <span style={{ fontWeight: 700 }}>{picked.size} picked</span>}
+              {picked.size > 0 && (
+                <button onClick={handleExport} disabled={exporting} style={s.exportBtn}>
+                  {exporting ? 'Exporting…' : 'Export'}
+                </button>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div style={{ color: '#6B8C74', fontSize: 13 }}>Loading…</div>
           ) : templates.length === 0 ? (
@@ -469,6 +527,16 @@ export default function ManageTemplates() {
             templates.map(t => (
               <div key={t.id} style={s.card}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <input
+                    type="checkbox"
+                    checked={picked.has(t.id)}
+                    onChange={() => setPicked(prev => {
+                      const next = new Set(prev);
+                      next.has(t.id) ? next.delete(t.id) : next.add(t.id);
+                      return next;
+                    })}
+                    title="Pick for export"
+                    style={{ width: 15, height: 15, flexShrink: 0, cursor: 'pointer', accentColor: '#2C4433' }} />
                   <div style={{ ...s.thumb, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {t.thumbnail_url
                       ? <img src={t.thumbnail_url} alt={t.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />

@@ -54,6 +54,7 @@ export default function ImportElements() {
   }
 
   const counts = bundle && {
+    templates: bundle.cake_templates?.length ?? 0,
     elements: bundle.elements?.length ?? 0,
     element_types: bundle.element_types?.length ?? 0,
     tags: bundle.tags?.length ?? 0,
@@ -66,8 +67,9 @@ export default function ImportElements() {
     <div style={s.page}>
       <h2 style={s.h2}>Import elements</h2>
       <p style={s.blurb}>
-        A bundle exported from another environment. Rows keep their ids, and every asset it names is
-        re-uploaded here under the same key.
+        A bundle exported from another environment — elements, or templates with the elements their
+        designs reference. Rows keep their ids, and every asset it names is re-uploaded here under
+        the same key.
       </p>
 
       <input type="file" accept="application/json,.json" onChange={onFile} style={s.file} />
@@ -78,6 +80,7 @@ export default function ImportElements() {
       {bundle && (
         <div style={s.card}>
           <div style={s.cardTitle}>In this bundle</div>
+          {counts.templates > 0 && <Row k="Templates" v={counts.templates} />}
           <Row k="Elements" v={counts.elements} />
           <Row k="Element types" v={counts.element_types} />
           <Row k="Tags" v={counts.tags} />
@@ -114,6 +117,9 @@ export default function ImportElements() {
           <Row k="Element types" v={`${plan.element_types.create} new, ${plan.element_types.update} updated`} />
           <Row k="Tags"          v={`${plan.tags.create} new, ${plan.tags.update} updated`} />
           <Row k="Elements"      v={`${plan.elements.create} new, ${plan.elements.update} updated`} />
+          {plan.cake_templates && (
+            <Row k="Templates"   v={`${plan.cake_templates.create} new, ${plan.cake_templates.update} updated`} />
+          )}
           <Row k="Tag links"     v={plan.element_tags.rows} />
           <Row k="Craft guides"  v={plan.element_craft_guide.rows} />
           <Row k="Assets to copy" v={plan.assets.count} />

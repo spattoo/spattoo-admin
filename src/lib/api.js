@@ -250,6 +250,13 @@ export async function importElements(bundle, { dryRun = false } = {}) {
   return post(`/api/admin/elements/import${dryRun ? '?dryRun=true' : ''}`, bundle);
 }
 
+// Templates carry their referenced ELEMENTS with them — a design embeds elementId, and a template
+// whose elements are absent renders correctly and misbehaves quietly. Same bundle format as the
+// element export, with the template rows added, so one import screen receives both.
+export async function exportTemplates(ids) {
+  return get(`/api/admin/templates/export?ids=${ids.map(encodeURIComponent).join(',')}`);
+}
+
 export async function createGlobalElement(payload) {
   return post('/api/admin/elements', payload);
 }
