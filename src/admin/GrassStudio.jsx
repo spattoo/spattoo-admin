@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -12,6 +12,7 @@ import * as THREE from 'three';
 // A colour tuned under the wrong lights is the wrong colour.
 import { GrassPatch, grassTriangleCount, GRASS_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
 import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
+import { fetchElementTypes, createGlobalElement, uploadThumbnail } from '../lib/api.js';
 
 // ── Grass studio ──────────────────────────────────────────────────────────────
 // Piped grass, the Wilton 233 look: a nozzle face pierced with ~15 holes, so one squeeze lays down a
@@ -85,6 +86,10 @@ export default function GrassStudio() {
   const [cakeColor, setCakeColor] = useState('#fdfdfd');
   const [bg, setBg] = useState('#e8b4a8');
   const [stats, setStats] = useState({ tufts: 0, blades: 0 });
+  const [saveName, setSaveName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const canvasWrapRef = useRef(null);
 
   const set = k => v => setP(o => ({ ...o, [k]: v }));
   const onStats = useCallback(s => setStats(s), []);
@@ -92,6 +97,56 @@ export default function GrassStudio() {
 
   // Cost, honestly. One draw call however dense it gets, but a phone still rasterises the triangles.
   const tris = grassTriangleCount(stats.tufts, p.strands);
+
+  async function captureThumbnail() {
+    const cnv = canvasWrapRef.current?.querySelector('canvas');
+    if (!cnv) return null;
+    const blob = await new Promise(res => cnv.toBlob(res, 'image/png'));
+    return blob ? uploadThumbnail('elements/thumbnails', blob) : null;
+  }
+
+  // Author this grass as a file-less catalogue element, exactly the way the drip studio does — the
+  // row is IDENTITY (name, thumbnail, tags) plus the tuned parameters; the geometry stays in code.
+  //
+  // That is what makes it searchable, taggable and manageable, which a hardcoded Tools button can
+  // never be. It also means "Putting green" and "Wild meadow" become two rows over one generator
+  // instead of two presets frozen in this file.
+  async function saveAsElement() {
+    if (!saveName.trim()) { setMsg({ ok: false, text: 'Give the element a name.' }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const types = await fetchElementTypes();
+      const grassType = (types ?? []).find(t => t.slug === 'grass' || (t.name ?? '').trim().toLowerCase() === 'grass');
+      if (!grassType) throw new Error('No "Grass" element type found - create it first in Element Types.');
+      let thumbnail_url = null;
+      try { thumbnail_url = await captureThumbnail(); } catch { /* best-effort, like the drip */ }
+      await createGlobalElement({
+        name: saveName.trim(),
+        element_type_id: grassType.id,
+        // Both surfaces: the designer card offers top and board independently, and the row does not
+        // constrain that - it only says where grass may go at all.
+        allowed_zones: ['top_surface', 'board'],
+        default_color: p.color,
+        image_url: null,            // generated, so there is no asset - the thumbnail carries the look
+        thumbnail_url,
+        placement_config: {
+          // The KEY the designer's PROCEDURAL_TOOLS registry dispatches on.
+          procedural: 'grass',
+          // Everything a baker does not get to change, tuned here once. Density/height/colour are
+          // deliberately omitted: those are the three the CARD exposes, and seeding them from the row
+          // would freeze a starting point that is meant to be per-cake.
+          grass: {
+            strands: p.strands, thickness: +p.thickness.toFixed(4),
+            splay: +p.splay.toFixed(3), droop: +p.droop.toFixed(3),
+            lengthVary: +p.lengthVary.toFixed(3), jitter: +p.jitter.toFixed(3),
+          },
+        },
+      });
+      setMsg({ ok: true, text: `Saved "${saveName.trim()}" - pick it from Decorations in the designer.` });
+    } catch (e) {
+      setMsg({ ok: false, text: e.message });
+    } finally { setBusy(false); }
+  }
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: "'Quicksand', sans-serif" }}>
@@ -161,12 +216,35 @@ export default function GrassStudio() {
                    border: '1.5px solid #1a1a1a', background: '#fff', fontFamily: 'inherit', fontWeight: 600 }}>
           Reset
         </button>
-        <p style={{ fontSize: 10.5, color: '#b08', marginTop: 14, lineHeight: 1.5 }}>
-          No save yet — this screen is for judging the look. Saving to an element comes once it earns it.
-        </p>
+        {/* Save. The look has been judged, so this is the step that makes it a real catalogue
+            element - searchable, taggable, manageable without a deploy. Until a row exists, grass
+            reaches the designer ONLY through a hardcoded Tools button, which no search can find.
+            Needs an element type with slug `grass` (Element Types screen). */}
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #f0e2e7' }}>
+          <div style={{ fontSize: 10.5, color: '#a98', marginBottom: 4, letterSpacing: 0.3 }}>SAVE AS ELEMENT</div>
+          <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="e.g. Football pitch"
+            style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
+              border: '1.5px solid #999', borderRadius: 7, boxSizing: 'border-box' }} />
+          <button onClick={saveAsElement} disabled={busy || !saveName.trim()}
+            style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
+              border: '1.5px solid #1a1a1a', background: busy || !saveName.trim() ? '#e8e2e4' : '#1a1a1a',
+              color: busy || !saveName.trim() ? '#aaa' : '#fff', fontWeight: 700, fontFamily: 'inherit',
+              cursor: busy || !saveName.trim() ? 'default' : 'pointer' }}>
+            {busy ? 'Saving...' : 'Save to catalogue'}
+          </button>
+          {msg && (
+            <p style={{ fontSize: 11, marginTop: 8, lineHeight: 1.45, color: msg.ok ? '#2e7d32' : '#c0392b' }}>
+              {msg.text}
+            </p>
+          )}
+          <p style={{ fontSize: 10.5, color: '#a98', marginTop: 8, lineHeight: 1.5 }}>
+            Density, height and colour are <b>not</b> saved - those are the three a baker sets per
+            cake. Everything above them is what this row fixes.
+          </p>
+        </div>
       </div>
 
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative' }}>
         <Canvas shadows camera={{ position: [0, 2.9, 4.6], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
           <color attach="background" args={[bg]} />
           <SceneLights shadows />
