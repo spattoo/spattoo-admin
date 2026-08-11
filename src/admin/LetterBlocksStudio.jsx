@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -6,6 +6,7 @@ import * as THREE from 'three';
 // different lights is tuned wrong (see the note in GrassStudio, which learned that the hard way).
 import { NameBlocks, boardRunRadius, NAME_BLOCK_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
 import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
+import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Letter blocks studio ──────────────────────────────────────────────────────
 // The iced fondant cubes with a raised letter, lined up to spell a name — around the board at the
@@ -25,8 +26,9 @@ import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 //      typeface JSON, which is a config-level change, not a rewrite.
 //   4. Scale against the cake. A block should read as a couple of centimetres of fondant.
 //
-// No save. The look is judged before an element type, a designer card or a placement is built
-// around it — the discipline that caught grass early and that isomalt and the palette knife skipped.
+// The look was judged here BEFORE a designer card or a catalogue row was built around it — the
+// discipline isomalt and the palette knife skipped, both of which reached a working studio with all
+// the scaffolding and never shipped. It passed, so Save now authors a real cake_elements row.
 
 const R = 1.2, BOTTOM_H = 1.45, BOARD_H = 0.1, BOARD_R = 1.9;
 
@@ -66,6 +68,33 @@ export default function LetterBlocksStudio() {
   const [cakeColor, setCakeColor] = useState('#fdfdfd');
   const [bg, setBg] = useState('#efe7e0');
   const [stats, setStats] = useState({ blocks: 0 });
+  const canvasWrapRef = useRef(null);
+
+  // Same hook the grass studio uses — create once, update thereafter (INVARIANTS #3).
+  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+    typeSlug: 'letter_blocks',
+    canvasRef: canvasWrapRef,
+    // What makes a cube read as FONDANT: the chamfer, how the letter sits on the face, the spacing.
+    // NOT the name, the size or the colours — those are the card's, and they change per cake.
+    buildPayload: () => ({
+      allowed_zones: ['top_surface', 'board'],
+      default_color: p.blockColor,
+      placement_config: {
+        procedural: 'letter_blocks',
+        letter_blocks: {
+          chamfer: +p.chamfer.toFixed(3),
+          letterScale: +p.letterScale.toFixed(3),
+          letterDepth: +p.letterDepth.toFixed(4),
+          gap: +p.gap.toFixed(4),
+          letterColor: p.letterColor,
+        },
+      },
+    }),
+    onHydrate: (el) => setP(o => ({
+      ...o, ...(el.placement_config?.letter_blocks ?? {}),
+      blockColor: el.default_color ?? o.blockColor,
+    })),
+  });
 
   const set = k => v => setP(o => ({ ...o, [k]: v }));
   const onStats = useCallback(s => setStats(s), []);
@@ -130,12 +159,42 @@ export default function LetterBlocksStudio() {
             border: '1.5px solid #1a1a1a', background: '#fff', fontFamily: 'inherit', fontWeight: 600 }}>
           Reset
         </button>
-        <p style={{ fontSize: 10.5, color: '#b08', marginTop: 14, lineHeight: 1.5 }}>
-          No save — this screen is for judging the look. Placement and the designer card come once it earns them.
-        </p>
+        {/* Save. The look has been judged, so the row is what makes it a real catalogue element:
+            searchable, taggable, tunable without a deploy. Create once, update thereafter — see
+            useElementSave for why that matters. Needs an element type with slug `letter_blocks`. */}
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #f0e2e7' }}>
+          <div style={{ fontSize: 10.5, color: '#a98', marginBottom: 4, letterSpacing: 0.3 }}>
+            {editing ? 'EDITING A SAVED ELEMENT' : 'SAVE AS ELEMENT'}
+          </div>
+          {editing && (
+            <p style={{ fontSize: 10.5, color: '#9b5f72', margin: '0 0 6px', lineHeight: 1.45 }}>
+              Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather than
+              adding another row.
+            </p>
+          )}
+          <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="e.g. Christening pink"
+            style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
+              border: '1.5px solid #999', borderRadius: 7, boxSizing: 'border-box' }} />
+          <button onClick={save} disabled={busy || !saveName.trim()}
+            style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
+              border: '1.5px solid #1a1a1a', background: busy || !saveName.trim() ? '#e8e2e4' : '#1a1a1a',
+              color: busy || !saveName.trim() ? '#aaa' : '#fff', fontWeight: 700, fontFamily: 'inherit',
+              cursor: busy || !saveName.trim() ? 'default' : 'pointer' }}>
+            {busy ? (editing ? 'Updating...' : 'Saving...') : (editing ? 'Update this element' : 'Save to catalogue')}
+          </button>
+          {msg && (
+            <p style={{ fontSize: 11, marginTop: 8, lineHeight: 1.45, color: msg.ok ? '#2e7d32' : '#c0392b' }}>
+              {msg.text}
+            </p>
+          )}
+          <p style={{ fontSize: 10.5, color: '#a98', marginTop: 8, lineHeight: 1.5 }}>
+            The name, block size and colours are <b>not</b> saved — a baker sets those per cake. This
+            row fixes the chamfer, the letter's relief and the spacing.
+          </p>
+        </div>
       </div>
 
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative' }}>
         <Canvas shadows camera={{ position: [0, 2.2, 4.4], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
           <color attach="background" args={[bg]} />
           <SceneLights shadows />

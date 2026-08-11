@@ -12,7 +12,7 @@ import * as THREE from 'three';
 // A colour tuned under the wrong lights is the wrong colour.
 import { GrassPatch, grassTriangleCount, GRASS_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
 import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
-import { fetchElementTypes, createGlobalElement, updateGlobalElement, fetchGlobalElement, uploadThumbnail } from '../lib/api.js';
+import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Grass studio ──────────────────────────────────────────────────────────────
 // Piped grass, the Wilton 233 look: a nozzle face pierced with ~15 holes, so one squeeze lays down a
@@ -86,112 +86,29 @@ export default function GrassStudio() {
   const [cakeColor, setCakeColor] = useState('#fdfdfd');
   const [bg, setBg] = useState('#e8b4a8');
   const [stats, setStats] = useState({ tufts: 0, blades: 0 });
-  const [saveName, setSaveName] = useState('');
-  // ── Editing an existing row vs authoring a new one ──────────────────────────────────────────
-  // `?element=<id>` opens this studio against a saved grass, the way the Relief Sticker Studio does.
-  // Without it, Save was create-only: every press made ANOTHER row, because cake_elements has no
-  // uniqueness constraint and the API insert has no upsert. Tuning is iterative, so that was a
-  // catalogue full of near-duplicates waiting to happen.
-  const elementId = useMemo(() => new URLSearchParams(window.location.search).get('element'), []);
-  const [editing, setEditing] = useState(null);   // { id, name } once we are revising a real row
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
   const canvasWrapRef = useRef(null);
 
-  const set = k => v => setP(o => ({ ...o, [k]: v }));
-  const onStats = useCallback(s => setStats(s), []);
-  const shape = SHAPES[shapeKey];
-
-  // Cost, honestly. One draw call however dense it gets, but a phone still rasterises the triangles.
-  const tris = grassTriangleCount(stats.tufts, p.strands);
-
-  // Hydrate every slider the row carries, so what you land on is what the designer renders today.
-  // An unset key keeps this studio's default, which IS the designer's default (GRASS_DEFAULTS is the
-  // single source both read).
-  useEffect(() => {
-    if (!elementId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const el = await fetchGlobalElement(elementId);
-        if (cancelled || !el) return;
-        setEditing({ id: el.id, name: el.name });
-        setSaveName(el.name ?? '');
-        setP(o => ({ ...o, ...(el.placement_config?.grass ?? {}), color: el.default_color ?? o.color }));
-      } catch (e) {
-        if (!cancelled) setMsg({ ok: false, text: `Could not load that element: ${e.message}` });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [elementId]);
-
-  async function captureThumbnail() {
-    const cnv = canvasWrapRef.current?.querySelector('canvas');
-    if (!cnv) return null;
-    const blob = await new Promise(res => cnv.toBlob(res, 'image/png'));
-    return blob ? uploadThumbnail('elements/thumbnails', blob) : null;
-  }
-
-  // Author this grass as a file-less catalogue element, exactly the way the drip studio does — the
-  // row is IDENTITY (name, thumbnail, tags) plus the tuned parameters; the geometry stays in code.
-  //
-  // That is what makes it searchable, taggable and manageable, which a hardcoded Tools button can
-  // never be. It also means "Putting green" and "Wild meadow" become two rows over one generator
-  // instead of two presets frozen in this file.
-  // Create the first time, UPDATE every time after — including straight after a create, because the
-  // whole point is that tuning is iterative. cake_elements has no uniqueness constraint and the API
-  // insert has no upsert, so a create-only Save quietly builds a catalogue of near-duplicates.
-  async function saveAsElement() {
-    if (!saveName.trim()) { setMsg({ ok: false, text: 'Give the element a name.' }); return; }
-    setBusy(true); setMsg(null);
-    try {
-      // The look, and only the look. Density, height and colour are the baker's per-cake choices,
-      // exposed on the designer card — baking them into the row would freeze them.
-      const placement_config = {
+  // Authoring a catalogue row is the same job in every procedural studio, so it lives in one hook
+  // (INVARIANTS #3) — create the first time, update every time after, thumbnail included.
+  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+    typeSlug: 'grass',
+    canvasRef: canvasWrapRef,
+    // The LOOK, and only the look. Density, height and colour are what the baker's card exposes;
+    // freezing them here would take away a per-cake choice.
+    buildPayload: () => ({
+      allowed_zones: ['top_surface', 'board'],
+      default_color: p.color,
+      placement_config: {
         procedural: 'grass',
         grass: {
           strands: p.strands, thickness: +p.thickness.toFixed(4),
           splay: +p.splay.toFixed(3), droop: +p.droop.toFixed(3),
           lengthVary: +p.lengthVary.toFixed(3), jitter: +p.jitter.toFixed(3),
         },
-      };
-      // Best-effort, as in the drip studio: a failed capture must not lose the tuning.
-      let thumbnail_url = null;
-      try { thumbnail_url = await captureThumbnail(); } catch { /* keep the old one */ }
-
-      if (editing) {
-        await updateGlobalElement(editing.id, {
-          name: saveName.trim(),
-          default_color: p.color,
-          placement_config,
-          // Only send a thumbnail we actually captured — PATCH treats undefined as "leave alone",
-          // so a failed capture keeps the picture that is already there rather than blanking it.
-          ...(thumbnail_url ? { thumbnail_url } : {}),
-        });
-        setEditing({ id: editing.id, name: saveName.trim() });
-        setMsg({ ok: true, text: `Updated "${saveName.trim()}".` });
-      } else {
-        const types = await fetchElementTypes();
-        const grassType = (types ?? []).find(t => t.slug === 'grass' || (t.name ?? '').trim().toLowerCase() === 'grass');
-        if (!grassType) throw new Error('No "Grass" element type found - create it first in Element Types.');
-        const created = await createGlobalElement({
-          name: saveName.trim(),
-          element_type_id: grassType.id,
-          allowed_zones: ['top_surface', 'board'],
-          default_color: p.color,
-          image_url: null,          // generated - the thumbnail carries the look, there is no asset
-          thumbnail_url,
-          placement_config,
-        });
-        // Become an EDIT of what was just made, so the next press revises this row instead of
-        // cloning it. This is the line that stops a tuning session leaving five grasses behind.
-        if (created?.id) setEditing({ id: created.id, name: saveName.trim() });
-        setMsg({ ok: true, text: `Saved "${saveName.trim()}" - pick it from Decorations. Saving again updates it.` });
-      }
-    } catch (e) {
-      setMsg({ ok: false, text: e.message });
-    } finally { setBusy(false); }
-  }
+      },
+    }),
+    onHydrate: (el) => setP(o => ({ ...o, ...(el.placement_config?.grass ?? {}), color: el.default_color ?? o.color })),
+  });
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: "'Quicksand', sans-serif" }}>
@@ -278,7 +195,7 @@ export default function GrassStudio() {
           <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="e.g. Football pitch"
             style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
               border: '1.5px solid #999', borderRadius: 7, boxSizing: 'border-box' }} />
-          <button onClick={saveAsElement} disabled={busy || !saveName.trim()}
+          <button onClick={save} disabled={busy || !saveName.trim()}
             style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
               border: '1.5px solid #1a1a1a', background: busy || !saveName.trim() ? '#e8e2e4' : '#1a1a1a',
               color: busy || !saveName.trim() ? '#aaa' : '#fff', fontWeight: 700, fontFamily: 'inherit',
