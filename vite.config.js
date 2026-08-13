@@ -7,6 +7,10 @@ import path from 'path';
 // Source-map upload to Sentry runs ONLY when SENTRY_AUTH_TOKEN is set (a build-time
 // secret). Without it the plugin is omitted and the build is unchanged — so local
 // dev/builds never need the token. Set it (+ build) to de-minify admin traces.
+// Core's source, resolved RELATIVE to this file rather than hardcoded to one machine. Present on a
+// developer box with both repos checked out side by side; absent on any build server.
+const CORE_SRC = path.resolve(import.meta.dirname, '../spattoo-core/src/index.js');
+
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
 // Dev-only: accept a POSTed PNG data URL from the Texture Calibrator's "Save snapshot" and write it
@@ -47,8 +51,20 @@ export default defineConfig({
   server: { port: 5174 },
   appType: 'spa',
   resolve: {
+    // ── Core from SOURCE when it is next door, from the vendored tarball otherwise ────────────
+    // Admin used to alias @spattoo/designer to an ABSOLUTE path on one laptop. That is what made
+    // the studios quick to build — an edit in core shows up here on save, no pack, no install —
+    // and it is also why admin could not be deployed: no build server has that directory.
+    //
+    // The filesystem decides. Core checked out beside admin → alias wins → source, instant. A
+    // build server → no such directory → the `file:vendor/…tgz` in package.json resolves instead.
+    // No env var, no mode to remember, and nobody has to know which they are in.
+    //
+    // Consequence worth knowing: locally you are NOT running the vendored tarball, so a stale
+    // vendor cannot be noticed by using the app. That is what makes vendoring into admin part of
+    // `npm run release` rather than a thing to remember — see scripts/release.mjs in core.
     alias: {
-      '@spattoo/designer': '/users/sandeep/dev/spattoo-core/src/index.js',
+      ...(fs.existsSync(CORE_SRC) ? { '@spattoo/designer': CORE_SRC } : {}),
     },
     dedupe: ['react', 'react-dom', 'three', '@react-three/fiber', '@react-three/drei'],
   },
