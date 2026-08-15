@@ -28,6 +28,11 @@ import { uploadBlob, identifyCandidates, generateCandidates, fetchExtractJob, up
 // runs candidates sequentially). We poll the job and refresh the candidate list from it.
 const POLL_MS = 4000;
 
+// How many attempts per candidate. Judging four side by side beats accepting one and regenerating:
+// you are choosing rather than settling, and four at low quality cost about what one at high does.
+// Capped at 4 — past that you are browsing, not deciding.
+const VARIANT_CHOICES = [1, 2, 3, 4];
+
 const INTENTS = [
   { key: 'sticker', label: 'Sticker',  hint: 'Printed flat on edible paper' },
   { key: 'relief',  label: 'Fondant',  hint: 'Raised cut-out — alpha becomes the extruded shape' },
@@ -52,7 +57,10 @@ const S = {
   grid:    { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginTop: 20 },
   card:    { border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff' },
   cardOff: { opacity: 0.45 },
-  thumb:   { width: '100%', height: 150, objectFit: 'contain', background: '#f8fafc', borderRadius: 8 },
+  thumb:   { width: '100%', height: 150, objectFit: 'contain', background: '#f8fafc', borderRadius: 8, display: 'block' },
+  dl:      { position: 'absolute', right: 6, bottom: 6, width: 26, height: 26, borderRadius: 8, background: 'rgba(44,68,51,0.92)',
+             color: '#fff', fontWeight: 800, fontSize: 14, textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  count:   { display: 'flex', gap: 4, alignItems: 'center', marginRight: 4 },
   label:   { fontWeight: 700, fontSize: 13, margin: '8px 0 2px' },
   meta:    { fontSize: 11.5, color: '#94a3b8' },
   seg:     { display: 'flex', gap: 4, marginTop: 8 },
@@ -76,6 +84,7 @@ export default function ExtractElements() {
   const [candidates, setCands]  = useState([]);
   const [skipped, setSkipped]   = useState(() => new Set());
   const [jobId, setJobId]       = useState(null);
+  const [variants, setVariants] = useState(1);
   const pollInFlight = useRef(false);
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
@@ -125,7 +134,7 @@ export default function ExtractElements() {
     if (!chosen.length) return;
     setBusy(true); setError(null);
     try {
-      const res = await generateCandidates(chosen.map(c => c.id));
+      const res = await generateCandidates(chosen.map(c => c.id), variants);
       setJobId(res.jobId ?? res.job?.id ?? null);
       setStep('generating');
     } catch (e) {
@@ -200,7 +209,17 @@ export default function ExtractElements() {
               const off = skipped.has(c.id) || c.status === 'blocked';
               return (
                 <div key={c.id} style={{ ...S.card, ...(off ? S.cardOff : {}) }}>
-                  <img src={c.outputUrl || c.cropUrl} alt={c.label ?? 'candidate'} style={S.thumb} />
+                  {(c.outputUrls?.length ? c.outputUrls : [c.cropUrl].filter(Boolean)).map((url, i) => (
+                    <div key={url} style={{ position: 'relative', marginBottom: 6 }}>
+                      <img src={url} alt={`${c.label ?? 'candidate'} ${i + 1}`} style={S.thumb} />
+                      {/* download, not "save as element" — this screen is a workspace. You look at
+                          the attempts, take the one you want, and add it in AddElement yourself. */}
+                      {c.outputUrls?.length > 0 && (
+                        <a href={url} download={`${(c.label ?? 'element').replace(/[^a-z0-9]+/gi, '-')}-${i + 1}.png`}
+                           style={S.dl} title="Download this one">↓</a>
+                      )}
+                    </div>
+                  ))}
                   <div style={S.label}>{c.label ?? 'unnamed'}</div>
                   <div style={S.meta}>
                     {c.status}{c.material ? ` · ${c.material}` : ''}{c.outputUrl ? ' · generated' : ''}
@@ -241,6 +260,14 @@ export default function ExtractElements() {
           </div>
 
           <div style={S.bar}>
+            <span style={S.count}>
+              <span style={S.hint}>Attempts each</span>
+              {VARIANT_CHOICES.map(v => (
+                <button key={v} onClick={() => setVariants(v)}
+                        disabled={step === 'generating'}
+                        style={{ ...S.segBtn(variants === v), flex: 'none', width: 28 }}>{v}</button>
+              ))}
+            </span>
             <button style={S.btn} onClick={generate}
                     disabled={busy || step === 'generating' || !chosen.length}>
               {step === 'generating' ? 'Generating…' : `Generate ${chosen.length || ''}`.trim()}

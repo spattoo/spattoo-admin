@@ -166,7 +166,7 @@ export async function uploadBlob(folder, filename, blob, contentType = blob.type
 // generation — a generated image cannot be re-purposed by relabelling it, because the recipe
 // shaped how it was drawn.
 export async function identifyCandidates(sourceKey)      { return post('/api/admin/element-extract/identify', { sourceKey }); }
-export async function generateCandidates(candidateIds)   { return post('/api/admin/element-extract/generate', { candidateIds }); }
+export async function generateCandidates(candidateIds, variants = 1) { return post('/api/admin/element-extract/generate', { candidateIds, variants }); }
 export async function fetchExtractJob(jobId)             { return get(`/api/admin/element-extract/${jobId}`); }
 export async function updateCandidate(id, body)          { return patch(`/api/admin/element-extract/candidates/${id}`, body); }
 
