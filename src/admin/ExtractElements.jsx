@@ -35,7 +35,9 @@ const S = {
   wrap:    { padding: 24, maxWidth: 1100, margin: '0 auto', fontFamily: 'inherit' },
   h1:      { fontSize: 20, fontWeight: 800, margin: '0 0 4px' },
   sub:     { fontSize: 13, color: '#666', margin: '0 0 20px' },
-  drop:    { border: '2px dashed #cbd5e1', borderRadius: 14, padding: 36, textAlign: 'center', cursor: 'pointer', background: '#fafafa' },
+  // display:block — a <label> is INLINE by default, so padding, width and text-align silently did
+  // nothing and the dashed box collapsed to a sliver beside its own text.
+  drop:    { display: 'block', border: '2px dashed #cbd5e1', borderRadius: 14, padding: 36, textAlign: 'center', cursor: 'pointer', background: '#fafafa' },
   preview: { maxWidth: 320, maxHeight: 260, objectFit: 'contain', borderRadius: 10, display: 'block', margin: '0 auto 14px' },
   grid:    { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginTop: 20 },
   card:    { border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff' },
