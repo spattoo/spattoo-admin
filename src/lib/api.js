@@ -158,6 +158,18 @@ export async function uploadBlob(folder, filename, blob, contentType = blob.type
   return { key, publicUrl };
 }
 
+// ── Extract Elements ─────────────────────────────────────────────────────────────────────────
+// Point at a reference cake photo, get back the decorations on it as candidates, choose what each
+// one is FOR, and regenerate the chosen ones as isolated images.
+//
+// `intent` selects the prompt recipe server-side (migration 062) and is settable only BEFORE
+// generation — a generated image cannot be re-purposed by relabelling it, because the recipe
+// shaped how it was drawn.
+export async function identifyCandidates(sourceKey)      { return post('/api/admin/element-extract/identify', { sourceKey }); }
+export async function generateCandidates(candidateIds)   { return post('/api/admin/element-extract/generate', { candidateIds }); }
+export async function fetchExtractJob(jobId)             { return get(`/api/admin/element-extract/${jobId}`); }
+export async function updateCandidate(id, body)          { return patch(`/api/admin/element-extract/candidates/${id}`, body); }
+
 // Delete a managed R2 object. Accepts a bare key or a full public URL; the API
 // normalizes it and refuses anything outside the managed asset folders.
 export async function deleteR2Object(key) {
