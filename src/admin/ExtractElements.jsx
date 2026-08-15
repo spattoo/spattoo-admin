@@ -5,8 +5,11 @@ import { uploadBlob, identifyCandidates, generateCandidates, fetchExtractJob, up
 //
 // The reference is CONTEXT, not a source to cut from. Point at a makeup-themed cake and the model
 // lists what is on it (nail polish, lipstick, mirror…); each one is then REGENERATED as an isolated
-// image at high input fidelity, so the output is a clean asset rather than a crop of somebody's
-// photograph.
+// image, so the output is a clean asset rather than a crop of somebody's photograph.
+//
+// Two choices per candidate, and they answer different questions:
+//   intent    what the image will BECOME → picks the prompt recipe
+//   fidelity  how closely to copy the reference → picks the ENDPOINT
 //
 // ── Why the intent picker is the important control ──────────────────────────────────────────────
 // The same subject needs a different image depending on what it becomes, and the differences are
@@ -29,6 +32,13 @@ const INTENTS = [
   { key: 'sticker', label: 'Sticker',  hint: 'Printed flat on edible paper' },
   { key: 'relief',  label: 'Fondant',  hint: 'Raised cut-out — alpha becomes the extruded shape' },
   { key: 'model',   label: '3D model', hint: 'Input for image-to-3D — needs depth cues' },
+];
+
+// How closely to copy the reference. Two endpoints, not a slider: images/edits always conditions on
+// the image it is given, so "ignore the reference" is only achievable by not sending it.
+const FIDELITIES = [
+  { key: 'reference', label: 'Copy this',  hint: 'Reproduce THIS object — same shape, shade and quirks' },
+  { key: 'fresh',     label: 'Fresh',      hint: 'A clean version from the description — none of the photo\'s angle or wonk, and cheaper' },
 ];
 
 const S = {
@@ -94,12 +104,13 @@ export default function ExtractElements() {
 
   // Optimistic: the picker should feel like a toggle, not a save. A failure puts the old value back
   // and says so, rather than leaving the UI claiming something the server did not accept.
-  async function setIntent(id, intent) {
-    const prev = candidates.find(c => c.id === id)?.intent;
-    setCands(cs => cs.map(c => (c.id === id ? { ...c, intent } : c)));
-    try { await updateCandidate(id, { intent }); }
+  // One handler for both pickers — they behave identically and differ only in which key they set.
+  async function setField(id, key, value) {
+    const prev = candidates.find(c => c.id === id)?.[key];
+    setCands(cs => cs.map(c => (c.id === id ? { ...c, [key]: value } : c)));
+    try { await updateCandidate(id, { [key]: value }); }
     catch (e) {
-      setCands(cs => cs.map(c => (c.id === id ? { ...c, intent: prev } : c)));
+      setCands(cs => cs.map(c => (c.id === id ? { ...c, [key]: prev } : c)));
       setError(e.message || 'Could not save that choice.');
     }
   }
@@ -202,9 +213,19 @@ export default function ExtractElements() {
                     {INTENTS.map(i => (
                       <button key={i.key} title={i.hint}
                               disabled={c.status === 'blocked' || !!c.outputUrl}
-                              onClick={() => setIntent(c.id, i.key)}
+                              onClick={() => setField(c.id, 'intent', i.key)}
                               style={S.segBtn((c.intent ?? 'sticker') === i.key)}>
                         {i.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={S.seg}>
+                    {FIDELITIES.map(f => (
+                      <button key={f.key} title={f.hint}
+                              disabled={c.status === 'blocked' || !!c.outputUrl}
+                              onClick={() => setField(c.id, 'fidelity', f.key)}
+                              style={S.segBtn((c.fidelity ?? 'reference') === f.key)}>
+                        {f.label}
                       </button>
                     ))}
                   </div>
@@ -227,7 +248,7 @@ export default function ExtractElements() {
             <button style={S.ghost} onClick={reset} disabled={busy}>Start over</button>
             <span style={S.hint}>
               {step === 'generating'
-                ? 'One at a time — the image API is rate-limited per minute.'
+                ? 'Working through them one at a time — the image API allows only a few per minute.'
                 : 'Blocked candidates are licensed characters and cannot be regenerated.'}
             </span>
           </div>
