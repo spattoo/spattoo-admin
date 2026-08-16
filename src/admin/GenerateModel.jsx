@@ -3,7 +3,8 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { measureForSave, toStatColumns, deriveAssetClass } from '../lib/glb.js';
 
 import { ZONE_LIST as ZONES } from '../lib/constants.js';
 
@@ -397,15 +398,18 @@ export default function GenerateModel() {
       const glbBuffer = await exportGLB(exportRoot);
       const glbBlob = new Blob([glbBuffer], { type: 'model/gltf-binary' });
 
-      const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', `${crypto.randomUUID()}.glb`, 'model/gltf-binary');
-      await uploadToR2(fu, glbBlob);
-      const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-      await uploadToR2(tu, thumbBlob);
+      const { key: fk } = await uploadBlob('elements/files/3D', `${crypto.randomUUID()}.glb`, glbBlob, 'model/gltf-binary');
+      const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       // Stash the part-map + source script alongside placement (jsonb) so the
       // model stays re-editable and parts can drive per-part color later.
       const partsMeta = parts.map(p => ({ id: p.id, label: p.label, default: colors[p.id] ?? p.default }));
       const placement = { ...placementConfig, _model: { script, parts: partsMeta } };
+
+      // Record the GLB cost (§3) — measured from the export root. Best-effort; never blocks save.
+      let statCols = {};
+      try { statCols = toStatColumns(measureForSave(exportRoot, Math.round(glbBuffer.byteLength / 1024), deriveAssetClass({ placementConfig, zones }))); }
+      catch (e) { console.warn('GLB measure failed:', e.message); }
 
       await createGlobalElement({
         name: name.trim(),
@@ -418,6 +422,7 @@ export default function GenerateModel() {
         allowed_actions: capabilities,
         default_color: parts[0] ? (colors[parts[0].id] ?? parts[0].default) : null,
         sort_order: 0,
+        ...statCols,
       });
 
       setMsg({ ok: true, text: 'Model saved as element!' });
@@ -454,7 +459,6 @@ export default function GenerateModel() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={s.page}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={s.title}>Generate 3D Model</div>

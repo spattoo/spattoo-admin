@@ -4,7 +4,7 @@ import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 import { makeGoldLeafMaps } from '../lib/goldLeafTexture.js';
-import { fetchElementTypes, createGlobalElement, getSignedUploadUrl, uploadToR2 } from '../lib/api.js';
+import { fetchElementTypes, createGlobalElement, uploadThumbnail } from '../lib/api.js';
 import {
   buildSecondCreamLayer,
   buildSecondCreamEdgeLine,
@@ -243,10 +243,7 @@ export default function SecondCreamLayerStudio() {
     if (!cnv) return null;
     const blob = await new Promise(res => cnv.toBlob(res, 'image/png'));
     if (!blob) return null;
-    const filename = `${crypto.randomUUID()}.png`;
-    const { url, key } = await getSignedUploadUrl('elements/thumbnails', filename, 'image/png');
-    await uploadToR2(url, blob);
-    return key;
+    return uploadThumbnail('elements/thumbnails', blob);
   }
 
   // Author the cream layer as a file-less master-data element (cake_elements) under the "Cream Layer"

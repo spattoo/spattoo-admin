@@ -1,15 +1,22 @@
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
   fetchAdminElementTypes, fetchAllElements, fetchParentElements,
-  getSignedUploadUrl, uploadToR2, updateGlobalElement, createGlobalElement, removeBg, deleteR2Object,
+  uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
 } from '../lib/api.js';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
-import { normalizeThumbnail } from '../lib/thumbnail.js';
+import DecorationGuidePanel from './DecorationGuidePanel.jsx';
+import { normalizeArtwork } from '@spattoo/designer';
+import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
+import { statsFromElement } from '../lib/glb.js';
+import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
+import { serializeZone, zoneValueMode, zoneValueSeat, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
+import PlacementZoneRow from './PlacementZoneRow.jsx';
+import ElementPreviewPanel from './ElementPreviewPanel.jsx';
 
 const CAKE_ZONES = [
   { value: 'top_surface', label: 'Top Surface' },
@@ -19,6 +26,8 @@ const CAKE_ZONES = [
   { value: 'board',       label: 'Board' },
 ];
 
+// Positions only. `insert` is NO LONGER a position — it's a per-zone MODIFIER (a checkbox on the
+// stand/hug poses, see PlacementZoneRow + zoneShowsInsert), so it stays out of this list.
 const PLACEMENT_MODES = [
   { value: 'hug',              label: 'hug (default)' },   // explicit — saved as "hug", not omitted
   { value: 'stand',            label: 'stand' },
@@ -114,6 +123,37 @@ const s = {
     background: '#fff', borderRadius: 16,
     border: '1.5px solid #C5D4C8',
     overflow: 'hidden',
+  },
+  recencyRow: { display: 'flex', gap: 4, marginTop: 8 },
+  recencyChip: {
+    flex: 1, padding: '5px 0', borderRadius: 8, cursor: 'pointer',
+    borderWidth: 1.5, borderStyle: 'solid', borderColor: '#C5D4C8',
+    background: '#fff', color: '#6B8C74', fontSize: 11, fontWeight: 700,
+    fontFamily: "'Quicksand',sans-serif",
+  },
+  recencyChipOn: { background: '#2C4433', borderColor: '#2C4433', color: '#fff' },
+  selectAllBtn: {
+    marginTop: 8, width: '100%', padding: '6px 0', borderRadius: 8, cursor: 'pointer',
+    borderWidth: 1.5, borderStyle: 'solid', borderColor: '#C5D4C8',
+    background: '#fff', color: '#2C4433', fontSize: 12, fontWeight: 700,
+    fontFamily: "'Quicksand',sans-serif",
+  },
+
+  // Appears only when something is picked — a permanently visible bar for an occasional action is
+  // chrome the other 99% of visits pay for.
+  exportBar: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '8px 12px', borderBottom: '1px solid #C5D4C8',
+    background: '#F3F7F4', fontSize: 12, color: '#2C4433', fontFamily: "'Quicksand',sans-serif",
+  },
+  exportBtn: {
+    marginLeft: 'auto', padding: '5px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
+    background: '#2C4433', color: '#fff', fontSize: 12, fontWeight: 700, fontFamily: "'Quicksand',sans-serif",
+  },
+  exportClear: {
+    padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
+    borderWidth: 1.5, borderStyle: 'solid', borderColor: '#C5D4C8',
+    background: '#fff', color: '#6B8C74', fontSize: 12, fontWeight: 700, fontFamily: "'Quicksand',sans-serif",
   },
   listSearch: {
     padding: '10px 12px',
@@ -390,8 +430,52 @@ export default function ManageElements() {
   const [elements,     setElements]     = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [query,        setQuery]        = useState('');
+  const [overCapOnly,  setOverCapOnly]  = useState(false);   // filter: only elements over their §3 budget
+  // Filter: how recently an element was added. "The ones I added today" is how a promotion is
+  // actually thought about, and ticking ten boxes from memory is how one gets missed — a missing
+  // element does not error in prod, it is simply absent until somebody notices.
+  const [addedWithin, setAddedWithin] = useState(0);   // days; 0 = any time
   const [selectedId,   setSelectedId]   = useState(null);
   const [cloneMode,    setCloneMode]    = useState(false);   // "create a NEW element from these settings"
+  // Bumped on every successful save. The preview renders the SAVED row, so this is its cue to
+  // re-fetch — which is what makes "save, then look" a loop instead of a page reload.
+  const [savedAt,      setSavedAt]      = useState(0);
+  // ── Picked for export ─────────────────────────────────────────────────────────────────────────
+  // Separate from `selectedId`, which is "the element being edited". Ticking a row must not load it
+  // into the form, and editing one must not change what is about to be promoted.
+  const [picked, setPicked] = useState(() => new Set());
+  const [exporting, setExporting] = useState(false);
+
+  const togglePicked = (id) => setPicked(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  async function handleExport() {
+    if (!picked.size) return;
+    setExporting(true);
+    try {
+      const bundle = await exportElements([...picked]);
+      // The server resolves the CLOSURE, so what comes back is routinely more than what was ticked —
+      // element types, parent elements, tags. Say so, because silently exporting a parent nobody
+      // chose is a surprise best had here rather than in prod.
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `elements-${new Date().toISOString().slice(0, 10)}-${bundle.elements.length}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg({ ok: true, text:
+        `Exported ${bundle.elements.length} element(s) — plus ${bundle.element_types.length} type(s), ` +
+        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s).` });
+    } catch (e) {
+      setMsg({ ok: false, text: e?.message ?? 'Export failed' });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   // Derive selected element from list (auto-updates after reload)
   const selectedEl = elements.find(e => e.id === selectedId) ?? null;
@@ -405,6 +489,10 @@ export default function ManageElements() {
   const [parentOptions,    setParentOptions]    = useState([]);
   const [capabilities,     setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
   const [defaultColor,     setDefaultColor]     = useState('#F0DEB8');
+  // WHAT IT IS MADE OF. Technique already lives in the element TYPE (Cream Piping vs Palette knife
+  // art), so this is material only — and it decides what X-Ray offers: fondant gets a modelling
+  // guide AND printing, a printed sheet gets only printing, acrylic gets neither.
+  const [medium,           setMedium]           = useState('');
   const [isActive,         setIsActive]         = useState(true);
 
   // Pattern thumbnail regeneration (piping_pattern elements have no GLB to capture from —
@@ -437,14 +525,15 @@ export default function ManageElements() {
   const [glbEnvPreset,     setGlbEnvPreset]     = useState('none');
 
   const [placementConfig,    setPlacementConfig]    = useState('{}');
-  const [placementZoneConfig, setPlacementZoneConfig] = useState({});
+  const [placementZoneConfig, setPlacementZoneConfig] = useState({});   // per-zone MODE string
+  const [seatConfig,          setSeatConfig]          = useState({});   // per-zone seat override: { side: 'proud'|'flush', ... } — 'auto'/absent = default
   const [placementScale,      setPlacementScale]      = useState('');
   const [placementScaleMin,   setPlacementScaleMin]   = useState('');   // placement_config.scale.min
   const [placementScaleMax,   setPlacementScaleMax]   = useState('');   // placement_config.scale.max
   const [placementScaleStep,  setPlacementScaleStep]  = useState('');   // placement_config.scale.step
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
-  const [sideProud,          setSideProud]          = useState(false);
+  const [scatterCount,       setScatterCount]       = useState('');   // placement_config.scatter_count (blank = designer default 12)
   const [useFondant,         setUseFondant]         = useState(false);   // placement_config.useSharedFondantTexture
   const [hugFill,            setHugFill]            = useState('');
   // Packed ball cluster (placement_config.cluster) — see AddElement. sizes = [largest,2nd,3rd,small].
@@ -458,6 +547,11 @@ export default function ManageElements() {
   const [vergeAngle,     setVergeAngle]     = useState('');   // verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]   = useState('');   // verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset] = useState('');   // verge.edge_inset (blank = 0)
+  // Insert (base sunk into the surface at an angle — chocolate bars, sparklers) is a per-zone
+  // MODIFIER now (rides `placement_config[zone].insert`, like `seat`), NOT a global position. One
+  // entry per zone that has it on: { [zone]: { depth?, lean_deg?, jitter_deg? } } ({} = on, defaults).
+  const [insertConfig,  setInsertConfig]   = useState({});
+  const [fullRingConfig, setFullRingConfig] = useState({});   // per ring-zone { rim, board } — mirrors top_/bottom_ring_finish==='element'
   // Folded sticker (2D) + pixel-recolour region — config-driven capabilities (see spattoo-core).
   const [foldable,      setFoldable]      = useState(false);
   const [foldAngle,     setFoldAngle]     = useState('');
@@ -465,6 +559,12 @@ export default function ManageElements() {
   const [recolorMethod, setRecolorMethod] = useState('opaque');
   const [recolorGuard,  setRecolorGuard]  = useState('12');
   const [recolorSat,    setRecolorSat]    = useState('0.25');
+  // Print finish (placement_config.print_finish) — OPTIONAL artistic overrides. The designer now renders a
+  // print at exactly 1× its artwork by construction (spattoo-core shared/printExposure.js), so these exist
+  // to make a deliberate choice, NOT to correct a render that is wrong. Blank writes no key at all.
+  const [printSat,     setPrintSat]     = useState('');   // print_finish.saturation — chroma boost (1 = the artwork)
+  const [printShading, setPrintShading] = useState('');   // print_finish.shading    — how much cake light it takes
+  const [printGain,    setPrintGain]    = useState('');   // print_finish.gain       — exposure (1 = the artwork)
   const [patternOnly,        setPatternOnly]        = useState(false);
   const [description,      setDescription]      = useState('');
   const [glbRotation,        setGlbRotation]        = useState([0, 0, 0]);
@@ -477,6 +577,19 @@ export default function ManageElements() {
   const canvasRef = useRef();
 
   useEffect(() => { loadAll(); }, []);
+
+  // Deep link: /elements/manage?element=<id> opens straight onto that element (the Relief Sticker Studio
+  // links back this way, so you return to the row you were tuning). Waits for BOTH lists — selectElement
+  // resolves the element's type slug to seed a missing placement_config, and would mis-seed on an empty
+  // elementTypes. Fires once; a later manual selection must not be yanked back.
+  const deepLinkId = useMemo(() => new URLSearchParams(window.location.search).get('element'), []);
+  const deepLinkedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkedRef.current || !deepLinkId || !elements.length || !elementTypes.length) return;
+    deepLinkedRef.current = true;
+    const el = elements.find(e => e.id === deepLinkId);
+    if (el) selectElement(el);
+  }, [deepLinkId, elements, elementTypes]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!elementTypeId || isParent) { setParentOptions([]); return; }
@@ -508,6 +621,7 @@ export default function ManageElements() {
     setParentId(el.parent_id ?? '');
     setCapabilities(el.allowed_actions ?? { resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
     setDefaultColor(el.default_color ?? '#F0DEB8');
+    setMedium(el.medium ?? '');
     setPreviewColor(el.default_color ?? '#f5e6c8');   // seed pattern-thumbnail cream from default
     setIsActive(el.is_active ?? true);
     setNewAssetFile(null);
@@ -527,9 +641,7 @@ export default function ManageElements() {
     setPlacementConfig(JSON.stringify(pc, null, 2));
     setGlbRoughness(pc.roughness ?? 0.6);
     setGlbMetalness(pc.metalness ?? 0.15);
-    const zoneConf = {};
-    (el.allowed_zones ?? []).forEach(z => { if (pc[z]) zoneConf[z] = pc[z]; });
-    setPlacementZoneConfig(zoneConf);
+    loadZonesFromPc(pc, el.allowed_zones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
@@ -537,13 +649,15 @@ export default function ManageElements() {
     setSinglePerSlot(pc.single_per_slot === true);
     setUseFondant(pc.useSharedFondantTexture === true);
     setCanScatter(pc.scatter === true);
-    setSideProud(pc.side_proud === true);
+    setScatterCount(pc.scatter_count != null ? String(pc.scatter_count) : '');
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
+    loadPrintFinishFromPc(pc);
     setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
@@ -563,11 +677,11 @@ export default function ManageElements() {
     setRemovingBg(true);
     setNewThumbBlob(null);
     try {
-      // Skip remove.bg when disabled (the image's alpha is already authored, e.g. a photo frame).
-      const processed = enabled ? await removeBg(blob) : blob;
-      setNewThumbBlob(processed);
+      // Same shared 2D pipeline as AddElement: bg-remove (unless disabled) + normalize. Used as the
+      // thumbnail AND (for 2D + remove-bg) the replacement asset, so the sticker comes out transparent.
+      setNewThumbBlob(await prepareElementImage(blob, { removeBgEnabled: enabled }));
     } catch {
-      setNewThumbBlob(blob);
+      setNewThumbBlob(await normalizeArtwork(blob, { size: ELEMENT_IMAGE_DIM }));
     } finally {
       setRemovingBg(false);
     }
@@ -610,6 +724,79 @@ export default function ManageElements() {
       return JSON.stringify(cur, null, 2);
     });
   }
+  // Split a placement_config's per-zone values (string OR { mode, seat, insert }) into the mode +
+  // seat + insert control maps. Used by both element-load and JSON-edit sync so they can't drift.
+  // `splitZoneValue` promotes the legacy `insert` POSITION (mode:"insert" + shared global insert)
+  // into { mode:<stand|hug>, insert:{…} }. Migrates the legacy global `side_proud` flag → a per-zone
+  // 'proud' seat when no explicit seat is authored.
+  function loadZonesFromPc(pc, zones) {
+    const modeConf = {}, seatConf = {}, insertConf = {};
+    (zones ?? []).forEach(z => {
+      const raw = pc[z];
+      const { mode, insert } = splitZoneValue(raw, z, pc.insert);
+      if (raw != null) modeConf[z] = mode;
+      let seat = zoneValueSeat(raw);
+      if (seat === 'auto' && pc.side_proud === true && zoneShowsSeat(z, mode)) seat = 'proud';
+      if (seat !== 'auto') seatConf[z] = seat;
+      if (insert != null && zoneShowsInsert(mode)) insertConf[z] = insert;
+    });
+    setPlacementZoneConfig(modeConf);
+    setSeatConfig(seatConf);
+    setInsertConfig(insertConf);
+    // Full ring is a FLAT top_/bottom_ config, not a per-zone value — read it straight off the pc.
+    setFullRingConfig({ rim: pc.top_ring_finish === 'element', board: pc.bottom_ring_finish === 'element' });
+  }
+
+  // Toggle the "full ring" for a rim/board zone. Stored as the FLAT top_/bottom_ ring keys the designer
+  // reads (arrangement:'ring' + ring_finish:'element' so any decoration keeps its real materials), NOT
+  // the per-zone object. rim → top_, board → bottom_ (ringZonePrefix). Clearing removes the keys.
+  function setZoneFullRing(zone, on) {
+    const ns = ringZonePrefix(zone);
+    if (!ns) return;
+    setFullRingConfig(c => ({ ...c, [zone]: on }));
+    patchPc(on
+      ? { [`${ns}_ring_finish`]: 'element', [`${ns}_arrangement`]: 'ring', [`${ns}_arrangements_allowed`]: ['ring', 'single'] }
+      : { [`${ns}_ring_finish`]: null, [`${ns}_arrangement`]: null, [`${ns}_arrangements_allowed`]: null });
+  }
+  // Write a zone's mode + seat + insert modifier back into all three control maps AND the
+  // placement_config JSON (ONE path, used by every zone control). A seat only sticks on a wall hug;
+  // an insert modifier only on a pose that supports it (stand/hug). `insert` is null (off) or a params
+  // object (on; {} = defaults). Also clears the LEGACY global `side_proud`/`insert` keys — they're
+  // per-zone now, so any zone edit migrates them away. The JSON stores the string-or-object form.
+  function commitZone(zone, mode, seat, insert) {
+    const effSeat = zoneShowsSeat(zone, mode) ? seat : 'auto';
+    const effInsert = zoneShowsInsert(mode) ? (insert ?? null) : null;
+    setPlacementZoneConfig(c => ({ ...c, [zone]: mode }));
+    setSeatConfig(c => {
+      const next = { ...c };
+      if (effSeat === 'proud' || effSeat === 'flush') next[zone] = effSeat;
+      else delete next[zone];
+      return next;
+    });
+    setInsertConfig(c => {
+      const next = { ...c };
+      if (effInsert) next[zone] = effInsert; else delete next[zone];
+      return next;
+    });
+    patchPc({ [zone]: serializeZone(mode, effSeat, effInsert), side_proud: null, insert: null });
+  }
+  // A single insert param field edit for a zone: blank removes the key, else parse. Passing {} (all
+  // blank) keeps insert ON with defaults.
+  function setZoneInsertField(zone, mode, field, value) {
+    const cur = insertConfig[zone] ?? {};
+    const next = { ...cur };
+    if (value === '' || value == null) delete next[field];
+    else next[field] = parseFloat(value);
+    commitZone(zone, mode, seatConfig[zone], next);
+  }
+  // Reflect placement_config.print_finish into its controls (used by both load + JSON-edit sync — one
+  // helper, so the two paths can't drift). Blank when absent: the designer's defaults then apply.
+  function loadPrintFinishFromPc(pc) {
+    setPrintSat(pc.print_finish?.saturation != null ? String(pc.print_finish.saturation) : '');
+    setPrintShading(pc.print_finish?.shading != null ? String(pc.print_finish.shading) : '');
+    setPrintGain(pc.print_finish?.gain != null ? String(pc.print_finish.gain) : '');
+    // `emissive` is the LEGACY key from the pre-exposure model; the designer ignores it. Not surfaced.
+  }
   // Reflect placement_config.cluster into the cluster controls (used by both load + JSON-edit sync).
   function loadClusterFromPc(pc) {
     setCanCluster(!!pc.cluster);
@@ -633,9 +820,7 @@ export default function ManageElements() {
     patchPc({ cluster: c });
   }
   function syncStructuredFromPc(pc) {
-    const zoneConf = {};
-    (applicableZones ?? []).forEach(z => { if (pc[z]) zoneConf[z] = pc[z]; });
-    setPlacementZoneConfig(zoneConf);
+    loadZonesFromPc(pc, applicableZones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
@@ -643,13 +828,15 @@ export default function ManageElements() {
     setSinglePerSlot(pc.single_per_slot === true);
     setUseFondant(pc.useSharedFondantTexture === true);
     setCanScatter(pc.scatter === true);
-    setSideProud(pc.side_proud === true);
+    setScatterCount(pc.scatter_count != null ? String(pc.scatter_count) : '');
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
+    loadPrintFinishFromPc(pc);
     setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
@@ -672,7 +859,24 @@ export default function ManageElements() {
   const recolorDesc = (m = recolorMethod, g = recolorGuard, sv = recolorSat) =>
     m === 'blue_gt_green' ? { method: 'blue_gt_green', guard: g !== '' ? parseInt(g, 10) : 12 }
     : m === 'saturated'   ? { method: 'saturated', sat: sv !== '' ? parseFloat(sv) : 0.25 }
+    // hue_regions clusters the coloured pixels BY HUE and gives the customer one swatch per detected colour
+    // (the multi-colour path — a tree's trunk/leaves/flower stay separate). Like `saturated` it thresholds on
+    // `sat` (which pixels count as coloured); the per-region swatches are chosen per instance in the designer.
+    : m === 'hue_regions' ? { method: 'hue_regions', sat: sv !== '' ? parseFloat(sv) : 0.18 }
     : { method: 'opaque' };
+  // The print_finish descriptor — only non-blank fields; all blank → '' so patchPc drops the key entirely
+  // and the print renders as its artwork. Never write a "default" value into the config: an explicit key
+  // freezes the element against the model. (The Relief Studio used to stamp its defaults into every
+  // element it touched, which is how {emissive:0.22, saturation:1.12} ended up frozen on 7 elements and
+  // the 1.4× overshoot got baked across the library. Don't reintroduce that.) The legacy `emissive` key is
+  // dropped on save, so re-saving a legacy element cleans it up.
+  const printFinishDesc = (sat = printSat, sh = printShading, g = printGain) => {
+    const p = {};
+    if (numPatch(sat) !== '') p.saturation = numPatch(sat);
+    if (numPatch(sh)  !== '') p.shading    = numPatch(sh);
+    if (numPatch(g)   !== '') p.gain       = numPatch(g);
+    return Object.keys(p).length ? p : '';
+  };
   // The verge descriptor (rests on the rim lip, reclines outward) — only non-blank fields; all blank
   // → '' so patchPc drops the key and the designer uses its defaults (angle_deg 35 / 0 offsets).
   const vergeDesc = (seat = vergeSeat, a = vergeAngle, y = vergeYOffset, ei = vergeEdgeInset) => {
@@ -702,8 +906,18 @@ export default function ManageElements() {
     catch (e) { throw new Error(`placement_config is not valid JSON — fix it before saving (${e.message}).`); }
     // Merge zone config — write the chosen mode for EVERY applicable zone, explicitly (default
     // 'hug'). No more "absent means hug": the saved config states the mode for each zone, so the
-    // designer never has to guess. (Existing config still wins via the designer's spread/backfill.)
-    applicableZones.forEach(z => { parsedConfig[z] = placementZoneConfig[z] || 'hug'; });
+    // designer never has to guess. Per-zone modifiers (`seat` on a wall hug, `insert` on a stand/hug
+    // pose) serialize into the { mode, … } object form; otherwise the plain mode string (shared
+    // serializeZone). The legacy GLOBAL `insert` key is dropped — insert is per-zone now.
+    applicableZones.forEach(z => {
+      const mode = placementZoneConfig[z] || 'hug';
+      parsedConfig[z] = serializeZone(
+        mode,
+        zoneShowsSeat(z, mode) ? seatConfig[z] : undefined,
+        zoneShowsInsert(mode) ? insertConfig[z] : undefined,
+      );
+    });
+    delete parsedConfig.insert;
     if (placementScale !== '') parsedConfig.r = parseFloat(placementScale);
     else delete parsedConfig.r;
     // Optional size-dial bounds { min, max, step } (each independent). r is the default WITHIN this
@@ -718,11 +932,14 @@ export default function ManageElements() {
     // Scatter STYLE: many packed instances driven by a density control (sprinkles), vs. discrete
     // decor placed/duplicated by hand. Config-driven; the designer reads placement_config.scatter,
     // never the element type. Mutually exclusive with single_per_slot.
-    if (canScatter) { parsedConfig.scatter = true; delete parsedConfig.single_per_slot; }
-    else delete parsedConfig.scatter;
-    // Side seating: default flush (true hug); proud = stands off the wall.
-    if (sideProud) parsedConfig.side_proud = true;
-    else delete parsedConfig.side_proud;
+    if (canScatter) {
+      parsedConfig.scatter = true; delete parsedConfig.single_per_slot;
+      // Admin-authored default instance count (core reads placement_config.scatter_count, else 12).
+      if (scatterCount !== '' && parseInt(scatterCount, 10) > 0) parsedConfig.scatter_count = parseInt(scatterCount, 10);
+      else delete parsedConfig.scatter_count;
+    } else { delete parsedConfig.scatter; delete parsedConfig.scatter_count; }
+    // Legacy global side_proud is superseded by the per-zone seat written above — never persist it.
+    delete parsedConfig.side_proud;
     // Hero side-hug size = fraction of tier wall height (designer derives at render; r = stand size).
     if (hugFill !== '') parsedConfig.hug_fill = parseFloat(hugFill);
     else delete parsedConfig.hug_fill;
@@ -749,6 +966,9 @@ export default function ManageElements() {
       allowed_zones:    applicableZones,
       allowed_actions:  capabilities,
       default_color:    defaultColor || null,
+      // '' means "not stated" and must reach the API as null, not as an empty string the CHECK
+      // constraint would reject.
+      medium:           medium || null,
       is_active:        isActive,
       description,
       placement_config: parsedConfig,
@@ -761,29 +981,23 @@ export default function ManageElements() {
   // Save only persists a DELIBERATE thumbnail change (the "Save + Thumbnail" button or a manual one).
   async function uploadStagedAssets(fields, parsedConfig, forceThumb) {
     if (newAssetFile) {
-      const ext = newAssetFile.name.split('.').pop();
-      const folder = /\.(glb|gltf)$/i.test(newAssetFile.name) ? 'elements/files/3D' : 'elements/files/2D';
-      const filename = `${crypto.randomUUID()}.${ext}`;
-      const contentType = newAssetFile.type || (folder.includes('3D') ? 'model/gltf-binary' : 'image/png');
-      const { url, key } = await getSignedUploadUrl(folder, filename, contentType);
-      await uploadToR2(url, newAssetFile);
-      fields.image_url = key;
-      fields.file_size = newAssetFile.size ?? null;
+      const isGlb = /\.(glb|gltf)$/i.test(newAssetFile.name);
+      const folder = isGlb ? 'elements/files/3D' : 'elements/files/2D';
+      // 2D + remove-bg: store the bg-removed + normalized image (the same blob shown as the thumbnail)
+      // as the asset, so the sticker is transparent and matches AddElement. GLB or remove-bg-off keeps
+      // the raw file (authored alpha must survive untouched, e.g. a photo-frame overlay).
+      const assetSrc = (!isGlb && removeBgEnabled && newThumbBlob) ? newThumbBlob : newAssetFile;
+      fields.image_url = await uploadAsset(folder, assetSrc);
+      fields.file_size = assetSrc.size ?? null;
     }
     if (altAssetFile) {
-      const ext = altAssetFile.name.split('.').pop();
-      const filename = `${crypto.randomUUID()}.${ext}`;
-      const { url, key } = await getSignedUploadUrl('elements/files/3D', filename, altAssetFile.type || 'model/gltf-binary');
-      await uploadToR2(url, altAssetFile);
+      const key = await uploadAsset('elements/files/3D', altAssetFile);
       parsedConfig.bottom_alt_glb_url = key;
       parsedConfig.top_alt_glb_url    = key;
       fields.placement_config = parsedConfig;
     }
     if (newThumbBlob && (forceThumb || thumbManual)) {
-      const filename = `${crypto.randomUUID()}.png`;
-      const { url, key } = await getSignedUploadUrl('elements/thumbnails', filename, 'image/png');
-      await uploadToR2(url, newThumbBlob);
-      fields.thumbnail_url = key;
+      fields.thumbnail_url = await uploadThumbnail('elements/thumbnails', newThumbBlob);
     }
   }
 
@@ -833,6 +1047,7 @@ export default function ManageElements() {
       }
 
       setMsg({ ok: true, text: savedText });
+      setSavedAt(n => n + 1);
       setNewAssetFile(null);
       setAltAssetFile(null);
       setNewThumbBlob(null);
@@ -918,15 +1133,41 @@ export default function ManageElements() {
 
   // Filter + group elements
   const lowerQuery = query.toLowerCase();
+  const overCapCount = elements.filter(el => el.over_cap).length;
+  // Cut once per render, not per element: `new Date()` inside the filter would make every row's
+  // comparison a slightly different "now".
+  const addedSince = addedWithin ? Date.now() - addedWithin * 864e5 : null;
+
   const grouped = elementTypes
     .map(et => ({
       type: et,
       items: elements.filter(el =>
         el.element_type_id === et.id &&
-        (lowerQuery === '' || (el.name ?? '').toLowerCase().includes(lowerQuery))
+        (lowerQuery === '' || (el.name ?? '').toLowerCase().includes(lowerQuery)) &&
+        (!overCapOnly || el.over_cap) &&
+        // No created_at (older rows predate the column being populated) → treated as OLD rather
+        // than recent. A filter that quietly includes unknowns is worse than one that excludes
+        // them: you would promote something you did not mean to and never see it in the list.
+        (!addedSince || (el.created_at ? new Date(el.created_at).getTime() >= addedSince : false))
       ),
     }))
     .filter(g => g.items.length > 0);
+
+  // Select-all works on what is VISIBLE — the same filtered set the list renders, so "today" plus
+  // "select all" means exactly the ten added today. Anything else would be a button that lies.
+  const visibleIds = grouped.flatMap(g => g.items.map(el => el.id));
+  const allVisiblePicked = visibleIds.length > 0 && visibleIds.every(id => picked.has(id));
+
+  function toggleAllVisible() {
+    setPicked(prev => {
+      const next = new Set(prev);
+      // Deselecting removes only the visible ones, leaving a selection built up under another
+      // filter intact — the picked set is deliberately cumulative across filter changes.
+      if (allVisiblePicked) visibleIds.forEach(id => next.delete(id));
+      else visibleIds.forEach(id => next.add(id));
+      return next;
+    });
+  }
 
   // Resolve everything needed to re-render a pattern's thumbnail: the referenced building
   // block's GLB url (part A, and part B if different) plus a calibrator-shaped cfg rebuilt
@@ -973,10 +1214,8 @@ export default function ManageElements() {
     try {
       const raw = await new Promise(r => canvas.toBlob(r, 'image/png'));
       if (!raw) throw new Error('Could not capture the pattern preview.');
-      const thumb = await normalizeThumbnail(raw);
-      const filename = `${crypto.randomUUID()}.png`;
-      const { url, key } = await getSignedUploadUrl('elements/thumbnails', filename, 'image/png');
-      await uploadToR2(url, thumb);
+      const thumb = await normalizeArtwork(raw, { size: PATTERN_THUMB_DIM });
+      const key = await uploadThumbnail('elements/thumbnails', thumb);
       const oldThumb = selectedEl.thumbnail_url;
       await updateGlobalElement(selectedEl.id, { thumbnail_url: key });
       if (oldThumb) deleteR2Object(oldThumb).catch(e => console.warn('Old thumbnail delete failed:', e));
@@ -1105,7 +1344,6 @@ export default function ManageElements() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div style={s.page}>
         <div style={s.title}>Manage Elements</div>
@@ -1120,7 +1358,40 @@ export default function ManageElements() {
                 value={query}
                 onChange={e => setQuery(e.target.value)}
               />
+              <button
+                onClick={() => setOverCapOnly(v => !v)}
+                title="Show only elements over their phone-memory budget (§3)"
+                style={{ marginTop: 8, width: '100%', padding: '7px 0', borderRadius: 8, cursor: 'pointer',
+                  border: `1.5px solid ${overCapOnly ? '#E0B341' : '#C5D4C8'}`,
+                  background: overCapOnly ? '#FFF6E5' : '#fff',
+                  color: overCapOnly ? '#8a6d1a' : '#6B8C74', fontFamily: "'Quicksand',sans-serif", fontSize: 12, fontWeight: 700 }}>
+                {overCapOnly ? '⚠ Showing over-budget only' : `⚠ Over budget (${overCapCount})`}
+              </button>
+
+              <div style={s.recencyRow}>
+                {[[0, 'Any time'], [1, 'Today'], [7, '7 days'], [30, '30 days']].map(([days, label]) => (
+                  <button key={days} onClick={() => setAddedWithin(days)}
+                          style={{ ...s.recencyChip, ...(addedWithin === days ? s.recencyChipOn : {}) }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {visibleIds.length > 0 && (
+                <button onClick={toggleAllVisible} style={s.selectAllBtn}>
+                  {allVisiblePicked ? `Deselect these ${visibleIds.length}` : `Select all ${visibleIds.length} shown`}
+                </button>
+              )}
             </div>
+            {picked.size > 0 && (
+              <div style={s.exportBar}>
+                <span style={{ fontWeight: 700 }}>{picked.size} picked</span>
+                <button onClick={handleExport} disabled={exporting} style={s.exportBtn}>
+                  {exporting ? 'Exporting…' : 'Export'}
+                </button>
+                <button onClick={() => setPicked(new Set())} style={s.exportClear}>Clear</button>
+              </div>
+            )}
             <div style={s.listScroll}>
               {loading && (
                 <div style={{ padding: 20, textAlign: 'center', fontSize: 12, color: '#9BB5A2' }}>Loading…</div>
@@ -1135,6 +1406,15 @@ export default function ManageElements() {
                     <div key={el.id}
                       style={s.elementRow(el.id === selectedId)}
                       onClick={() => selectElement(el)}>
+                      {/* stopPropagation: ticking a row picks it for export, it does not load it
+                          into the editor. Two different intents on one row. */}
+                      <input
+                        type="checkbox"
+                        checked={picked.has(el.id)}
+                        onClick={e => e.stopPropagation()}
+                        onChange={() => togglePicked(el.id)}
+                        title="Pick for export"
+                        style={{ width: 15, height: 15, flexShrink: 0, cursor: 'pointer', accentColor: '#2C4433' }} />
                       {el.thumbnail_url
                         ? <img src={el.thumbnail_url} alt="" style={s.elementThumb} />
                         : <div style={s.elementThumb} />
@@ -1142,6 +1422,12 @@ export default function ManageElements() {
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={s.elementName}>{el.name}</div>
                         {!el.is_active && <span style={s.inactiveBadge}>Inactive</span>}
+                        {(() => { const st = statsFromElement(el); return st ? (
+                          <div style={{ marginTop: 3 }}>
+                            <OverCapBadge stats={st} />
+                            <GlbStatChips stats={st} style={{ marginTop: 3, fontSize: 10 }} />
+                          </div>
+                        ) : null; })()}
                       </div>
                     </div>
                   ))}
@@ -1182,6 +1468,18 @@ export default function ManageElements() {
                           </span>
                         )}
                       </div>
+                    )}
+                    {/* Relief authoring is a 2D-image capability (the studio bakes displacement from the
+                        image's alpha + luminance), so this is gated on the ASSET KIND — not on the element
+                        type. The studio loads this element and pre-fills from its placement_config. */}
+                    {!isGlb && selectedEl.image_url && (
+                      <a
+                        href={`/elements/relief-sticker?element=${selectedEl.id}`}
+                        style={{ ...s.smallBtn, display: 'inline-block', marginTop: 8, marginBottom: 0, textDecoration: 'none' }}
+                        title="Tune this element's raised-fondant relief in the Relief Sticker Studio"
+                      >
+                        Open in Relief Sticker Studio
+                      </a>
                     )}
                   </div>
                   <label style={s.activeToggle(isActive)}>
@@ -1581,6 +1879,7 @@ export default function ManageElements() {
                         <option value="opaque">Whole image — recolour every pixel (solid stickers)</option>
                         <option value="saturated">Coloured fill, keep black/white lines (any colour + outline)</option>
                         <option value="blue_gt_green">Coloured fill, keep gold/white outline (blue-dominant fill)</option>
+                        <option value="hue_regions">Multi-colour — one swatch per colour (tree: trunk + leaves + flower)</option>
                       </select>
                       {recolorMethod === 'blue_gt_green' && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
@@ -1590,20 +1889,84 @@ export default function ManageElements() {
                             onChange={e => { const g = e.target.value; setRecolorGuard(g); patchPc({ recolor: recolorDesc('blue_gt_green', g) }); }} />
                         </div>
                       )}
-                      {recolorMethod === 'saturated' && (
+                      {(recolorMethod === 'saturated' || recolorMethod === 'hue_regions') && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
                           <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Saturation min</span>
                           <input type="number" min="0" max="0.8" step="0.01" style={{ ...s.input, flex: 1 }} value={recolorSat}
-                            placeholder="0.25 — lower catches more, higher protects lines"
-                            onChange={e => { const sv = e.target.value; setRecolorSat(sv); patchPc({ recolor: recolorDesc('saturated', recolorGuard, sv) }); }} />
+                            placeholder="lower catches more, higher protects lines"
+                            onChange={e => { const sv = e.target.value; setRecolorSat(sv); patchPc({ recolor: recolorDesc(recolorMethod, recolorGuard, sv) }); }} />
                         </div>
                       )}
                       <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>
-                        Which pixels the colour picker recolours (brightness preserved). <b>Whole image</b> for a single-fill sticker; <b>Coloured fill</b> keeps gold/white outlines. Multi-colour artwork isn't a fit — leave colour-changeable off.
+                        Which pixels the colour picker recolours (brightness preserved). <b>Whole image</b> for a single-fill sticker; <b>Coloured fill</b> keeps gold/white outlines; <b>Multi-colour</b> gives the customer one swatch per detected colour (whites/blacks stay) — the fit for artwork like a tree or a dino.
                       </div>
                     </div>
                   )}
                 </div>
+
+                {/* ── Print finish — 2D image stickers only (these act on the printed decal, not a GLB). ──
+                    LEAVE THESE BLANK unless you mean it. The designer renders a print at exactly 1× its
+                    artwork by construction (spattoo-core shared/printExposure.js) — so a print that looks
+                    wrong on the cake is now a bug to REPORT, not a slider to fight. These are deliberate
+                    artistic overrides only. Blank writes no key at all. */}
+                {selectedEl?.image_url && !isGlb && (
+                  <div style={s.field}>
+                    <label style={s.label}>Print finish <span style={{ fontWeight: 500, color: '#6B8C74' }}>— optional; blank = looks like the artwork</span></label>
+                    {[
+                      { k: 'gain', label: 'Exposure', v: printGain, min: 0.2, max: 1.5, step: 0.01,
+                        ph: '1.0 = exactly the artwork. Below 1 dims the print, above 1 brightens it.',
+                        set: setPrintGain, desc: (x) => printFinishDesc(printSat, printShading, x) },
+                      { k: 'saturation', label: 'Saturation', v: printSat, min: 0.5, max: 1.6, step: 0.01,
+                        ph: "1.0 = the artwork's own colour. Above 1 punches the chroma up.",
+                        set: setPrintSat, desc: (x) => printFinishDesc(x, printShading, printGain) },
+                      { k: 'shading', label: 'Takes shading', v: printShading, min: 0, max: 1, step: 0.05,
+                        ph: '0.35 — how much of the cake\'s light/shadow falls on the print. 0 = flat, immune to light.',
+                        set: setPrintShading, desc: (x) => printFinishDesc(printSat, x, printGain) },
+                    ].map(f => (
+                      <div key={f.k} style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>{f.label}</span>
+                        <input type="number" min={f.min} max={f.max} step={f.step} style={{ ...s.input, flex: 1 }}
+                          value={f.v} placeholder={f.ph}
+                          onChange={e => { const x = e.target.value; f.set(x); patchPc({ print_finish: f.desc(x) }); }} />
+                      </div>
+                    ))}
+                    <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>
+                      <b>Leave these blank.</b> A print now renders as its artwork — same brightness on the wall,
+                      on a topper, on any cake — so you should not need to calibrate elements one by one.
+                      Use them only to make a deliberate choice (a deliberately muted or punchier print).
+                      If an element looks wrong with these blank, that&apos;s a renderer bug worth reporting, not a
+                      slider to fight.
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Made of ──
+                    MATERIAL only. How it is worked is already the element TYPE — 'Cream Piping'
+                    and 'Palette knife art' are the same material, and that is exactly why this
+                    column does not carry technique.
+
+                    It decides WHAT X-RAY OFFERS, which is why it is worth setting even though it
+                    is optional: fondant gets both a modelling guide and printing at actual size
+                    (bakers substitute one for the other constantly — time, budget, a cake that has
+                    to travel); a printed sheet gets only printing, because there is no hand-made
+                    version of one; acrylic gets neither, being bought rather than made.
+
+                    Blank is safe: X-Ray offers both and the model self-reports when something is
+                    not hand-made, which costs at most one generation. */}
+                {!isPipingConfig && (
+                  <div style={s.field}>
+                    <label style={s.label}>Made of</label>
+                    <select value={medium} onChange={e => setMedium(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2F4A38' }}>
+                      <option value="">Not stated — X-Ray offers both</option>
+                      <option value="fondant">Fondant / gumpaste — guide + print</option>
+                      <option value="chocolate">Modelling chocolate — print only for now</option>
+                      <option value="edible_paper">Edible paper (printed sheet) — print only</option>
+                      <option value="acrylic">Acrylic / non-edible — neither</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                )}
 
                 {/* ── Default color ── */}
                 <div style={s.field}>
@@ -1625,18 +1988,27 @@ export default function ManageElements() {
                   <div style={s.field}>
                     <label style={s.label}>Placement Config</label>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {/* Seat depth (side/middle_tier hug) supersedes the old global "Stands out from
+                          the side wall" checkbox — see PlacementZoneRow. */}
                       {applicableZones.map(zone => {
-                        const zoneLabel = CAKE_ZONES.find(z => z.value === zone)?.label ?? zone;
+                        const mode = placementZoneConfig[zone] ?? 'hug';
                         return (
-                          <div key={zone} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>{zoneLabel}</span>
-                            <select
-                              style={{ ...s.select, flex: 1 }}
-                              value={placementZoneConfig[zone] ?? 'hug'}
-                              onChange={e => { const v = e.target.value; setPlacementZoneConfig(c => ({ ...c, [zone]: v })); patchPc({ [zone]: v }); }}>
-                              {PLACEMENT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                            </select>
-                          </div>
+                          <PlacementZoneRow
+                            key={zone}
+                            zone={zone}
+                            zoneLabel={CAKE_ZONES.find(z => z.value === zone)?.label ?? zone}
+                            mode={mode}
+                            seat={seatConfig[zone]}
+                            insert={insertConfig[zone] ?? null}
+                            fullRing={fullRingConfig[zone] ?? false}
+                            modes={PLACEMENT_MODES}
+                            selectStyle={s.select}
+                            inputStyle={s.input}
+                            onModeChange={v => commitZone(zone, v, seatConfig[zone], insertConfig[zone])}
+                            onSeatChange={v => commitZone(zone, mode, v, insertConfig[zone])}
+                            onInsertToggle={on => commitZone(zone, mode, seatConfig[zone], on ? (insertConfig[zone] ?? {}) : null)}
+                            onInsertField={(field, val) => setZoneInsertField(zone, mode, field, val)}
+                            onFullRingToggle={on => setZoneFullRing(zone, on)} />
                         );
                       })}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -1701,7 +2073,7 @@ export default function ManageElements() {
                             setCanScatter(on);
                             // Scatter and single-per-slot are mutually exclusive.
                             if (on) { setSinglePerSlot(false); patchPc({ scatter: true, single_per_slot: null }); }
-                            else patchPc({ scatter: null });
+                            else { setScatterCount(''); patchPc({ scatter: null, scatter_count: null }); }
                           }} />
                         <div>
                           <div style={s.checkLabel}>Can scatter (density)</div>
@@ -1710,6 +2082,17 @@ export default function ManageElements() {
                           </div>
                         </div>
                       </label>
+                      {canScatter && (
+                        <div style={{ marginTop: 6, marginLeft: 26 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', marginBottom: 3 }}>Default scatter count</div>
+                          <input type="number" min="1" step="1" style={{ ...s.input, width: 120 }}
+                            value={scatterCount} placeholder="e.g. 12"
+                            onChange={e => { const v = e.target.value; setScatterCount(v); patchPc({ scatter_count: v === '' ? '' : parseInt(v, 10) }); }} />
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 2 }}>
+                            How many instances a scatter seeds with per surface (top and side). Blank = 12. Capped to what fits the cake; the customer adjusts with the density slider.
+                          </div>
+                        </div>
+                      )}
                       <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 6, opacity: (canScatter || singlePerSlot) ? 0.45 : 1 }}
                         title="A packed clump of mixed-size balls. Drops as a single ball the customer grows into a cluster; mixed colours from a palette.">
                         <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
@@ -1748,18 +2131,6 @@ export default function ManageElements() {
                           </div>
                         </div>
                       )}
-                      <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 6 }}
-                        title="Off = lies flat against the side (hugs the wall). On = raised off the wall — for deep 3D pieces that look half-buried when flattened.">
-                        <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
-                          checked={sideProud}
-                          onChange={e => { setSideProud(e.target.checked); patchPc({ side_proud: e.target.checked ? true : null }); }} />
-                        <div>
-                          <div style={s.checkLabel}>Stands out from the side wall</div>
-                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                            Off = lies flat against the side (hugs the wall). On = raised off the wall — for deep 3D pieces (e.g. a topper) that look half-buried when flattened.
-                          </div>
-                        </div>
-                      </label>
                       <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 6 }}>
                         <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
                           checked={patternOnly}
@@ -1808,6 +2179,8 @@ export default function ManageElements() {
                           </div>
                         </>
                       )}
+                      {/* Insert is now a per-zone MODIFIER — its depth/lean/jitter live in each zone's
+                          row above (PlacementZoneRow, gated by zoneShowsInsert). No global block. */}
                       {selectedEl?.image_url && !isGlb && (
                         <>
                           <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}>
@@ -1836,6 +2209,14 @@ export default function ManageElements() {
                       )}
                     </div>
                   </div>
+                )}
+
+                {/* ── Preview ─────────────────────────────────────────────────────────────────
+                    Directly under the placement editor because that is what it verifies. It is also
+                    the only way to see a decoration on a cake without signing in as a baker, which
+                    an admin cannot do. Renders the SAVED row — see ElementPreviewPanel. */}
+                {selectedId && !cloneMode && (
+                  <ElementPreviewPanel elementId={selectedId} savedAt={savedAt} />
                 )}
 
                 {/* ── placement_config JSON editor (+ calibrator paste side-by-side for piping) ── */}
@@ -1938,6 +2319,13 @@ export default function ManageElements() {
                     description={selectedEl.description}
                     thumbnailUrl={selectedEl.thumbnail_url}
                   />
+                )}
+
+                {/* The other half of the same rail: how a decoration is MADE, for the flat
+                    placeables. Piping is excluded because its answer is the nozzle guide above —
+                    the two are never both right for one element. */}
+                {!isPipingConfig && !cloneMode && (
+                  <DecorationGuidePanel key={selectedEl.id} elementId={selectedEl.id} />
                 )}
 
                 {cloneMode ? (

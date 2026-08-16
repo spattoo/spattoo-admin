@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement } from '../lib/api.js';
+import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement } from '../lib/api.js';
 
 // ── Photo Frame Studio ─────────────────────────────────────────────────────────
 // Authors a "photo cake" frame as ONE cake_elements row. The SHAPE MASK is the only required asset
@@ -153,8 +153,7 @@ export default function PhotoFrameStudio() {
   async function uploadOne(folder, file, contentType) {
     const ext = (file.name?.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
     const filename = `${crypto.randomUUID()}.${ext}`;
-    const { url, key } = await getSignedUploadUrl(folder, filename, contentType);
-    await uploadToR2(url, file);
+    const { key } = await uploadBlob(folder, filename, file, contentType);
     return key;
   }
 
@@ -168,7 +167,7 @@ export default function PhotoFrameStudio() {
       const overlayKey = overlayFile ? await uploadOne('elements/files/2D', overlayFile, overlayFile.type || 'image/png') : null;
       // Thumbnail = the composited cake look (border/overlay + photo), so the picker tile reads right.
       const blob = await new Promise(res => composite(512, sampleImg, maskImg, overlayImg, borderColor, DEFAULT_BORDER_WIDTH).toBlob(res, 'image/png'));
-      const thumbKey = await uploadOne('elements/thumbnails', new File([blob], 'thumb.png', { type: 'image/png' }), 'image/png');
+      const thumbKey = await uploadThumbnail('elements/thumbnails', blob);
 
       const photo = { mask: maskKey, shape: frameShape, fill: +maskFill.toFixed(3), border: { width: DEFAULT_BORDER_WIDTH } };
       if (overlayKey) photo.overlay = overlayKey;

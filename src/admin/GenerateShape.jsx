@@ -4,7 +4,8 @@ import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { measureGlbBuffer, toStatColumns, deriveAssetClass } from '../lib/glb.js';
 import { displaceCreamWaveCylinder, getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 
 // Cream-wave finish: a tangent-space normal map baked from the Meshy reference cake (its wavy
@@ -548,12 +549,10 @@ export default function GenerateShape() {
         const canvas = canvas2dRef.current;
         const rawBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
         const fn = `${crypto.randomUUID()}.png`;
-        const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/2D', fn, 'image/png');
-        await uploadToR2(fu, rawBlob);
+        const { key: fk } = await uploadBlob('elements/files/2D', fn, rawBlob, 'image/png');
         let thumbBlob = rawBlob;
         try { thumbBlob = await removeBg(rawBlob); } catch (e) { console.warn('remove.bg failed:', e.message); }
-        const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-        await uploadToR2(tu, thumbBlob);
+        const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
         await createGlobalElement({ name: name.trim(), element_type_id: elementTypeId, parent_id: null, image_url: fk, thumbnail_url: tk, allowed_zones: zones, placement_config: finalPlacementConfig, allowed_actions: capabilities, default_color: null, sort_order: 0 });
 
       } else {
@@ -569,13 +568,16 @@ export default function GenerateShape() {
         const glbBlob = new Blob([glbBuffer], { type: 'model/gltf-binary' });
 
         const glbFilename = `${crypto.randomUUID()}.glb`;
-        const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', glbFilename, 'model/gltf-binary');
-        await uploadToR2(fu, glbBlob);
+        const { key: fk } = await uploadBlob('elements/files/3D', glbFilename, glbBlob, 'model/gltf-binary');
 
-        const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-        await uploadToR2(tu, thumbBlob);
+        const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
-        await createGlobalElement({ name: name.trim(), element_type_id: elementTypeId, parent_id: null, image_url: fk, thumbnail_url: tk, allowed_zones: zones, placement_config: finalPlacementConfig, allowed_actions: capabilities, default_color: color3d, sort_order: 0 });
+        // Record the GLB cost (§3) — measured from the exported buffer. Best-effort; never blocks save.
+        let statCols = {};
+        try { statCols = toStatColumns(await measureGlbBuffer(glbBuffer, Math.round(glbBuffer.byteLength / 1024), deriveAssetClass({ placementConfig: finalPlacementConfig, zones }))); }
+        catch (e) { console.warn('GLB measure failed:', e.message); }
+
+        await createGlobalElement({ name: name.trim(), element_type_id: elementTypeId, parent_id: null, image_url: fk, thumbnail_url: tk, allowed_zones: zones, placement_config: finalPlacementConfig, allowed_actions: capabilities, default_color: color3d, sort_order: 0, ...statCols });
       }
 
       setMsg({ ok: true, text: 'Element saved!' });
@@ -642,7 +644,6 @@ export default function GenerateShape() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={s.page}>
         <div style={{ maxWidth: 1020, margin: '0 auto' }}>
           <div style={s.title}>Generate Shape Element</div>

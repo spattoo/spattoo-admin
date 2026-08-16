@@ -5,7 +5,10 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
-import { fetchElementTypes, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg } from '../lib/api.js';
+import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
+import { toStatColumns } from '../lib/glb.js';
+import { GlbReviewBanner } from './GlbStats.jsx';
+import GlbStudio from './GlbStudio.jsx';
 import { ZONE_LIST as ZONES } from '../lib/constants.js';
 import { loader, parseGLB, bakeAndWeldGeo, simplifyWeldedGeo, deriveFaceData, kmeans, clusterConnected, floodFillFaces, brushFaces, boundaryEdges, buildTexturedScene } from './glbRecomposeCore.js';
 
@@ -140,6 +143,12 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
   const [capabilities, setCapabilities] = useState({ resize: true, duplicate: true, color: true, delete: true, move: false, tilt: false });
   const [saveMsg, setSaveMsg] = useState(null);
   const [topperSize, setTopperSize] = useState(2.5); // match the designer's default GLB topper scale (placement_config.r)
+  // Recompose is experiment-only: the recomposed GLB must pass through GLB Studio (measure + optimize)
+  // before it can become an element. `glbStudioFile` is what's open in the embedded Studio; `reviewed`
+  // (the optimized blob + stats + segment metadata) is the gate that the pass happened.
+  const [glbStudioFile, setGlbStudioFile] = useState(null);
+  const [reviewed, setReviewed] = useState(null);
+  const reviewMeta = useRef(null); // segment/group metadata captured when the review GLB was built
 
   const [ambientInt] = useState(0.5);
   const [keyInt] = useState(1.3);   // softer key so the texture's pinks don't blow out
@@ -542,11 +551,40 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
   }
   function setZonePlacement(z, m) { setPlacementConfig(prev => ({ ...prev, [z]: m })); }
 
+  // Edits to the model/segmentation invalidate a prior Studio review — the optimized blob would no
+  // longer match what's on screen, so it must be re-reviewed before saving.
+  useEffect(() => { setReviewed(null); }, [geo, parts, counts, exportMode, editableGroups, useFondant]);
+
+  // Step 1: build the recomposed GLB and hand it to GLB Studio to measure + optimize. The segment
+  // metadata is captured now (it describes the parts, not the geometry, so it survives optimization).
+  async function openStudioReview() {
+    if (!geo) return setSaveMsg({ ok: false, text: 'Import a GLB first' });
+    setBusy(true); setSaveMsg(null);
+    try {
+      const { buffer, metaSegments, groups } = await buildGLBBuffer();
+      reviewMeta.current = { metaSegments, groups };
+      const fname = `${(name.trim() || 'recompose').replace(/\s+/g, '-')}.glb`;
+      setGlbStudioFile(new File([buffer], fname, { type: 'model/gltf-binary' }));
+    } catch (e) {
+      setSaveMsg({ ok: false, text: `Couldn't prepare GLB: ${e.message}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // GLB Studio returns the optimized blob + measured stats; pair it with the captured segment metadata.
+  function handleReviewed({ blob, stats }) {
+    setReviewed({ blob, stats, ...reviewMeta.current });
+    setGlbStudioFile(null);
+  }
+
+  // Step 2: create the element from the reviewed (optimized) GLB — recompose's own metadata + stats.
   async function handleSaveElement() {
     if (!geo) return setSaveMsg({ ok: false, text: 'Import a GLB first' });
     if (!name.trim()) return setSaveMsg({ ok: false, text: 'Enter a name' });
     if (!elementTypeId) return setSaveMsg({ ok: false, text: 'Select an element type' });
     if (!zones.length) return setSaveMsg({ ok: false, text: 'Select at least one zone' });
+    if (!reviewed) return setSaveMsg({ ok: false, text: 'Review the recomposed GLB in GLB Studio first.' });
     setBusy(true); setSaveMsg(null);
     try {
       const glCanvas = previewRef.current?.querySelector('canvas');
@@ -555,12 +593,9 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
       let thumbBlob = rawThumb;
       try { thumbBlob = await removeBg(rawThumb); } catch (e) { console.warn('remove.bg failed:', e.message); }
 
-      const { buffer, metaSegments, groups } = await buildGLBBuffer();
-      const glbBlob = new Blob([buffer], { type: 'model/gltf-binary' });
-      const { url: fu, key: fk } = await getSignedUploadUrl('elements/files/3D', `${crypto.randomUUID()}.glb`, 'model/gltf-binary');
-      await uploadToR2(fu, glbBlob);
-      const { url: tu, key: tk } = await getSignedUploadUrl('elements/thumbnails', `${crypto.randomUUID()}.png`, 'image/png');
-      await uploadToR2(tu, thumbBlob);
+      const { blob, stats, metaSegments, groups } = reviewed;
+      const { key: fk } = await uploadBlob('elements/files/3D', `${crypto.randomUUID()}.glb`, blob, 'model/gltf-binary');
+      const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
       await createGlobalElement({
         name: name.trim(),
@@ -573,6 +608,7 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
         allowed_actions: capabilities,
         default_color: exportMode === 'parts' ? (parts[0]?.color ?? null) : null,
         sort_order: 0,
+        ...toStatColumns(stats),
       });
       setSaveMsg({ ok: true, text: 'Saved as element!' });
     } catch (e) { setSaveMsg({ ok: false, text: e.message }); }
@@ -833,7 +869,17 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
                       ))}
                     </div>
                   </div>
-                  <button style={S.exportBtn(busy)} onClick={handleSaveElement} disabled={busy}>{busy ? 'Working…' : 'Save as Element'}</button>
+                  {/* Mandatory GLB Studio pass before creation — shows the real cost; over-cap is flagged. */}
+                  <GlbReviewBanner
+                    reviewed={reviewed}
+                    busy={busy}
+                    disabled={!geo}
+                    onReview={openStudioReview}
+                    title="Review the recomposed GLB before saving"
+                    promptText="See its real cost on phones and optimize if needed — required before creating the element."
+                  >
+                    <button style={S.exportBtn(busy)} onClick={handleSaveElement} disabled={busy}>{busy ? 'Working…' : 'Save as Element'}</button>
+                  </GlbReviewBanner>
                   {saveMsg && <div style={saveMsg.ok ? { ...S.err, background: '#E8F5E9', color: '#2E7D32' } : S.err}>{saveMsg.text}</div>}
                 </div>
               </div>
@@ -841,6 +887,17 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
           )}
         </div>
       </div>
+
+      {/* Embedded GLB Studio — mandatory measure+optimize pass; returns the optimized GLB via onUse. */}
+      {glbStudioFile && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,30,24,0.45)', overflow: 'auto' }}>
+          <button onClick={() => setGlbStudioFile(null)}
+            style={{ position: 'fixed', top: 16, right: 20, zIndex: 1001, padding: '8px 14px', borderRadius: 8, border: 'none', background: '#2C4433', color: '#fff', fontFamily: "'Quicksand',sans-serif", fontWeight: 700, cursor: 'pointer' }}>
+            ✕ Close
+          </button>
+          <GlbStudio initialFile={glbStudioFile} onUse={handleReviewed} />
+        </div>
+      )}
     </div>
   );
 });

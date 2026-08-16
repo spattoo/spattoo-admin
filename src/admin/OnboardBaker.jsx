@@ -1,11 +1,22 @@
 import { useState } from 'react';
-import { createBaker, getSignedUploadUrl, uploadToR2 } from '../lib/api.js';
+// FULL ("max") metadata — the default "min" bundle only length-checks and wrongly
+// accepts junk like "123123123" for IN. "max" enforces real per-country patterns.
+import { isValidPhoneNumber, getCountries, getCountryCallingCode } from 'libphonenumber-js/max';
+import { createBaker, uploadBlob } from '../lib/api.js';
 
-const TIERS = ['trial', 'starter', 'pro', 'enterprise'];
+// Note: no subscription/tier picker here — every baker starts on the one-time Spark trial
+// automatically (api bakerProvisioning). Plan changes happen in the Baker Subscriptions screen.
 
 function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
+
+// Full ISO-3166 country list (from libphonenumber-js) for the phone-region select —
+// international-ready from day one. Names via Intl.DisplayNames; sorted A→Z.
+const REGION_NAMES = new Intl.DisplayNames(['en'], { type: 'region' });
+const COUNTRY_OPTIONS = getCountries()
+  .map(code => ({ code, calling: getCountryCallingCode(code), name: REGION_NAMES.of(code) || code }))
+  .sort((a, b) => a.name.localeCompare(b.name));
 
 const EMPTY_FORM = {
   name: '',
@@ -16,13 +27,12 @@ const EMPTY_FORM = {
   website_url: '',
   primary_color: '#3D5A44',
   accent_color: '#C5D4C8',
-  subscription_tier: 'trial',
-  trial_ends_at: '',
   currency_code: 'INR',
   timezone: 'Asia/Kolkata',
   user_first_name: '',
   user_last_name: '',
   user_email: '',
+  user_phone_country: 'IN',
   user_phone: '',
   user_whatsapp: '',
 };
@@ -33,6 +43,7 @@ export default function OnboardBaker() {
   const [slugManual, setSlugManual] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [fieldErr, setFieldErr] = useState({});
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
 
@@ -48,19 +59,25 @@ export default function OnboardBaker() {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setSaving(true);
     setError(null);
+
+    // Phone required + valid (E.164 for form.user_phone_country); WhatsApp valid if given.
+    // Server re-validates + enforces one-phone-per-baker; this is just fast UX.
+    const fe = {};
+    if (!form.user_phone.trim()) fe.phone = 'Phone is required';
+    else if (!isValidPhoneNumber(form.user_phone, form.user_phone_country)) fe.phone = 'Enter a valid phone number';
+    if (form.user_whatsapp.trim() && !isValidPhoneNumber(form.user_whatsapp, form.user_phone_country)) fe.whatsapp = 'Enter a valid WhatsApp number';
+    setFieldErr(fe);
+    if (Object.keys(fe).length) return;
+
+    setSaving(true);
     try {
-      const { user_first_name, user_last_name, user_email, user_phone, user_whatsapp, ...baker } = form;
-      if (baker.subscription_tier !== 'trial' || !baker.trial_ends_at) {
-        delete baker.trial_ends_at;
-      }
+      const { user_first_name, user_last_name, user_email, user_phone_country, user_phone, user_whatsapp, ...baker } = form;
 
       if (logoFile) {
         const ext = logoFile.name.split('.').pop();
         const filename = `${crypto.randomUUID()}.${ext}`;
-        const { url, key } = await getSignedUploadUrl('logos', filename, logoFile.type);
-        await uploadToR2(url, logoFile);
+        const { key } = await uploadBlob('logos', filename, logoFile);
         baker.logo_url = key;
       }
 
@@ -70,13 +87,16 @@ export default function OnboardBaker() {
           first_name:      user_first_name,
           last_name:       user_last_name,
           email:           user_email,
-          phone:           user_phone || null,
+          phone:           user_phone,
+          phone_country:   user_phone_country,
           whatsapp_number: user_whatsapp || null,
         },
       });
       setResult(data);
     } catch (err) {
-      setError(err.message);
+      // A phone-uniqueness conflict (409) reads best under the phone field.
+      if (/phone/i.test(err.message)) setFieldErr({ phone: err.message });
+      else setError(err.message);
     } finally {
       setSaving(false);
     }
@@ -199,26 +219,40 @@ export default function OnboardBaker() {
             required
           />
 
+          <label style={s.label}>Country <span style={s.hint}>region for phone numbers</span></label>
+          <select
+            style={s.input}
+            value={form.user_phone_country}
+            onChange={e => set('user_phone_country', e.target.value)}
+          >
+            {COUNTRY_OPTIONS.map(c => (
+              <option key={c.code} value={c.code}>{c.name} (+{c.calling})</option>
+            ))}
+          </select>
+
           <div style={s.twoCol}>
             <div>
-              <label style={s.label}>Phone</label>
+              <label style={s.label}>Phone *</label>
               <input
-                style={s.input}
+                style={{ ...s.input, ...(fieldErr.phone ? s.inputError : null) }}
                 type="tel"
                 value={form.user_phone}
                 onChange={e => set('user_phone', e.target.value)}
-                placeholder="+91 98765 43210"
+                placeholder="98765 43210"
+                required
               />
+              {fieldErr.phone && <div style={s.fieldError}>{fieldErr.phone}</div>}
             </div>
             <div>
               <label style={s.label}>WhatsApp</label>
               <input
-                style={s.input}
+                style={{ ...s.input, ...(fieldErr.whatsapp ? s.inputError : null) }}
                 type="tel"
                 value={form.user_whatsapp}
                 onChange={e => set('user_whatsapp', e.target.value)}
-                placeholder="+91 98765 43210"
+                placeholder="98765 43210"
               />
+              {fieldErr.whatsapp && <div style={s.fieldError}>{fieldErr.whatsapp}</div>}
             </div>
           </div>
 
@@ -310,40 +344,6 @@ export default function OnboardBaker() {
             </button>
           )}
 
-          {/* ── Subscription ── */}
-          <div style={{ ...s.sectionLabel, marginTop: 20 }}>Subscription</div>
-
-          <label style={s.label}>Tier</label>
-          <div style={s.tierRow}>
-            {TIERS.map(t => (
-              <button
-                key={t}
-                type="button"
-                style={{
-                  ...s.tierBtn,
-                  background:  form.subscription_tier === t ? '#3D5A44' : '#fff',
-                  color:       form.subscription_tier === t ? '#fff' : '#3D5A44',
-                  borderColor: form.subscription_tier === t ? '#3D5A44' : '#C5D4C8',
-                }}
-                onClick={() => set('subscription_tier', t)}
-              >
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          {form.subscription_tier === 'trial' && (
-            <>
-              <label style={s.label}>Trial ends</label>
-              <input
-                style={s.input}
-                type="date"
-                value={form.trial_ends_at}
-                onChange={e => set('trial_ends_at', e.target.value)}
-              />
-            </>
-          )}
-
           {/* ── Locale ── */}
           <div style={{ ...s.sectionLabel, marginTop: 20 }}>Locale</div>
 
@@ -428,17 +428,13 @@ const s = {
     width: 36, height: 36, border: '1.5px solid #C5D4C8',
     borderRadius: 8, cursor: 'pointer', padding: 2, background: 'none',
   },
-  tierRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 },
-  tierBtn: {
-    padding: '7px 16px', border: '1.5px solid', borderRadius: 20,
-    fontSize: 12, fontWeight: 700, cursor: 'pointer',
-    fontFamily: 'Quicksand, sans-serif', transition: 'all 0.15s',
-  },
   errorMsg: {
     background: '#FFF0F0', border: '1.5px solid #F5C0C0',
     borderRadius: 8, padding: '10px 14px',
     color: '#C0392B', fontSize: 12, fontWeight: 600, marginTop: 8,
   },
+  inputError:  { borderColor: '#E39B9B', background: '#FFF7F7' },
+  fieldError:  { fontSize: 11, fontWeight: 600, color: '#C0392B', marginTop: 4 },
   submitBtn: {
     marginTop: 20, padding: '13px',
     background: '#3D5A44', color: '#fff',

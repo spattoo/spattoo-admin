@@ -17,7 +17,12 @@ export function initTelemetry() {
 
   Sentry.init({
     dsn,
-    environment: import.meta.env.MODE,           // 'development' | 'production'
+    // NOT import.meta.env.MODE. That is 'production' for every Vite BUILD, so a dev deploy and a
+    // prod deploy report as the same environment and their errors pile into one bucket — the exact
+    // question you ask Sentry ("is this happening in prod?") becomes unanswerable. VITE_ENV names
+    // the DEPLOYMENT, matching SENTRY_ENVIRONMENT on the API. Falling back to MODE keeps a local
+    // run without the variable behaving as it did.
+    environment: import.meta.env.VITE_ENV || import.meta.env.MODE,
     tracesSampleRate: 0,                          // errors only — no perf/tracing
   });
 

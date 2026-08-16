@@ -3,8 +3,15 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { fetchElementTypes, fetchParentElements, getSignedUploadUrl, uploadToR2, createGlobalElement, removeBg, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
+import { fetchElementTypes, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
+import { normalizeArtwork } from '@spattoo/designer';
+import { prepareElementImage, ELEMENT_IMAGE_DIM } from '../lib/elementImage.js';
+import { toStatColumns, measureGlbBuffer, deriveAssetClass } from '../lib/glb.js';
+import { GlbReviewBanner } from './GlbStats.jsx';
+import GlbStudio from './GlbStudio.jsx';
 import CraftGuideFields, { RANKS } from './CraftGuideFields.jsx';
+import { serializeZone, zoneShowsInsert } from '../lib/placementSeat.js';
+import PlacementZoneRow from './PlacementZoneRow.jsx';
 
 const ASSET_TYPES = [
   { value: '2D',      label: '2D Image',       folder: 'elements/files/2D' },
@@ -19,6 +26,8 @@ const CAKE_ZONES = [
   { value: 'board',        label: 'Board' },
 ];
 
+// Positions only. `insert` is NO LONGER a position — it's a per-zone MODIFIER (a checkbox on the
+// stand/hug poses, see PlacementZoneRow + zoneShowsInsert), so it stays out of this list.
 const PLACEMENT_MODES = [
   { value: 'hug',             label: 'hug (default)' },   // explicit — saved as "hug", not omitted
   { value: 'stand',           label: 'stand' },
@@ -255,6 +264,15 @@ export default function AddElement() {
   const [glbEnvPreset, setGlbEnvPreset]   = useState('none');
   const [glbHasTexture, setGlbHasTexture] = useState(null);
   const [assetFile, setAssetFile]         = useState(null);
+  // 3D GLBs must pass through GLB Studio (measure + optimize) before creation. `glbStudioFile` is the
+  // file currently open in the embedded Studio; `optimizedStats` holds the measured cost returned —
+  // its presence is the gate that a GLB has been reviewed.
+  const [glbStudioFile, setGlbStudioFile] = useState(null);
+  const [optimizedStats, setOptimizedStats] = useState(null);
+  // Escape hatch: the GLB was ALREADY optimised outside the app (e.g. a Draco-compressed asset). Attesting
+  // this MEASURES the GLB (records the mobile-budget cost) but skips the Studio's OPTIMISE step — so the
+  // budget stats are preserved. `skipGlbReview` is the fallback that satisfies the gate if the measure fails.
+  const [skipGlbReview, setSkipGlbReview] = useState(false);
   const [thumbnailBlob, setThumbnailBlob] = useState(null);
   const [placementConfig, setPlacementConfig] = useState({});
   const [placementScale, setPlacementScale]   = useState('');
@@ -263,7 +281,8 @@ export default function AddElement() {
   const [placementScaleStep, setPlacementScaleStep] = useState(''); // placement_config.scale.step
   const [singlePerSlot,  setSinglePerSlot]    = useState(false);
   const [canScatter,     setCanScatter]       = useState(false);
-  const [sideProud,      setSideProud]        = useState(false);
+  const [scatterCount,   setScatterCount]     = useState('');   // placement_config.scatter_count — default instances a scatter seeds with (blank = designer default 12)
+  const [seatConfig,     setSeatConfig]       = useState({});   // per-zone seat override: { side: 'proud'|'flush', ... } — absent = auto (default)
   const [hugFill,        setHugFill]          = useState('');
   // Packed ball cluster (placement_config.cluster). A cluster element drops as a single ball the
   // customer can grow into a packed clump; these author the defaults. sizes = [largest, 2nd, 3rd,
@@ -279,6 +298,10 @@ export default function AddElement() {
   const [vergeAngle,     setVergeAngle]       = useState('');   // placement_config.verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]     = useState('');   // placement_config.verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset]   = useState('');   // placement_config.verge.edge_inset (blank = 0)
+  // Insert (base sunk into the surface, standing at an angle — chocolate bars, sparklers) is a
+  // per-zone MODIFIER now (rides `placement_config[zone].insert`, like `seat`), NOT a global position.
+  // One entry per zone that has it on: { [zone]: { depth?, lean_deg?, jitter_deg? } } ({} = defaults).
+  const [insertConfig,  setInsertConfig]   = useState({});
   // Folded sticker (2D only): a flat decal splits at the body spine into two hinged wings.
   const [foldable,   setFoldable]   = useState(false);
   const [foldAngle,  setFoldAngle]  = useState('');   // placement_config.fold (deg, blank = default 30)
@@ -341,75 +364,15 @@ export default function AddElement() {
     setParentId('');
   }
 
-  // Normalize a transparent PNG so the content fills ~80% of a 512×512 square.
-  // Works by finding the non-transparent bounding box, then centering it with 10% padding.
-  function normalizeThumbnail(blob) {
-    return new Promise(resolve => {
-      const img = new Image();
-      img.onload = () => {
-        const src = document.createElement('canvas');
-        src.width  = img.width;
-        src.height = img.height;
-        const sCtx = src.getContext('2d');
-        sCtx.drawImage(img, 0, 0);
-
-        // Find non-transparent bounding box
-        const { data } = sCtx.getImageData(0, 0, src.width, src.height);
-        let minX = src.width, minY = src.height, maxX = 0, maxY = 0;
-        for (let y = 0; y < src.height; y++) {
-          for (let x = 0; x < src.width; x++) {
-            if (data[(y * src.width + x) * 4 + 3] > 10) {
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
-            }
-          }
-        }
-
-        const OUT  = 512;
-        const FILL = 0.8; // content occupies 80% of the output square
-        const out  = document.createElement('canvas');
-        out.width  = OUT;
-        out.height = OUT;
-        const oCtx = out.getContext('2d');
-
-        if (maxX >= minX && maxY >= minY) {
-          const cw    = maxX - minX + 1;
-          const ch    = maxY - minY + 1;
-          const scale = (OUT * FILL) / Math.max(cw, ch);
-          const dw    = cw * scale;
-          const dh    = ch * scale;
-          const dx    = (OUT - dw) / 2;
-          const dy    = (OUT - dh) / 2;
-          oCtx.drawImage(src, minX, minY, cw, ch, dx, dy, dw, dh);
-        } else {
-          // Fully transparent fallback — just scale to fit
-          const scale = (OUT * FILL) / Math.max(src.width, src.height);
-          const dw    = src.width  * scale;
-          const dh    = src.height * scale;
-          oCtx.drawImage(src, (OUT - dw) / 2, (OUT - dh) / 2, dw, dh);
-        }
-
-        out.toBlob(resolve, 'image/png');
-        URL.revokeObjectURL(img.src);
-      };
-      img.src = URL.createObjectURL(blob);
-    });
-  }
-
   async function processRemoveBg(blob) {
     setRemovingBg(true);
     setThumbnailBlob(null);
     try {
-      // Skip remove.bg when disabled (the asset's alpha is already authored, e.g. a photo frame).
-      const processed   = removeBgEnabled ? await removeBg(blob) : blob;
-      const normalized  = await normalizeThumbnail(processed);
-      setThumbnailBlob(normalized);
+      // Shared 2D pipeline: bg-remove (unless disabled — e.g. photo frames carry authored alpha) +
+      // normalize. The result is the element's master image (image_url) AND thumbnail_url.
+      setThumbnailBlob(await prepareElementImage(blob, { removeBgEnabled }));
     } catch {
-      // Fall back to original if remove.bg fails; still normalize
-      const normalized = await normalizeThumbnail(blob);
-      setThumbnailBlob(normalized);
+      setThumbnailBlob(await normalizeArtwork(blob, { size: ELEMENT_IMAGE_DIM }));
     } finally {
       setRemovingBg(false);
     }
@@ -470,6 +433,36 @@ export default function AddElement() {
     }
   }
 
+  // GLB Studio returns the optimized model — swap it in as the working file so the existing 3D
+  // preview / rotation / thumbnail flow continues on the optimized geometry, and record the stats
+  // (their presence is the save gate). Geometry changed, so the front view must be re-confirmed.
+  function handleOptimized({ blob, stats }) {
+    const baseName = (assetFile?.name || 'model').replace(/\.(glb|gltf)$/i, '');
+    setAssetFile(new File([blob], `${baseName}.glb`, { type: 'model/gltf-binary' }));
+    setOptimizedStats(stats);
+    setGlbStudioFile(null);
+    setFrontConfirmed(false);
+    setGlbRotation([0, 0, 0]);
+  }
+
+  // "Already optimised" attestation: MEASURE the current GLB (records the mobile-budget cost — tris/size/mem/
+  // class — same as the Studio would) but skip the optimise pass. Sets optimizedStats so the gate passes ON
+  // THE STATS, preserving the budget. If the measure fails (bad GLB), skipGlbReview alone still bypasses.
+  async function attestOptimised(checked) {
+    setSkipGlbReview(checked);
+    if (!checked || !assetFile || optimizedStats) return;
+    try {
+      const buffer = await assetFile.arrayBuffer();
+      const assetClass = deriveAssetClass({ placementConfig, zones: applicableZones });
+      // sizeKB must be an INTEGER — optimized_size_kb is an integer column, and the Studio rounds it too;
+      // a float here (assetFile.size / 1024) makes the element-create insert fail with a 500.
+      const stats = await measureGlbBuffer(buffer, Math.round(assetFile.size / 1024), assetClass);
+      setOptimizedStats(stats);
+    } catch {
+      setMsg({ ok: false, text: 'Could not measure the GLB — it will be created without cost stats.' });
+    }
+  }
+
   async function handleSave() {
     const needsFile = !isPatternType;
     if (!name.trim() || !elementTypeId || (needsFile && !assetFile)) {
@@ -480,6 +473,13 @@ export default function AddElement() {
     // If a thumbnail has already been provided (uploaded or captured), it's no longer required.
     if (assetType === '3D' && !isPatternType && !frontConfirmed && !thumbnailBlob) {
       setMsg({ ok: false, text: 'Set the front view before saving — drag the model and click "This is the front", or upload a thumbnail.' });
+      return;
+    }
+    // Every GLB passes through GLB Studio first so its cost is known (and optimizable) before it
+    // enters the library. Over-cap is allowed — it's flagged, not blocked — but the review is required,
+    // UNLESS the author attests it's already optimised (skipGlbReview) — e.g. a pre-Draco'd asset.
+    if (assetType === '3D' && !isPatternType && !optimizedStats && !skipGlbReview) {
+      setMsg({ ok: false, text: 'Review the GLB in GLB Studio first — or tick "I’ve already optimised this" to skip.' });
       return;
     }
     if (applicableZones.length === 0) {
@@ -524,37 +524,26 @@ export default function AddElement() {
       // without a background). With remove-bg OFF, upload the ORIGINAL file untouched + un-cropped —
       // its authored alpha must survive intact (e.g. a photo-frame overlay that must stay aligned to
       // its window mask).
-      const raw2D = assetType === '2D' && !removeBgEnabled;
       let assetKey = null;
       let assetSize = null;
       if (needsFile) {
         const folder = ASSET_TYPES.find(a => a.value === assetType).folder;
+        // With remove-bg ON we upload the bg-removed + normalized blob (WebP); OFF we upload the
+        // ORIGINAL file untouched so authored alpha survives (e.g. a photo-frame overlay + its mask).
+        // uploadAsset derives the extension + Content-Type from the blob/file so they always agree.
         const fileToUpload = (assetType === '2D' && removeBgEnabled && thumbnailBlob) ? thumbnailBlob : assetFile;
-        const ext = assetType === '3D' ? assetFile.name.split('.').pop()
-                  : raw2D ? (assetFile.name.split('.').pop() || 'png') : 'png';
-        const assetFilename = `${crypto.randomUUID()}.${ext}`;
-        const assetContentType = assetType === '3D' ? (assetFile.type || 'model/gltf-binary')
-                  : raw2D ? (assetFile.type || 'image/png') : 'image/png';
-        const { url: assetUrl, key } = await getSignedUploadUrl(folder, assetFilename, assetContentType);
-        await uploadToR2(assetUrl, fileToUpload);
-        assetKey = key;
-        // Record the byte size of what we actually uploaded (bg-removed PNG for 2D).
+        assetKey = await uploadAsset(folder, fileToUpload);
         assetSize = fileToUpload.size ?? null;
       }
 
-      // Thumbnail is always PNG (remove.bg output or manual upload)
-      const thumbFilename = `${crypto.randomUUID()}.png`;
-      const { url: thumbUrl, key: thumbKey } = await getSignedUploadUrl('elements/thumbnails', thumbFilename, 'image/png');
-      await uploadToR2(thumbUrl, thumbnailBlob);
+      // Thumbnail is a normalized WebP (master) — the server bakes a smaller picker WebP from it.
+      const thumbKey = await uploadThumbnail('elements/thumbnails', thumbnailBlob);
 
       // Photo-frame window mask (2D only) — a separate 2D asset alongside the overlay; its key goes
       // into placement_config.photo.mask below. Uploaded raw (no bg-removal — the alpha IS the mask).
       let maskKey = null;
       if (assetType === '2D' && isPhotoFrame && maskFile) {
-        const maskFilename = `${crypto.randomUUID()}.png`;
-        const { url: maskUrl, key } = await getSignedUploadUrl('elements/files/2D', maskFilename, 'image/png');
-        await uploadToR2(maskUrl, maskFile);
-        maskKey = key;
+        maskKey = await uploadAsset('elements/files/2D', maskFile);
       }
 
       let builtPlacementConfig = {};
@@ -567,9 +556,13 @@ export default function AddElement() {
           builtPlacementConfig.metalness = glbMetalness;
         }
         // Write the chosen mode for EVERY applicable zone explicitly (default 'hug') — no more
-        // "absent means hug"; the config states each zone's mode so the designer never guesses.
+        // "absent means hug"; the config states each zone's mode so the designer never guesses. A
+        // wall-hug zone with a NON-default seat is written as the per-zone OBJECT form { mode, seat }
+        // ('proud' = solid body stands off the wall, 'flush' = centred); otherwise the mode string.
+        // Auto seat is config-driven in core (scatter→flush, else proud) — see PLACEMENT_CONFIG.md.
         for (const zone of applicableZones) {
-          builtPlacementConfig[zone] = placementConfig[zone] || 'hug';
+          const mode = placementConfig[zone] || 'hug';
+          builtPlacementConfig[zone] = serializeZone(mode, seatConfig[zone], zoneShowsInsert(mode) ? insertConfig[zone] : undefined);
         }
         if (placementScale !== '') builtPlacementConfig.r = parseFloat(placementScale);
         // Optional size-dial bounds in the designer: { min, max } (each independent). r is the
@@ -591,11 +584,12 @@ export default function AddElement() {
           const palette = clusterPalette.split(',').map(s => s.trim()).filter(Boolean);
           if (palette.length) cluster.palette = palette;
           builtPlacementConfig.cluster = cluster;
-        } else if (effectiveCanScatter) builtPlacementConfig.scatter = true;  // sprinkles: density-driven, packed
+        } else if (effectiveCanScatter) {
+          builtPlacementConfig.scatter = true;  // sprinkles: density-driven, packed
+          // Admin-authored default instance count (core reads placement_config.scatter_count, else 12).
+          if (scatterCount !== '' && parseInt(scatterCount, 10) > 0) builtPlacementConfig.scatter_count = parseInt(scatterCount, 10);
+        }
         else if (singlePerSlot) builtPlacementConfig.single_per_slot = true;  // hero
-        // Side seating: default flush (true hug); proud = stands off the wall (deep toppers). A cluster
-        // ball is a sphere — the designer forces it proud on the side regardless of this flag.
-        if (sideProud) builtPlacementConfig.side_proud = true;
         // Hero side-hug size = this fraction of the tier wall height (designer derives it at
         // render time; r is the stand size only). Blank → designer default (0.7).
         if (hugFill !== '') builtPlacementConfig.hug_fill = parseFloat(hugFill);
@@ -610,6 +604,8 @@ export default function AddElement() {
           if (vergeEdgeInset !== '') verge.edge_inset = parseFloat(vergeEdgeInset);
           builtPlacementConfig.verge = verge;
         }
+        // Insert is a per-zone MODIFIER — its params are serialized into each zone's { mode, insert }
+        // object by serializeZone above (gated by zoneShowsInsert). No global `insert` key.
         // Folded sticker (2D image only): split at the spine into two hinged wings. fold (deg) /
         // spine (0–1) are optional — the designer falls back to its defaults. See spattoo-core
         // placement.js / PLACEMENT_CONFIG.md.
@@ -672,6 +668,8 @@ export default function AddElement() {
         allowed_actions:  capabilities,
         default_color:    (assetType === '3D' && userPickedColor) ? elementColor : null,
         sort_order:       0,
+        // GLB cost stats from the Studio review (§3) — flagged, not gated.
+        ...toStatColumns(optimizedStats),
       });
 
       // Step 2 — save the craft guide to the sidecar table now the element id exists.
@@ -703,7 +701,9 @@ export default function AddElement() {
       setPlacementScaleStep('');
       setSinglePerSlot(false);
       setCanScatter(false);
-      setSideProud(false);
+      setScatterCount('');
+      setSeatConfig({});
+      setInsertConfig({});
       setCanCluster(false);
       setClusterMin('');
       setClusterMax('');
@@ -746,7 +746,6 @@ export default function AddElement() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div style={s.page}>
         <div style={s.card}>
@@ -756,7 +755,7 @@ export default function AddElement() {
             <label style={s.label}>Asset Type</label>
             <div style={s.radioRow}>
               {ASSET_TYPES.map(a => (
-                <button key={a.value} style={s.radioBtn(assetType === a.value)} onClick={() => { setAssetType(a.value); setAssetFile(null); setThumbnailBlob(null); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); }}>
+                <button key={a.value} style={s.radioBtn(assetType === a.value)} onClick={() => { setAssetType(a.value); setAssetFile(null); setThumbnailBlob(null); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setOptimizedStats(null); }}>
                   {a.label}
                 </button>
               ))}
@@ -767,7 +766,7 @@ export default function AddElement() {
             label={assetType === '3D' ? 'GLB File' : 'Image File'}
             accept={assetType === '3D' ? '.glb,.gltf' : 'image/*'}
             file={assetFile}
-            onChange={f => { setAssetFile(f); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setGlbRotation([0,0,0]); setFrontConfirmed(false); }}
+            onChange={f => { setAssetFile(f); setOptimizedStats(null); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setGlbRotation([0,0,0]); setFrontConfirmed(false); }}
           />
 
           {assetType === '2D' && (
@@ -786,6 +785,21 @@ export default function AddElement() {
           {/* 3D preview + auto-capture */}
           {assetType === '3D' && assetFile && (
             <div style={s.field}>
+              {/* Mandatory GLB Studio review — shows the real cost; over-cap is flagged, not blocked.
+                  Escape hatch: an already-optimised asset (e.g. Draco-compressed outside the app) can skip it. */}
+              <div style={{ marginBottom: 14 }}>
+                <GlbReviewBanner
+                  reviewed={optimizedStats ? { stats: optimizedStats } : null}
+                  onReview={() => setGlbStudioFile(assetFile)}
+                  promptText="See its real cost on phones and optimize if needed — required for 3D elements."
+                />
+                {!optimizedStats && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12, color: '#6B8C74', fontWeight: 600, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={skipGlbReview} onChange={e => attestOptimised(e.target.checked)} />
+                    I’ve already optimised this GLB — measure its cost &amp; skip the Studio
+                  </label>
+                )}
+              </div>
               <label style={s.label}>3D Preview</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1001,17 +1015,33 @@ export default function AddElement() {
             <div style={s.field}>
               <label style={s.label}>Placement Config</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {applicableZones.map(zone => {
-                  const zoneLabel = CAKE_ZONES.find(z => z.value === zone)?.label ?? zone;
-                  return (
-                    <div key={zone} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>{zoneLabel}</span>
-                      <select style={{ ...s.select, flex: 1 }} value={placementConfig[zone] ?? 'hug'} onChange={e => setPlacementConfig(c => ({ ...c, [zone]: e.target.value }))}>
-                        {PLACEMENT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                      </select>
-                    </div>
-                  );
-                })}
+                {applicableZones.map(zone => (
+                  <PlacementZoneRow
+                    key={zone}
+                    zone={zone}
+                    zoneLabel={CAKE_ZONES.find(z => z.value === zone)?.label ?? zone}
+                    mode={placementConfig[zone] ?? 'hug'}
+                    seat={seatConfig[zone]}
+                    insert={insertConfig[zone] ?? null}
+                    modes={PLACEMENT_MODES}
+                    selectStyle={s.select}
+                    inputStyle={s.input}
+                    onModeChange={v => {
+                      setPlacementConfig(c => ({ ...c, [zone]: v }));
+                      if (!zoneShowsInsert(v)) setInsertConfig(c => { const n = { ...c }; delete n[zone]; return n; });
+                    }}
+                    onSeatChange={v => setSeatConfig(c => ({ ...c, [zone]: v }))}
+                    onInsertToggle={on => setInsertConfig(c => {
+                      const n = { ...c };
+                      if (on) n[zone] = n[zone] ?? {}; else delete n[zone];
+                      return n;
+                    })}
+                    onInsertField={(field, val) => setInsertConfig(c => {
+                      const cur = { ...(c[zone] ?? {}) };
+                      if (val === '') delete cur[field]; else cur[field] = parseFloat(val);
+                      return { ...c, [zone]: cur };
+                    })} />
+                ))}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Default scale (r)</span>
                   <input type="number" min="0.1" step="0.1" style={{ ...s.input, flex: 1 }} value={placementScale} placeholder="e.g. 2.5 — leave blank for auto" onChange={e => setPlacementScale(e.target.value)} />
@@ -1034,6 +1064,17 @@ export default function AddElement() {
                     </div>
                   </div>
                 </label>
+                {effectiveCanScatter && (
+                  <div style={{ marginTop: 6, marginLeft: 26 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', marginBottom: 3 }}>Default scatter count</div>
+                    <input type="number" min="1" step="1" style={{ ...s.input, width: 120 }}
+                      value={scatterCount} placeholder="e.g. 12"
+                      onChange={e => setScatterCount(e.target.value)} />
+                    <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 2 }}>
+                      How many instances a scatter seeds with per surface (top and side). Blank = 12. Capped to what fits the cake; the customer adjusts with the density slider.
+                    </div>
+                  </div>
+                )}
                 <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4, opacity: (effectiveCanScatter || singlePerSlot) ? 0.45 : 1 }}
                   title="A packed clump of mixed-size balls. Drops as a single ball the customer grows into a cluster; mixed colours from a palette.">
                   <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={canCluster} disabled={effectiveCanScatter || singlePerSlot} onChange={e => setCanCluster(e.target.checked)} />
@@ -1064,16 +1105,6 @@ export default function AddElement() {
                     </div>
                   </div>
                 )}
-                <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}
-                  title="Off = lies flat against the side (hugs the wall). On = raised off the wall — for deep 3D pieces that look half-buried when flattened.">
-                  <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={sideProud} onChange={e => setSideProud(e.target.checked)} />
-                  <div>
-                    <div style={s.checkLabel}>Stands out from the side wall</div>
-                    <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                      Off = lies flat against the side (hugs the wall). On = raised off the wall — for deep 3D pieces (e.g. a topper) that look half-buried when flattened.
-                    </div>
-                  </div>
-                </label>
                 <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4, opacity: (effectiveCanScatter || canCluster) ? 0.45 : 1 }}>
                   <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={singlePerSlot} disabled={effectiveCanScatter || canCluster} onChange={e => setSinglePerSlot(e.target.checked)} />
                   <div>
@@ -1109,6 +1140,8 @@ export default function AddElement() {
                     </div>
                   </>
                 )}
+                {/* Insert is a per-zone MODIFIER now — its depth/lean/jitter live inside each zone's
+                    row above (PlacementZoneRow, gated by zoneShowsInsert). No global block. */}
                 {assetType === '2D' && (
                   <>
                     <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}
@@ -1251,6 +1284,17 @@ export default function AddElement() {
           {msg && <div style={s.msg(msg.ok)}>{msg.text}</div>}
         </div>
       </div>
+
+      {/* Embedded GLB Studio — mandatory measure+optimize step; returns the optimized GLB via onUse. */}
+      {glbStudioFile && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,30,24,0.45)', overflow: 'auto' }}>
+          <button onClick={() => setGlbStudioFile(null)}
+            style={{ position: 'fixed', top: 16, right: 20, zIndex: 1001, padding: '8px 14px', borderRadius: 8, border: 'none', background: '#2C4433', color: '#fff', fontFamily: "'Quicksand',sans-serif", fontWeight: 700, cursor: 'pointer' }}>
+            ✕ Close
+          </button>
+          <GlbStudio initialFile={glbStudioFile} onUse={handleOptimized} />
+        </div>
+      )}
     </>
   );
 }

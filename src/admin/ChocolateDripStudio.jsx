@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // designer (spattoo-core CakeTier) renders — never a divergent copy.
 import { buildDripGeometry, buildDripWeb, DRIP_DEFAULTS } from '@spattoo/designer';
 import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
-import { fetchElementTypes, createGlobalElement, getSignedUploadUrl, uploadToR2 } from '../lib/api.js';
+import { useElementSave } from '../lib/useElementSave.js';
 
 // Scene constants mirror the designer's bottom tier (see PerchCalibrator) so the drip is tuned at the
 // same scale customers see: radius 1.2, top at BOARD_H + BOTTOM_H.
@@ -123,10 +123,42 @@ export default function ChocolateDripStudio() {
 
   const params = { count, seed, length, lengthVar, width, widthVar, protrude, flat, meander, webDepth, archHeight };
 
-  const [saveName, setSaveName] = useState('Chocolate Drip');
-  const [busy, setBusy]         = useState(false);
-  const [msg, setMsg]           = useState(null);
-  const canvasWrapRef           = useRef(null);
+  const canvasWrapRef = useRef(null);
+
+  // Shared with the grass and letter-block studios (INVARIANTS #3). This studio wrote the original
+  // save and carried two faults nobody had noticed: every press made ANOTHER row (no uniqueness
+  // constraint, no upsert), and a saved drip could never be corrected because nothing called PATCH.
+  // Moving to the hook fixes both here.
+  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+    typeSlug: 'drip',
+    canvasRef: canvasWrapRef,
+    buildPayload: () => ({
+      allowed_zones: ['rim'],
+      default_color: color,
+      placement_config: {
+        top_drip: true,
+        top_arrangements_allowed: ['ring'],
+        top_drip_gloss:  +studioGloss.toFixed(2),
+        top_drip_length: 1,
+        top_drip_flood:  flood,
+        top_drip_config: dripConfigBundle(),
+      },
+    }),
+    // Every slider the row carries, so opening ?element=<id> lands on what the designer renders.
+    onHydrate: (el) => {
+      const pc = el.placement_config ?? {};
+      const d  = pc.top_drip_config ?? {};
+      if (el.default_color) setColor(el.default_color);
+      if (pc.top_drip_flood !== undefined) setFlood(!!pc.top_drip_flood);
+      // gloss is stored, roughness is the control — invert the same mapping studioGloss applies.
+      if (pc.top_drip_gloss !== undefined) setRoughness(0.5 - pc.top_drip_gloss * 0.42);
+      const set = (v, fn) => { if (v !== undefined) fn(v); };
+      set(d.count, setCount);       set(d.seed, setSeed);        set(d.length, setLength);
+      set(d.lengthVar, setLengthVar); set(d.width, setWidth);    set(d.widthVar, setWidthVar);
+      set(d.protrude, setProtrude); set(d.flat, setFlat);        set(d.meander, setMeander);
+      set(d.webDepth, setWebDepth); set(d.archHeight, setArch);  set(d.lipRadius, setLipRadius);
+    },
+  });
 
   function copyJson() {
     const json = { drip: { ...params, color, roughness: +roughness.toFixed(2), lip_radius: +lipRadius.toFixed(3), flood } };
@@ -146,50 +178,6 @@ export default function ChocolateDripStudio() {
     };
   }
 
-  async function captureThumbnail() {
-    const cnv = canvasWrapRef.current?.querySelector('canvas');
-    if (!cnv) return null;
-    const blob = await new Promise(res => cnv.toBlob(res, 'image/png'));
-    if (!blob) return null;
-    const filename = `${crypto.randomUUID()}.png`;
-    const { url, key } = await getSignedUploadUrl('elements/thumbnails', filename, 'image/png');
-    await uploadToR2(url, blob);
-    return key;
-  }
-
-  // Author the drip as a file-less master-data element (cake_elements) under the "Drip" type, with the
-  // tuned geometry in placement_config. The designer picks it up via seed-in-code defaults + this row.
-  async function saveAsElement() {
-    if (!saveName.trim()) { setMsg({ ok: false, text: 'Give the element a name.' }); return; }
-    setBusy(true); setMsg(null);
-    try {
-      const types = await fetchElementTypes();
-      const dripType = (types ?? []).find(t => t.slug === 'drip' || (t.name ?? '').trim().toLowerCase() === 'drip');
-      if (!dripType) throw new Error('No "Drip" element type found — create it first.');
-      let thumbnail_url = null;
-      try { thumbnail_url = await captureThumbnail(); } catch { /* thumbnail is best-effort */ }
-      const placement_config = {
-        top_drip: true,
-        top_arrangements_allowed: ['ring'],
-        top_drip_gloss:  +studioGloss.toFixed(2),
-        top_drip_length: 1,
-        top_drip_flood:  flood,
-        top_drip_config: dripConfigBundle(),
-      };
-      await createGlobalElement({
-        name: saveName.trim(),
-        element_type_id: dripType.id,
-        allowed_zones: ['rim'],
-        default_color: color,
-        image_url: null,
-        thumbnail_url,
-        placement_config,
-      });
-      setMsg({ ok: true, text: `Saved "${saveName.trim()}" — pick it from Decorations in the designer.` });
-    } catch (e) {
-      setMsg({ ok: false, text: e.message });
-    } finally { setBusy(false); }
-  }
 
   return (
     <div style={S.page}>
@@ -238,8 +226,8 @@ export default function ChocolateDripStudio() {
             <label style={S.label}>Save as Drip element</label>
             <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Element name"
               style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', fontSize: 13, fontFamily: 'Quicksand, sans-serif', color: '#2C4433', boxSizing: 'border-box' }} />
-            <button style={{ ...S.btn, opacity: busy ? 0.6 : 1 }} onClick={saveAsElement} disabled={busy}>
-              {busy ? 'Saving…' : 'Save to library'}
+            <button style={{ ...S.btn, opacity: busy ? 0.6 : 1 }} onClick={save} disabled={busy || !saveName.trim()}>
+              {busy ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update this element' : 'Save to library')}
             </button>
             {msg && <div style={{ ...S.hint, color: msg.ok ? '#2C7A3F' : '#C0392B', fontWeight: 700 }}>{msg.text}</div>}
             <div style={S.hint}>Saves the tuned drip as a file-less element under the “Drip” type (rim only). Customers control colour, length and gloss; the rest is baked here.</div>

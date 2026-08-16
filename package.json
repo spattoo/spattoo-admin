@@ -3,14 +3,22 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:dup": "jscpd src",
+    "check:feature-docs": "node ../spattoo-docs/bin/check-feature-docs.mjs --repo spattoo-admin",
+    "verify": "npm run check:dup"
   },
   "dependencies": {
+    "@fontsource-variable/quicksand": "^5.3.0",
+    "@fontsource/playfair-display": "^5.3.0",
     "@sentry/react": "^10.60.0",
-    "@spattoo/designer": "file:../spattoo-core",
+    "@spattoo/designer": "file:vendor/spattoo-designer-0.1.317.tgz",
     "@supabase/supabase-js": "^2.103.0",
+    "libphonenumber-js": "^1.13.7",
+    "meshoptimizer": "^1.1.1",
     "onnxruntime-web": "^1.27.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -20,6 +28,7 @@
     "@react-three/fiber": "^8.18.0",
     "@sentry/vite-plugin": "^5.3.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "jscpd": "^5.0.10",
     "react-colorful": "^5.6.1",
     "three": "^0.183.2",
     "vite": "^6.3.0"

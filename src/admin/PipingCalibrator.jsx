@@ -3,8 +3,9 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, RoundedBox } from '@react-three/drei';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import { fetchAllElements, fetchElementTypes, createGlobalElement, getSignedUploadUrl, uploadToR2 } from '../lib/api';
-import { normalizeThumbnail } from '../lib/thumbnail.js';
+import { fetchAllElements, fetchElementTypes, createGlobalElement, uploadThumbnail } from '../lib/api';
+import { normalizeArtwork } from '@spattoo/designer';
+import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
 
@@ -428,7 +429,7 @@ export function BuildingBlockScene({ glbUrl, altGlbUrl, cfg, overlap = 0.9, shel
   const dYB      = (cfg.altYOffset || 0) - (cfg.yOffset || 0);
   // Scale the motif to FILL ~85% of the capture frustum width (both up for a lone A/B set and
   // down for a long arc) so the shells are always large in frame — the live preview then closely
-  // matches the saved thumbnail (normalizeThumbnail also targets ~80%). Translate is scaled too
+  // matches the saved thumbnail (normalizeArtwork also targets ~80%). Translate is scaled too
   // so the arc's centre (the front, angle π/2) stays at the origin, head-on to the camera.
   const span = Math.max(1e-3, (total - 1) * step + A.shellScale * A.bbWidth);
   const fit  = 0.85 / span;
@@ -461,7 +462,7 @@ export function BuildingBlockScene({ glbUrl, altGlbUrl, cfg, overlap = 0.9, shel
 // Renders a small cake + board with the pattern's FULL piping ring wrapping it, exactly as
 // the designer renders it (same radius/step/per-shell rotation as BottomPipingRing). This is
 // the clearest "this is a pattern" thumbnail — a continuous border around a cake. Transparent
-// background (no floor) so normalizeThumbnail crops to the cake. Cake/board are neutral so the
+// background (no floor) so normalizeArtwork crops to the cake. Cake/board are neutral so the
 // piping (in the chosen `color`) reads clearly. `zone` picks board (bottom) vs rim (top).
 export function PatternCakeThumb({
   glbUrl, altGlbUrl, cfg, color = '#f5e6c8', zone = 'board',
@@ -749,10 +750,10 @@ export default function PipingCalibrator() {
     const canvas = shotRef.current?.querySelector('canvas');
     if (!canvas) { setMsg({ ok: false, text: 'Capture canvas not ready — try again.' }); return; }
     const raw = await new Promise(r => canvas.toBlob(r, 'image/png'));
-    const thumb = await normalizeThumbnail(raw);
+    const thumb = await normalizeArtwork(raw, { size: PATTERN_THUMB_DIM });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(thumb);
-    a.download = `calibrator-${target}-${Date.now()}.png`;
+    a.download = `calibrator-${target}-${Date.now()}.webp`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -792,10 +793,8 @@ export default function PipingCalibrator() {
       const canvas = captureRef.current?.querySelector('canvas');
       if (!canvas) throw new Error('Thumbnail preview not ready — try again.');
       const raw = await new Promise(r => canvas.toBlob(r, 'image/png'));
-      const thumb = await normalizeThumbnail(raw);
-      const tfn = `${crypto.randomUUID()}.png`;
-      const { url, key: thumbKey } = await getSignedUploadUrl('elements/thumbnails', tfn, 'image/png');
-      await uploadToR2(url, thumb);
+      const thumb = await normalizeArtwork(raw, { size: PATTERN_THUMB_DIM });
+      const thumbKey = await uploadThumbnail('elements/thumbnails', thumb);
 
       // MVP: both parts reference the SAME block (self-alternate). Two-file later just
       // points part B at a different element id — same shape, no structural change.

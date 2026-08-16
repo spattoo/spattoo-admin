@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { CakeDesigner } from '@spattoo/designer';
 import { supabase } from '../lib/supabase.js';
-import { fetchAdminBakers, getSignedUploadUrl, uploadToR2, createTemplate } from '../lib/api.js';
+import { fetchAdminBakers, uploadBlob, createTemplate } from '../lib/api.js';
 
 const BASE_URL = import.meta.env.VITE_API_URL;
 
@@ -24,6 +24,7 @@ function createAdminApiClient(bakerId = null) {
     fetchElementTypes: () => authFetch('/api/element-types'),
     fetchTextures: () => authFetch('/api/textures'),
     fetchMaterials: () => authFetch('/api/materials'),
+    fetchCakeShapes: () => authFetch('/api/cake-shapes'),   // the footprints authored in the Cake Shape Studio
     fetchElements: (opts = {}) => {
       const p = new URLSearchParams();
       if (opts.parentsOnly)    p.set('parents_only', 'true');
@@ -112,9 +113,11 @@ export default function DesignTemplate() {
   async function handleSaveTemplate({ name, offering, tierCount, designJson, thumbnailBlob }) {
     let thumbnailKey = null;
     if (thumbnailBlob) {
-      const filename = `${crypto.randomUUID()}.png`;
-      const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, 'image/png');
-      await uploadToR2(url, thumbnailBlob);
+      // Extension + content type follow the captured blob (WebP, or PNG on browsers that
+      // can't encode WebP via canvas) so the R2 signed PUT signature stays consistent.
+      const ext = thumbnailBlob.type === 'image/webp' ? 'webp' : 'png';
+      const filename = `${crypto.randomUUID()}.${ext}`;
+      const { key } = await uploadBlob('templates/thumbnails', filename, thumbnailBlob);
       thumbnailKey = key;
     }
     await createTemplate({
@@ -144,7 +147,6 @@ export default function DesignTemplate() {
 
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <div style={s.page}>
         <div style={s.header}>
           <span style={s.title}>Design Template</span>

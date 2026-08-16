@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Internal tool — never index on any host (prod or dev). Auth-gates content
+         anyway; this keeps the login shell itself out of search results. -->
+    <meta name="robots" content="noindex, nofollow" />
     <title>Spattoo Admin</title>
     <style>* { margin: 0; padding: 0; box-sizing: border-box; } html, body, #root { height: 100%; }</style>
   </head>

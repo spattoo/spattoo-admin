@@ -1,9 +1,19 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
+// SEC-WEB-7 — @spattoo/designer NAMES its UI font but no longer LOADS it (it used to
+// @import Google Fonts from 17 places, putting a third-party origin in every consumer
+// and leaking the visitor's IP to Google). Each host app now self-hosts the families
+// the library declares in REQUIRED_FONT_FAMILIES. These @fontsource packages ship the
+// woff2 files locally, so Vite bundles them and nothing is fetched from a CDN.
+// Quicksand = the whole admin/designer chrome; Playfair Display = the CreateTemplate
+// screen only. If these imports are removed, the UI silently falls back to a system
+// font — the library's warnIfFontsMissing() will say so in the console.
+import '@fontsource-variable/quicksand';
+import '@fontsource/playfair-display/700.css';
 import { supabase } from './lib/supabase.js';
 import Login from './auth/Login.jsx';
 import logo from './images/spattoo-green.png';
-import { getSignedUploadUrl, uploadToR2, createTemplate } from './lib/api.js';
+import { uploadBlob, createTemplate } from './lib/api.js';
 import { ErrorBoundary } from '@spattoo/designer';
 import { initTelemetry } from './lib/telemetry.js';
 
@@ -22,8 +32,10 @@ const GlbStudio        = lazy(() => import('./admin/GlbStudio.jsx'));
 const GlbRecompose     = lazy(() => import('./admin/GlbRecompose.jsx'));
 const ImageTo3DWizard  = lazy(() => import('./admin/ImageTo3DWizard.jsx'));
 const BuildFromInspiration = lazy(() => import('./admin/BuildFromInspiration.jsx'));
+const ExtractElements   = lazy(() => import('./admin/ExtractElements.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
+const ImportElements   = lazy(() => import('./admin/ImportElements.jsx'));
 const ManageFlavours        = lazy(() => import('./admin/ManageFlavours.jsx'));
 const ManagePlans           = lazy(() => import('./admin/ManagePlans.jsx'));
 const ManageTags            = lazy(() => import('./admin/ManageTags.jsx'));
@@ -38,6 +50,9 @@ const PhotoFrameStudio      = lazy(() => import('./admin/PhotoFrameStudio.jsx'))
 const RecolorTester         = lazy(() => import('./admin/RecolorTester.jsx'));
 const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
+const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
+const LetterBlocksStudio    = lazy(() => import('./admin/LetterBlocksStudio.jsx'));
+const GlazeStudio           = lazy(() => import('./admin/GlazeStudio.jsx'));
 const SecondCreamLayerStudio = lazy(() => import('./admin/SecondCreamLayerStudio.jsx'));
 const RolesCapabilities     = lazy(() => import('./admin/RolesCapabilities.jsx'));
 const TextureCalibrator     = lazy(() => import('./admin/TextureCalibrator.jsx'));
@@ -45,23 +60,34 @@ const PaletteKnifeStudio    = lazy(() => import('./admin/PaletteKnifeStudio.jsx'
 const BackgroundRemover     = lazy(() => import('./admin/BackgroundRemover.jsx'));
 const LusterDustStudio      = lazy(() => import('./admin/LusterDustStudio.jsx'));
 const MaterialStyles        = lazy(() => import('./admin/MaterialStyles.jsx'));
+const ReliefStickerStudio   = lazy(() => import('./admin/ReliefStickerStudio.jsx'));
+const TextTopperStudio      = lazy(() => import('./admin/TextTopperStudio.jsx'));
+const CakeShapeStudio       = lazy(() => import('./admin/CakeShapeStudio.jsx'));
+const IsomaltStudio         = lazy(() => import('./admin/IsomaltStudio.jsx'));
+const TopperSwapStudio      = lazy(() => import('./admin/TopperSwapStudio.jsx'));
+const EditorsIndex          = lazy(() => import('./admin/EditorsIndex.jsx'));
 const ROUTES = {
+  '/editors':                     EditorsIndex,
   '/elements/texture-calibrator': TextureCalibrator,
   '/elements/palette-knife':      PaletteKnifeStudio,
   '/elements/background-remover': BackgroundRemover,
   '/elements/luster-dust':        LusterDustStudio,
   '/elements/material-styles':    MaterialStyles,
+  '/elements/relief-sticker':     ReliefStickerStudio,
+  '/elements/isomalt':            IsomaltStudio,
   '/templates/create':    CreateTemplate,
   '/templates/design':    DesignTemplate,
   '/templates':           ManageTemplates,
   '/elements/add':        AddElement,
   '/elements/manage':     ManageElements,
+  '/elements/import':     ImportElements,
   '/elements/generate':   GenerateShape,
   '/elements/generate-model': GenerateModel,
   '/glb-studio':          GlbStudio,
   '/glb-recompose':       GlbRecompose,
   '/elements/image-to-3d': ImageTo3DWizard,
   '/elements/build-from-inspiration': BuildFromInspiration,
+  '/elements/extract':    ExtractElements,
   '/elements/types':      ElementTypes,
   '/elements/tags':       ManageTags,
   '/elements/nozzles':    ManageNozzles,
@@ -75,9 +101,15 @@ const ROUTES = {
   '/elements/cream-pen':         CreamPenStudio,
   '/elements/folded-sticker':    ButterflyStudio,
   '/elements/photo-frame':       PhotoFrameStudio,
+  '/elements/text-topper':       TextTopperStudio,
+  '/elements/topper-swap':       TopperSwapStudio,
+  '/elements/cake-shapes':       CakeShapeStudio,
   '/elements/recolor-tester':    RecolorTester,
   '/elements/freehand-pen':      FreehandPenStudio,
   '/elements/chocolate-drip':    ChocolateDripStudio,
+  '/elements/grass':             GrassStudio,
+  '/elements/letter-blocks':     LetterBlocksStudio,
+  '/elements/glaze':             GlazeStudio,
   '/elements/second-cream-layer': SecondCreamLayerStudio,
   '/admin/roles':                RolesCapabilities,
 };
@@ -97,11 +129,13 @@ const NAV_GROUPS = [
   { title: 'Elements', items: [
     { href: '/elements/add',    label: 'Add Element' },
     { href: '/elements/manage', label: 'Manage Elements' },
+    { href: '/elements/import', label: 'Import Elements' },
     { href: '/elements/types',  label: 'Element Types' },
     { href: '/elements/material-styles', label: 'Material → Styles' },
   ] },
-  { title: 'Editors', items: [
+  { title: 'Editors', index: '/editors', items: [
     { href: '/elements/build-from-inspiration', label: 'Build from Inspiration' },
+    { href: '/elements/extract',        label: 'Extract Elements' },
     { href: '/elements/image-to-3d',    label: 'Image → 3D Cake' },
     { href: '/elements/generate',       label: 'Generate Shape' },
     { href: '/elements/generate-model', label: 'Generate 3D Model' },
@@ -116,9 +150,17 @@ const NAV_GROUPS = [
     { href: '/elements/cream-pen',      label: 'Cream Pen' },
     { href: '/elements/freehand-pen',   label: 'Freehand Pen' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
+    { href: '/elements/grass',          label: 'Grass' },
+    { href: '/elements/letter-blocks',  label: 'Letter Blocks' },
+    { href: '/elements/glaze',          label: 'Glaze Studio' },
     { href: '/elements/second-cream-layer', label: 'Second Cream Layer' },
     { href: '/elements/folded-sticker', label: 'Folded Butterfly' },
     { href: '/elements/photo-frame',    label: 'Photo Frame Studio' },
+    { href: '/elements/text-topper',    label: 'Text Topper Studio' },
+    { href: '/elements/topper-swap',    label: 'Topper Swap Studio' },
+    { href: '/elements/cake-shapes',    label: 'Cake Shape Studio' },
+    { href: '/elements/relief-sticker', label: 'Relief Sticker Studio' },
+    { href: '/elements/isomalt',        label: 'Isomalt Studio' },
     { href: '/elements/recolor-tester', label: 'Recolour Tester' },
     { href: '/pattern-builder',         label: 'Pattern Builder' },
   ] },
@@ -153,8 +195,25 @@ function NavMenu() {
   return (
     <nav ref={navRef} style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
       {NAV_GROUPS.map(g => {
-        const active = g.items.some(it => it.href === path);
+        const active = g.items.some(it => it.href === path) || g.index === path;
         const isOpen = open === g.title;
+        // Large groups (e.g. Editors) link to a tiles index page instead of a flyout —
+        // the dropdown got unwieldy as the tool count grew.
+        if (g.index) {
+          return (
+            <a key={g.title} href={g.index}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                background: active ? '#F4F8F5' : 'transparent',
+                border: '1.5px solid', borderColor: active ? '#C5D4C8' : 'transparent',
+                borderRadius: 8, padding: '6px 12px', cursor: 'pointer', textDecoration: 'none',
+                fontFamily: "'Quicksand', sans-serif", fontSize: 13,
+                fontWeight: 700, color: active ? '#2C4433' : '#5C7565',
+              }}>
+              {g.title}
+            </a>
+          );
+        }
         return (
           <div key={g.title} style={{ position: 'relative' }}>
             <button
@@ -309,13 +368,18 @@ function Router({ session }) {
   if (Screen) {
     const extraProps = {};
 
+    // The Editors tiles page renders from the same NAV_GROUPS list (single source of truth).
+    if (path === '/editors') {
+      extraProps.items = NAV_GROUPS.find(g => g.title === 'Editors')?.items ?? [];
+    }
+
     if (path === '/templates/create') {
       extraProps.onSave = async ({ name, tierCount, designJson, thumbnailBlob }) => {
         let thumbnailKey = null;
         if (thumbnailBlob) {
-          const filename = `${crypto.randomUUID()}.png`;
-          const { url, key } = await getSignedUploadUrl('templates/thumbnails', filename, 'image/png');
-          await uploadToR2(url, thumbnailBlob);
+          const ext = thumbnailBlob.type === 'image/webp' ? 'webp' : 'png';
+          const filename = `${crypto.randomUUID()}.${ext}`;
+          const { key } = await uploadBlob('templates/thumbnails', filename, thumbnailBlob);
           thumbnailKey = key;
         }
         await createTemplate({

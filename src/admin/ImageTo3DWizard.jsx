@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { getSignedUploadUrl, uploadToR2, startMeshyGeneration, getMeshyGeneration } from '../lib/api.js';
+import { uploadBlob, startMeshyGeneration, getMeshyGeneration } from '../lib/api.js';
 import RecomposeEditor from './RecomposeEditor.jsx';
 
 // Image → 3D Cake wizard. Chains: upload a 2D image → GPT-4o validation gate → Meshy.ai
@@ -46,8 +46,7 @@ export default function ImageTo3DWizard() {
     setBusy(true); setError(null); setRejection(null);
     try {
       const ext = EXT[file.type] || 'png';
-      const { url, key } = await getSignedUploadUrl('meshy/source', `${crypto.randomUUID()}.${ext}`, file.type || 'image/png');
-      await uploadToR2(url, file);
+      const { key } = await uploadBlob('meshy/source', `${crypto.randomUUID()}.${ext}`, file, file.type || 'image/png');
 
       const res = await startMeshyGeneration(key, force);
       if (!res.ok) {
