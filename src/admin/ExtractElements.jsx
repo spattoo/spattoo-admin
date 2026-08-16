@@ -63,6 +63,9 @@ const S = {
   count:   { display: 'flex', gap: 4, alignItems: 'center', marginRight: 4 },
   label:   { fontWeight: 700, fontSize: 13, margin: '8px 0 2px' },
   meta:    { fontSize: 11.5, color: '#94a3b8' },
+  ta:      { width: '100%', boxSizing: 'border-box', marginTop: 8, padding: '6px 8px', fontSize: 11.5,
+             lineHeight: 1.45, borderRadius: 8, border: '1px solid #e2e8f0', color: '#475569',
+             fontFamily: 'inherit', resize: 'vertical', minHeight: 56 },
   seg:     { display: 'flex', gap: 4, marginTop: 8 },
   segBtn:  (on) => ({ flex: 1, padding: '5px 0', fontSize: 11, fontWeight: 700, borderRadius: 7, cursor: 'pointer',
                       border: `1px solid ${on ? '#2C4433' : '#e2e8f0'}`, background: on ? '#2C4433' : '#fff', color: on ? '#fff' : '#475569' }),
@@ -124,6 +127,18 @@ export default function ExtractElements() {
     }
   }
 
+  // The prompt box types locally and saves on blur. setField's save-per-change is right for a
+  // segmented button (one click, one value) and wrong for a textarea — it would PATCH on every
+  // keystroke.
+  const editPrompt = (id, value) => setCands(cs => cs.map(c => (c.id === id ? { ...c, prompt: value } : c)));
+
+  async function savePrompt(id) {
+    const text = (candidates.find(c => c.id === id)?.prompt ?? '').trim();
+    if (!text) return;
+    try { await updateCandidate(id, { prompt: text }); }
+    catch (e) { setError(e.message || 'Could not save that description.'); }
+  }
+
   const toggleSkip = (id) => setSkipped(s => {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
@@ -152,7 +167,17 @@ export default function ExtractElements() {
       if (Array.isArray(res.candidates)) setCands(res.candidates);
       // 'done' covers partial success — a candidate that failed carries its own `error`, and the
       // card shows it. One failure should not hold the whole screen in a spinner.
-      if (res.job?.status === 'done' || res.job?.status === 'failed') setStep('review');
+      if (res.job?.status === 'done' || res.job?.status === 'failed') {
+        // Everything that produced an image goes OFF. A finished candidate can now be re-run, which
+        // means a second press of Generate would otherwise redo — and re-bill — the whole set, when
+        // the reason you came back is that ONE of them was wrong. Include that one again to retry it.
+        setSkipped(s => {
+          const n = new Set(s);
+          for (const c of res.candidates ?? []) if (c.outputUrls?.length) n.add(c.id);
+          return n;
+        });
+        setStep('review');
+      }
     } catch { /* transient — the next tick retries */ }
     finally { pollInFlight.current = false; }
   }, [jobId]);
@@ -226,12 +251,25 @@ export default function ExtractElements() {
                   </div>
                   {c.error && <div style={{ ...S.meta, color: '#B42318', marginTop: 4 }}>{c.error}</div>}
 
-                  {/* Locked once generated — the recipe shaped how the image was drawn, so
-                      relabelling it afterwards would describe it wrongly rather than change it. */}
+                  {/* The strongest control on this card, and it used to be invisible. GPT writes the
+                      first description from the photo; when it reads a busy cake wrongly — pulling
+                      the nail polish and brush in with the makeup palette — no amount of intent or
+                      fidelity fixes that, because the sentence itself is what the image is drawn
+                      from. Editing it and generating again is the fix. Saves on blur. */}
+                  {c.status !== 'blocked' && (
+                    <textarea style={S.ta} value={c.prompt ?? ''} rows={3}
+                              placeholder="Describe just this one decoration…"
+                              onChange={e => editPrompt(c.id, e.target.value)}
+                              onBlur={() => savePrompt(c.id)} />
+                  )}
+
+                  {/* Changeable after a generation, because the result can now be re-run. Changing
+                      the intent does not alter an image already drawn — it decides how the NEXT
+                      attempt is drawn, which is the whole point of coming back to a bad one. */}
                   <div style={S.seg}>
                     {INTENTS.map(i => (
                       <button key={i.key} title={i.hint}
-                              disabled={c.status === 'blocked' || !!c.outputUrl}
+                              disabled={c.status === 'blocked'}
                               onClick={() => setField(c.id, 'intent', i.key)}
                               style={S.segBtn((c.intent ?? 'sticker') === i.key)}>
                         {i.label}
@@ -241,7 +279,7 @@ export default function ExtractElements() {
                   <div style={S.seg}>
                     {FIDELITIES.map(f => (
                       <button key={f.key} title={f.hint}
-                              disabled={c.status === 'blocked' || !!c.outputUrl}
+                              disabled={c.status === 'blocked'}
                               onClick={() => setField(c.id, 'fidelity', f.key)}
                               style={S.segBtn((c.fidelity ?? 'reference') === f.key)}>
                         {f.label}
