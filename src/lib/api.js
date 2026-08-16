@@ -1,7 +1,11 @@
 import { supabase } from './supabase.js';
 import { encodeWebp } from '@spattoo/designer';
 
-const BASE_URL = import.meta.env.VITE_API_URL;
+// Trailing slash stripped, because every caller below writes `${BASE_URL}/api/…`. Configured as
+// "https://api.spattoo.com/" that builds "…com//api/…", which is a different path to the router and
+// 404s on every request — with nothing in the message naming the cause. A deployment typo should not
+// be able to take the whole app down, so it is absorbed here rather than relied on being typed right.
+const BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
 async function authHeaders() {
   const { data: { session } } = await supabase.auth.getSession();
