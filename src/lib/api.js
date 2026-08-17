@@ -109,6 +109,12 @@ export async function createElementCategory(name) {
   return post('/api/admin/element-categories', { name });
 }
 
+// Rename, reorder, retire. No delete: the FK is ON DELETE SET NULL, so removing a category would
+// silently strip it off every element it held with no way back.
+export async function updateElementCategory(id, fields) {
+  return patch(`/api/admin/element-categories/${id}`, fields);
+}
+
 // ── Cake textures (cream finish/style config) ──────────────────────────────────
 export async function fetchTextures()            { return get('/api/textures'); }
 export async function fetchAdminTextures()       { return get('/api/admin/textures'); }
