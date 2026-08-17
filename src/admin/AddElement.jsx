@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { fetchElementTypes, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
+import { fetchElementTypes, fetchAdminElementCategories, createElementCategory, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM } from '../lib/elementImage.js';
 import { toStatColumns, measureGlbBuffer, deriveAssetClass } from '../lib/glb.js';
@@ -249,6 +249,12 @@ export default function AddElement() {
   const [suggestions,   setSuggestions]   = useState(null);
   const [suggestError,  setSuggestError]  = useState(null);
   const [elementTypeId, setElementTypeId] = useState('');
+  // Browsing category (migration 065) — what this decoration IS, which is a different question from
+  // element type and often a different answer. A unicorn horn is a Cake Topper and Unicorn & Rainbow.
+  const [categories, setCategories]       = useState([]);
+  const [categoryId, setCategoryId]       = useState('');
+  const [newCategory, setNewCategory]     = useState('');
+  const [addingCategory, setAddingCategory] = useState(false);
   const [applicableZones, setApplicableZones] = useState([]);
   const [isParent, setIsParent]           = useState(false);
   const [parentId, setParentId]           = useState('');
@@ -337,7 +343,33 @@ export default function AddElement() {
     fetchElementTypes()
       .then(setElementTypes)
       .catch(err => setMsg({ ok: false, text: err.message }));
+    // Categories are not required to save, so a failure here must not block the form — the element
+    // is still perfectly placeable without one, it just has no home in the browsing menu yet.
+    fetchAdminElementCategories()
+      .then(setCategories)
+      .catch(() => setCategories([]));
   }, []);
+
+  // Creating a category is a mid-task action: you are filing a decoration and there is no home for
+  // it. So it happens inline on this form rather than sending you to a separate screen and back —
+  // leaving mid-upload would lose the file, the thumbnail and the craft guide.
+  async function addCategory() {
+    const name = newCategory.trim();
+    if (!name) return;
+    setAddingCategory(true);
+    try {
+      const created = await createElementCategory(name);
+      // Re-sorted rather than appended: the API puts a new one at the END of the menu, and the list
+      // has to agree or the picker order stops matching what the customer will see.
+      setCategories(cs => [...cs, created].sort((a, b) => a.sort_order - b.sort_order));
+      setCategoryId(created.id);      // select it — creating it IS choosing it
+      setNewCategory('');
+    } catch (err) {
+      setMsg({ ok: false, text: err.message });
+    } finally {
+      setAddingCategory(false);
+    }
+  }
 
   useEffect(() => {
     if (!elementTypeId || isParent) { setParentOptions([]); setParentId(''); return; }
@@ -659,6 +691,8 @@ export default function AddElement() {
         name:             name.trim(),
         description:      description.trim() || null,
         element_type_id:  elementTypeId,
+        // null, not '' — the column is a uuid FK, and an empty string is not a valid uuid.
+        category_id:      categoryId || null,
         parent_id:        isParent ? null : parentId,
         image_url:        assetKey,
         thumbnail_url:    thumbKey,
@@ -997,6 +1031,36 @@ export default function AddElement() {
               <option value="">Select type…</option>
               {elementTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
+          </div>
+
+          {/* A SECOND axis, not a finer element type. Type says how it behaves; this says what it
+              is, and the customer's menu is built from this one. Optional on purpose — an element
+              with no category is still placeable, it simply has no home in the menu yet, and
+              forcing the choice here would only teach people to pick the first option. */}
+          <div style={s.field}>
+            <label style={s.label}>Category <span style={{ fontWeight: 400, color: '#9b8f94' }}>— how customers browse for it</span></label>
+            <select style={s.select} value={categoryId} onChange={e => setCategoryId(e.target.value)}>
+              <option value="">No category</option>
+              {categories.filter(c => c.is_active || c.id === categoryId)
+                         .map(c => <option key={c.id} value={c.id}>{c.name}{c.is_active ? '' : ' (retired)'}</option>)}
+            </select>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <input
+                style={{ ...s.select, flex: 1 }}
+                placeholder="…or type a new category"
+                value={newCategory}
+                onChange={e => setNewCategory(e.target.value)}
+                // Enter must not submit the whole form — the file, thumbnail and craft guide are all
+                // still in progress at this point.
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCategory(); } }}
+              />
+              <button type="button" onClick={addCategory} disabled={!newCategory.trim() || addingCategory}
+                style={{ padding: '0 14px', borderRadius: 8, border: '1.5px solid #c9a8b5', background: '#fff',
+                         color: '#9b5268', fontWeight: 700, fontSize: 12, cursor: newCategory.trim() ? 'pointer' : 'default',
+                         opacity: newCategory.trim() ? 1 : 0.5, fontFamily: "'Quicksand',sans-serif" }}>
+                {addingCategory ? 'Adding…' : 'Add'}
+              </button>
+            </div>
           </div>
 
           <div style={s.field}>

@@ -97,6 +97,18 @@ export async function fetchElementTypes() {
   return get('/api/element-types');
 }
 
+// ── Browsing categories (migration 065) ────────────────────────────────────────
+// What a decoration IS, as opposed to element-types, which is how it behaves. The ADMIN list, not
+// the customer one: it includes empty and retired categories, because an element has to be
+// assignable to a category before that category has anything in it.
+export async function fetchAdminElementCategories() {
+  return get('/api/admin/element-categories');
+}
+
+export async function createElementCategory(name) {
+  return post('/api/admin/element-categories', { name });
+}
+
 // ── Cake textures (cream finish/style config) ──────────────────────────────────
 export async function fetchTextures()            { return get('/api/textures'); }
 export async function fetchAdminTextures()       { return get('/api/admin/textures'); }

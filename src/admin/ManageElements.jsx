@@ -4,7 +4,8 @@ import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
-  fetchAdminElementTypes, fetchAllElements, fetchParentElements,
+  fetchAdminElementTypes, fetchAdminElementCategories, createElementCategory,
+  fetchAllElements, fetchParentElements,
   uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
 } from '../lib/api.js';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
@@ -427,6 +428,12 @@ function GLBPreview({ file, url, color, roughness, metalness, envPreset, camRef,
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ManageElements() {
   const [elementTypes, setElementTypes] = useState([]);
+  // Browsing category (migration 065). This screen is where the 86 backfilled elements get their
+  // categories corrected — the backfill guessed from names, and a guess is not an authored answer.
+  const [categories, setCategories]     = useState([]);
+  const [categoryId, setCategoryId]     = useState('');
+  const [newCategory, setNewCategory]   = useState('');
+  const [addingCategory, setAddingCategory] = useState(false);
   const [elements,     setElements]     = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [query,        setQuery]        = useState('');
@@ -601,13 +608,41 @@ export default function ManageElements() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [types, els] = await Promise.all([fetchAdminElementTypes(), fetchAllElements()]);
+      const [types, els, cats] = await Promise.all([
+        fetchAdminElementTypes(),
+        fetchAllElements(),
+        // Categories must not be able to fail the whole screen — every other field on this form
+        // works without them, and an element with no category is still fully placeable.
+        fetchAdminElementCategories().catch(() => []),
+      ]);
       setElementTypes(types);
       setElements(els);
+      setCategories(cats);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Inline, for the same reason as on AddElement: you discover a category is missing while looking
+  // at the element that needs it, and being sent to another screen loses the edit in progress.
+  async function addCategory() {
+    const name = newCategory.trim();
+    if (!name) return;
+    setAddingCategory(true);
+    try {
+      const created = await createElementCategory(name);
+      // Sorted, not appended — the API places a new category at the END of the menu, and this list
+      // has to match or the picker stops reflecting the order customers will see.
+      setCategories(cs => [...cs, created].sort((a, b) => a.sort_order - b.sort_order));
+      setCategoryId(created.id);
+      setNewCategory('');
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    } finally {
+      setAddingCategory(false);
     }
   }
 
@@ -616,6 +651,9 @@ export default function ManageElements() {
     setSelectedId(el.id);
     setName(el.name);
     setElementTypeId(el.element_type_id);
+    // '' rather than null so the select is controlled — a null value makes React treat it as
+    // uncontrolled and the field stops responding to further selections.
+    setCategoryId(el.category_id ?? '');
     setApplicableZones(el.allowed_zones ?? []);
     setIsParent(!el.parent_id);
     setParentId(el.parent_id ?? '');
@@ -962,6 +1000,9 @@ export default function ManageElements() {
     const fields = {
       name:             name.trim(),
       element_type_id:  elementTypeId,
+      // null clears it — the PATCH checks `!== undefined`, so "No category" is a real edit and not
+      // a no-op. A wrong category has to be removable, not merely changeable.
+      category_id:      categoryId || null,
       parent_id:        isParent ? null : (parentId || null),
       allowed_zones:    applicableZones,
       allowed_actions:  capabilities,
@@ -1530,6 +1571,34 @@ export default function ManageElements() {
                     }}>
                     {elementTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
+                </div>
+
+                {/* Category — what customers browse by. Independent of element type above, and
+                    usually a different answer: a unicorn horn is a Cake Topper AND Unicorn &
+                    Rainbow. The 86 existing elements were categorised by a name-matching backfill,
+                    so this field is where a guess becomes an authored answer. */}
+                <div style={s.field}>
+                  <label style={s.label}>Category <span style={{ fontWeight: 400, color: '#9b8f94' }}>— how customers browse for it</span></label>
+                  <select style={s.select} value={categoryId} onChange={e => setCategoryId(e.target.value)}>
+                    <option value="">No category</option>
+                    {categories.filter(c => c.is_active || c.id === categoryId)
+                               .map(c => <option key={c.id} value={c.id}>{c.name}{c.is_active ? '' : ' (retired)'}</option>)}
+                  </select>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                    <input
+                      style={{ ...s.input, flex: 1, fontSize: 12 }}
+                      placeholder="…or type a new category"
+                      value={newCategory}
+                      onChange={e => setNewCategory(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCategory(); } }}
+                    />
+                    <button type="button" onClick={addCategory} disabled={!newCategory.trim() || addingCategory}
+                      style={{ padding: '0 14px', borderRadius: 8, border: '1.5px solid #c9a8b5', background: '#fff',
+                               color: '#9b5268', fontWeight: 700, fontSize: 12, cursor: newCategory.trim() ? 'pointer' : 'default',
+                               opacity: newCategory.trim() ? 1 : 0.5, fontFamily: "'Quicksand',sans-serif" }}>
+                      {addingCategory ? 'Adding…' : 'Add'}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Zones */}
