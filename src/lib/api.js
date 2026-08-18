@@ -1,7 +1,11 @@
 import { supabase } from './supabase.js';
 import { encodeWebp } from '@spattoo/designer';
 
-const BASE_URL = import.meta.env.VITE_API_URL;
+// Trailing slash stripped, because every caller below writes `${BASE_URL}/api/…`. Configured as
+// "https://api.spattoo.com/" that builds "…com//api/…", which is a different path to the router and
+// 404s on every request — with nothing in the message naming the cause. A deployment typo should not
+// be able to take the whole app down, so it is absorbed here rather than relied on being typed right.
+const BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
 async function authHeaders() {
   const { data: { session } } = await supabase.auth.getSession();
@@ -91,6 +95,24 @@ export async function fetchDietaryRequirements() {
 
 export async function fetchElementTypes() {
   return get('/api/element-types');
+}
+
+// ── Browsing categories (migration 065) ────────────────────────────────────────
+// What a decoration IS, as opposed to element-types, which is how it behaves. The ADMIN list, not
+// the customer one: it includes empty and retired categories, because an element has to be
+// assignable to a category before that category has anything in it.
+export async function fetchAdminElementCategories() {
+  return get('/api/admin/element-categories');
+}
+
+export async function createElementCategory(name) {
+  return post('/api/admin/element-categories', { name });
+}
+
+// Rename, reorder, retire. No delete: the FK is ON DELETE SET NULL, so removing a category would
+// silently strip it off every element it held with no way back.
+export async function updateElementCategory(id, fields) {
+  return patch(`/api/admin/element-categories/${id}`, fields);
 }
 
 // ── Cake textures (cream finish/style config) ──────────────────────────────────

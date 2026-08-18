@@ -35,6 +35,7 @@ const BuildFromInspiration = lazy(() => import('./admin/BuildFromInspiration.jsx
 const ExtractElements   = lazy(() => import('./admin/ExtractElements.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
+const ElementCategories = lazy(() => import('./admin/ElementCategories.jsx'));
 const ImportElements   = lazy(() => import('./admin/ImportElements.jsx'));
 const ManageFlavours        = lazy(() => import('./admin/ManageFlavours.jsx'));
 const ManagePlans           = lazy(() => import('./admin/ManagePlans.jsx'));
@@ -80,6 +81,7 @@ const ROUTES = {
   '/templates':           ManageTemplates,
   '/elements/add':        AddElement,
   '/elements/manage':     ManageElements,
+  '/elements/categories': ElementCategories,
   '/elements/import':     ImportElements,
   '/elements/generate':   GenerateShape,
   '/elements/generate-model': GenerateModel,
@@ -131,6 +133,7 @@ const NAV_GROUPS = [
     { href: '/elements/manage', label: 'Manage Elements' },
     { href: '/elements/import', label: 'Import Elements' },
     { href: '/elements/types',  label: 'Element Types' },
+    { href: '/elements/categories', label: 'Element Categories' },
     { href: '/elements/material-styles', label: 'Material → Styles' },
   ] },
   { title: 'Editors', index: '/editors', items: [

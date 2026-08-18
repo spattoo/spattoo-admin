@@ -3,7 +3,8 @@ import { CakeDesigner } from '@spattoo/designer';
 import { supabase } from '../lib/supabase.js';
 import { fetchAdminBakers, uploadBlob, createTemplate } from '../lib/api.js';
 
-const BASE_URL = import.meta.env.VITE_API_URL;
+// Trailing slash stripped — see the note in lib/api.js. Same variable, same paths, same failure.
+const BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
 function createAdminApiClient(bakerId = null) {
   async function authFetch(path, opts = {}) {
