@@ -55,8 +55,10 @@ export function drawPolygon(ctx, size, { sides, rotation, fill, stroke, cornerRa
   const c = size / 2;
   const margin = size * 0.06;
   const r = c - margin;
-  // -90° so a rotation of 0 puts a FLAT edge on top, which is how a football panel sits. Without it
-  // a "0°" hexagon would be pointy-top and every authored offset would be rotated by half a step.
+  // -90° puts the FIRST VERTEX straight up, so rotation 0 is POINTY-top. That is the orientation the
+  // honeycomb offsets are derived for (rows step 0.866 × width vertically, alternate rows shift half
+  // a width). 30° gives flat-top, which swaps those two — so whichever you pick, every piece in one
+  // pattern must share it or the lattice will not close up.
   const start = (rotation - 90) * Math.PI / 180;
 
   const pts = Array.from({ length: sides }, (_, i) => {
@@ -170,7 +172,7 @@ export default function PolygonCutter() {
             <span style={s.val}>{rotation}°</span>
           </div>
           <div style={{ fontSize: 11, color: '#8aa091', marginTop: 3 }}>
-            0° is flat-top. A honeycomb needs every piece at the same rotation.
+            0° is pointy-top; 30° is flat-top. Every piece in one honeycomb must share a rotation.
           </div>
         </div>
 
