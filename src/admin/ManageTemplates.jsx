@@ -64,30 +64,6 @@ function CakeTier({ shape, scale, yCenter, color }) {
   const h       = shapeHeight(shape);
   const topY    = isHeart ? yCenter + h : yCenter + h / 2;
   const col     = color || '#F5E6C8';
-  async function handleExport() {
-    if (!picked.size) return;
-    setExporting(true);
-    try {
-      const bundle = await exportTemplates([...picked]);
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `templates-${new Date().toISOString().slice(0, 10)}-${bundle.cake_templates.length}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      // The element count is the number worth showing: a template bundle carries the elements its
-      // design references, so it is routinely far larger than the templates ticked — and those
-      // elements are what stops the templates misbehaving silently at the other end.
-      setMsg({ ok: true, text:
-        `Exported ${bundle.cake_templates.length} template(s) — plus ${bundle.elements.length} element(s), ` +
-        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s). Import under Elements → Import Elements.` });
-    } catch (e) {
-      setMsg({ ok: false, text: e?.message ?? 'Export failed' });
-    } finally {
-      setExporting(false);
-    }
-  }
 
   return (
     <group
@@ -214,10 +190,6 @@ const s = {
 const DEFAULT_TIER_COLOR = '#fefbea';
 
 function TemplateForm({ onSaved, onCancel }) {
-  // Picked for export — separate from anything the editor holds, for the same reason as elements:
-  // ticking a template is not opening it.
-  const [picked, setPicked]           = useState(() => new Set());
-  const [exporting, setExporting]     = useState(false);
   const [name, setName]               = useState('');
   const [shape, setShape]             = useState('round');
   const [tierCount, setTierCount]     = useState(1);
@@ -452,6 +424,16 @@ function TemplateForm({ onSaved, onCancel }) {
 
 export default function ManageTemplates() {
   const [templates, setTemplates] = useState([]);
+  // Picked for export — separate from anything the editor holds, for the same reason as elements:
+  // ticking a template is not opening it.
+  //
+  // ⚠️ These, and handleExport below, were declared in OTHER COMPONENTS: the state in TemplateForm
+  // and the handler inside CakeTier, a three.js mesh 200 lines above. Only the JSX landed here, so
+  // every render threw "picked is not defined" and the screen showed the error boundary. Neither
+  // misplacement is visible when reading either half on its own — a `useState` looks at home at the
+  // top of any component, which is why the anchor a patch attaches to matters more than the patch.
+  const [picked, setPicked]       = useState(() => new Set());
+  const [exporting, setExporting] = useState(false);
   const [loading, setLoading]     = useState(true);
   const [showForm, setShowForm]   = useState(false);
   const [msg, setMsg]             = useState(null);
@@ -461,6 +443,31 @@ export default function ManageTemplates() {
     try   { setTemplates(await fetchAdminTemplates()); }
     catch (err) { setMsg({ ok: false, text: err.message }); }
     finally { setLoading(false); }
+  }
+
+  async function handleExport() {
+    if (!picked.size) return;
+    setExporting(true);
+    try {
+      const bundle = await exportTemplates([...picked]);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `templates-${new Date().toISOString().slice(0, 10)}-${bundle.cake_templates.length}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      // The element count is the number worth showing: a template bundle carries the elements its
+      // design references, so it is routinely far larger than the templates ticked — and those
+      // elements are what stops the templates misbehaving silently at the other end.
+      setMsg({ ok: true, text:
+        `Exported ${bundle.cake_templates.length} template(s) — plus ${bundle.elements.length} element(s), ` +
+        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s). Import under Elements → Import Elements.` });
+    } catch (e) {
+      setMsg({ ok: false, text: e?.message ?? 'Export failed' });
+    } finally {
+      setExporting(false);
+    }
   }
 
   useEffect(() => { load(); }, []);
