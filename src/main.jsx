@@ -36,6 +36,7 @@ const ExtractElements   = lazy(() => import('./admin/ExtractElements.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
 const ElementCategories = lazy(() => import('./admin/ElementCategories.jsx'));
+const PolygonCutter     = lazy(() => import('./admin/PolygonCutter.jsx'));
 const ImportElements   = lazy(() => import('./admin/ImportElements.jsx'));
 const ManageFlavours        = lazy(() => import('./admin/ManageFlavours.jsx'));
 const ManagePlans           = lazy(() => import('./admin/ManagePlans.jsx'));
@@ -82,6 +83,7 @@ const ROUTES = {
   '/elements/add':        AddElement,
   '/elements/manage':     ManageElements,
   '/elements/categories': ElementCategories,
+  '/elements/polygon':    PolygonCutter,
   '/elements/import':     ImportElements,
   '/elements/generate':   GenerateShape,
   '/elements/generate-model': GenerateModel,
@@ -141,6 +143,7 @@ const NAV_GROUPS = [
     { href: '/elements/extract',        label: 'Extract Elements' },
     { href: '/elements/image-to-3d',    label: 'Image → 3D Cake' },
     { href: '/elements/generate',       label: 'Generate Shape' },
+    { href: '/elements/polygon',        label: 'Polygon Cutter' },
     { href: '/elements/generate-model', label: 'Generate 3D Model' },
     { href: '/glb-studio',              label: 'GLB Studio' },
     { href: '/glb-recompose',           label: 'GLB Recompose' },
