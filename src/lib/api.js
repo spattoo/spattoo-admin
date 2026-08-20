@@ -122,8 +122,20 @@ export async function updateElementCategory(id, fields) {
 // A category's own menu picture — typically a hand-made collage of a few of its decorations. Its own
 // folder (migration 068), so a category picture is never mistaken for an element's thumbnail when
 // somebody is reading the bucket.
+//
+// Through uploadThumbnail, NOT uploadAsset: this is a thumbnail, and that function is the one place
+// thumbnail uploads pick their format. It re-encodes to WebP with the alpha kept, and derives the
+// extension, the content-type signed into the URL and the PUT header from the encoded blob so the
+// three can never disagree. Uploading the raw file instead — which this did at first — put a 900KB
+// PNG in a menu that loads all eleven categories at once, and did it in a format nothing else here
+// uses.
+//
+// Background is deliberately NOT removed. An element gets that because a photographed decal has to be
+// cut out; a category picture is a collage somebody composed, and its background is part of the
+// composition. It is also a paid call. If one does need cutting out, admin already has a screen for
+// it (BackgroundRemover) — better than spending credits on every upload for the rare case.
 export async function uploadCategoryThumbnail(file) {
-  return uploadAsset('categories/thumbnails', file);
+  return uploadThumbnail('categories/thumbnails', file);
 }
 
 // ── Cake textures (cream finish/style config) ──────────────────────────────────
