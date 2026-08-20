@@ -61,7 +61,11 @@ const s = {
     background: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center',
     justifyContent: 'center', position: 'relative',
   }),
-  thumbImg: (own) => ({ width: '100%', height: '100%', objectFit: 'cover', opacity: own ? 1 : 0.4 }),
+  // `contain` and a 6px inset because that is EXACTLY what the customer's menu tile does. `cover`
+  // would crop here and letterbox there, so a collage judged in this square would not be the picture
+  // anyone actually sees — which is the one thing showing a preview is for.
+  thumbImg: (own) => ({ width: '100%', height: '100%', objectFit: 'contain', padding: 4,
+                        boxSizing: 'border-box', opacity: own ? 1 : 0.4 }),
   thumbNote: { fontSize: 8.5, fontWeight: 800, color: '#8aa091', textAlign: 'center',
                letterSpacing: 0.2, marginTop: 2, minHeight: 11 },
   thumbCol: { display: 'flex', flexDirection: 'column', alignItems: 'center', width: 52, flexShrink: 0 },
@@ -255,8 +259,9 @@ export default function ElementCategories() {
         The square is the picture customers see above the category name. A faded one is BORROWED —
         the first decoration in the category that has a thumbnail — so a category always shows
         something even before you give it a picture of its own. Click to upload one; a collage of a
-        few of its decorations reads better than a single one. Square images, please: the menu
-        renders them square and anything else gets cropped to fit.
+        few of its decorations reads better than a single one. Make them SQUARE, about 400x400 — the
+        tile is square, and a picture that is not is letterboxed inside it with bars down two sides.
+        No need to add your own margin: the tile already insets the picture.
       </p>
     </div>
   );
