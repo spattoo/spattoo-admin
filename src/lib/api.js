@@ -109,10 +109,21 @@ export async function createElementCategory(name) {
   return post('/api/admin/element-categories', { name });
 }
 
-// Rename, reorder, retire. No delete: the FK is ON DELETE SET NULL, so removing a category would
-// silently strip it off every element it held with no way back.
+// Rename, reorder, retire, re-picture. No delete: the FK is ON DELETE SET NULL, so removing a
+// category would silently strip it off every element it held with no way back.
+//
+// `thumb_key: null` CLEARS the category's own picture and returns it to borrowing an element's
+// thumbnail. That is a real edit, so it must reach the server as an explicit null rather than being
+// dropped as "nothing to change" — see the route, which distinguishes absent from null.
 export async function updateElementCategory(id, fields) {
   return patch(`/api/admin/element-categories/${id}`, fields);
+}
+
+// A category's own menu picture — typically a hand-made collage of a few of its decorations. Its own
+// folder (migration 068), so a category picture is never mistaken for an element's thumbnail when
+// somebody is reading the bucket.
+export async function uploadCategoryThumbnail(file) {
+  return uploadAsset('categories/thumbnails', file);
 }
 
 // ── Cake textures (cream finish/style config) ──────────────────────────────────

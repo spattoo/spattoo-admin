@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { fetchAdminElementCategories, createElementCategory, updateElementCategory } from '../lib/api.js';
+import { useState, useEffect, useRef } from 'react';
+import { fetchAdminElementCategories, createElementCategory, updateElementCategory, uploadCategoryThumbnail } from '../lib/api.js';
 
 // ── Element categories — the customer's decorations menu, in order ─────────────────────────────
 //
@@ -17,8 +17,19 @@ import { fetchAdminElementCategories, createElementCategory, updateElementCatego
 //   it back restores the memberships. There is no delete, deliberately: the FK is ON DELETE SET
 //   NULL, so deleting would quietly strip the category off every element it held, with no way back.
 //
+//   PICTURE. What the customer sees above the name in the decorations menu, because people recognise
+//   a lion faster than they read "Animals". Uploaded here — typically a collage of a few of the
+//   category's decorations, which says what is inside better than any one of them can.
+//
 // The COUNT is why retiring is safe to offer. It answers "how many decorations would this strand?"
 // at the moment you are deciding.
+//
+// ── Two kinds of picture, and the screen must not blur them ─────────────────────────────────────
+// A category with no picture of its own BORROWS one: the menu falls back to the first decoration in
+// it that has a thumbnail, so a category is never a blank square and nothing has to be made before a
+// category can exist. That is why the tile below shows the borrowed image faded, with "borrowed"
+// under it. Showing it the same as an uploaded one would leave the screen unable to answer the
+// question it exists to answer — which categories still need a picture of their own.
 
 const s = {
   wrap:   { padding: 24, maxWidth: 720, margin: '0 auto', fontFamily: "'Quicksand', sans-serif" },
@@ -42,7 +53,62 @@ const s = {
   err:    { background: '#FEF3F2', border: '1px solid #FECDCA', color: '#B42318', borderRadius: 10,
             padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 14 },
   hint:   { fontSize: 12, color: '#8aa091', marginTop: 16, lineHeight: 1.5 },
+  // The tile is square because the menu renders it square — judging a collage in a different shape
+  // from the one customers see is how a picture gets approved here and looks cropped there.
+  thumb:  (own) => ({
+    width: 46, height: 46, borderRadius: 8, flexShrink: 0, cursor: 'pointer', padding: 0,
+    border: own ? '1.5px solid #C5D4C8' : '1.5px dashed #C5D4C8',
+    background: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', position: 'relative',
+  }),
+  thumbImg: (own) => ({ width: '100%', height: '100%', objectFit: 'cover', opacity: own ? 1 : 0.4 }),
+  thumbNote: { fontSize: 8.5, fontWeight: 800, color: '#8aa091', textAlign: 'center',
+               letterSpacing: 0.2, marginTop: 2, minHeight: 11 },
+  thumbCol: { display: 'flex', flexDirection: 'column', alignItems: 'center', width: 52, flexShrink: 0 },
+  clear:  { background: 'none', border: 'none', padding: 0, fontSize: 9, fontWeight: 700,
+            color: '#B42318', cursor: 'pointer', fontFamily: 'inherit' },
 };
+
+// The picture tile: what a customer sees above this category's name, and whether it is the
+// category's own or one it is borrowing from a decoration inside it. A hidden file input rather than
+// a visible one — the tile IS the control, and a bare "Choose file" next to a picture reads as a
+// second, unrelated thing.
+function CategoryPicture({ cat, busy, onPick, onClear }) {
+  const fileRef = useRef(null);
+  const own = !!cat.thumbnail_url;
+  const src = cat.thumbnail_url || cat.borrowed_url;
+
+  return (
+    <div style={s.thumbCol}>
+      <button
+        style={s.thumb(own)}
+        disabled={busy}
+        onClick={() => fileRef.current?.click()}
+        title={own ? 'Replace this category’s picture' : 'Upload a picture for this category'}>
+        {src
+          ? <img src={src} alt="" style={s.thumbImg(own)} loading="lazy" decoding="async" />
+          : <span style={{ fontSize: 16, color: '#C5D4C8', fontWeight: 800 }}>+</span>}
+      </button>
+      <input
+        ref={fileRef} type="file"
+        // The raster types signUpload will actually sign — NOT `image/*`. SVG is excluded on purpose
+        // server-side (it executes script from our own asset origin), so accepting it here would let
+        // someone pick a file, wait for an upload, and be told no at the end. Refuse it at the pick.
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        style={{ display: 'none' }}
+        onChange={e => {
+          onPick(e.target.files?.[0]);
+          // Reset, or picking the SAME file twice after a failure fires no change event and the
+          // retry silently does nothing.
+          e.target.value = '';
+        }}
+      />
+      {own
+        ? <button style={s.clear} disabled={busy} onClick={onClear} title="Go back to borrowing a decoration’s picture">remove</button>
+        : <span style={s.thumbNote}>{src ? 'borrowed' : 'no picture'}</span>}
+    </div>
+  );
+}
 
 export default function ElementCategories() {
   const [cats, setCats]   = useState([]);
@@ -66,6 +132,33 @@ export default function ElementCategories() {
   async function save(id, fields) {
     try { await updateElementCategory(id, fields); }
     catch (e) { setError(e.message); load(); }   // reload so the screen stops showing what did not save
+  }
+
+  // Upload, then point the category at it. Two steps that must both land: the picture reaches R2
+  // first and the row is updated second, so a failed PATCH leaves an orphaned object rather than a
+  // category pointing at nothing. That is the right way round — a stray file costs storage, a
+  // dangling key costs the customer a broken image in the menu.
+  async function pickPicture(cat, file) {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const key = await uploadCategoryThumbnail(file);
+      const saved = await updateElementCategory(cat.id, { thumb_key: key });
+      patchLocal(cat.id, { thumb_key: key, thumbnail_url: saved.thumbnail_url });
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  // Clearing returns the category to the borrowed thumbnail — it does not leave it blank, which is
+  // why this is offered without a confirmation. `null` must reach the server as an explicit null.
+  async function clearPicture(cat) {
+    setBusy(true);
+    try {
+      await updateElementCategory(cat.id, { thumb_key: null });
+      patchLocal(cat.id, { thumb_key: null, thumbnail_url: null });
+    } catch (e) { setError(e.message); load(); }
+    finally { setBusy(false); }
   }
 
   // Reorder by SWAPPING sort_order with the neighbour, rather than renumbering the list. Two writes
@@ -117,6 +210,8 @@ export default function ElementCategories() {
             <button style={s.arrow(i === cats.length - 1)} disabled={i === cats.length - 1 || busy} onClick={() => move(i, 1)} title="Move down">↓</button>
           </div>
 
+          <CategoryPicture cat={c} busy={busy} onPick={f => pickPicture(c, f)} onClear={() => clearPicture(c)} />
+
           <input
             style={s.input}
             value={c.name}
@@ -155,6 +250,13 @@ export default function ElementCategories() {
         Retiring hides a category from customers but keeps every element in it, so restoring brings
         them all back. Categories cannot be deleted: that would strip the category off the
         decorations it holds, with no way to undo it.
+      </p>
+      <p style={s.hint}>
+        The square is the picture customers see above the category name. A faded one is BORROWED —
+        the first decoration in the category that has a thumbnail — so a category always shows
+        something even before you give it a picture of its own. Click to upload one; a collage of a
+        few of its decorations reads better than a single one. Square images, please: the menu
+        renders them square and anything else gets cropped to fit.
       </p>
     </div>
   );
