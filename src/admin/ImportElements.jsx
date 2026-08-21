@@ -124,7 +124,12 @@ export default function ImportElements() {
           )}
           <Row k="Tag links"     v={plan.element_tags.rows} />
           <Row k="Craft guides"  v={plan.element_craft_guide.rows} />
-          <Row k="Assets to copy" v={plan.assets.count} />
+          {/* `copy` is absent from a plan an older backend produced — fall back to the total
+              rather than rendering "undefined to copy". */}
+          <Row k="Assets to copy" v={plan.assets.copy ?? plan.assets.count} />
+          {plan.assets.present > 0 && (
+            <Row k="Already here" v={`${plan.assets.present} skipped`} />
+          )}
         </div>
       )}
 
@@ -132,7 +137,7 @@ export default function ImportElements() {
         <div style={s.card}>
           <div style={s.cardTitle}>{result.ok ? 'Imported' : 'Finished with problems'}</div>
           <Row k="Elements" v={`${result.plan.elements.create} new, ${result.plan.elements.update} updated`} />
-          <Row k="Assets" v={result.plan.assets.count} />
+          <Row k="Assets" v={`${result.plan.assets.copy ?? result.plan.assets.count} copied, ${result.plan.assets.present ?? 0} already here`} />
           {result.assetErrors?.length > 0 && (
             <div style={s.warn}>
               {result.assetErrors.length} asset(s) failed to copy. The rows are in place but those
