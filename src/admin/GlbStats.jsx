@@ -86,11 +86,19 @@ export function GlbBudgetRows({ capEval }) {
           </div>
         ))}
       </div>
+      {/* ⚠️ "Allowed, just flagged" is true a little over budget and MISLEADING a long way over.
+          A model at 250× the triangle cap is not a judgement call about detail — it is past what a
+          graphics card will draw, and the admin sees an empty viewport with no explanation. So the
+          verdict changes tone once it is hopeless, and says the one thing that actually helps: the
+          optimizer works from the pristine geometry and does not need the preview. */}
       <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 11.5, fontWeight: 700,
-        background: capEval.anyOver ? '#FFF6E5' : '#E8F5E9', color: capEval.anyOver ? '#8a6d1a' : '#2E7D32' }}>
-        {capEval.anyOver
-          ? `Over the ${capEval.capLabel} budget on phones. Optimize below, or keep it if this piece truly needs the detail — it's allowed, just flagged.`
-          : `Within the ${capEval.capLabel} budget. Good to go.`}
+        background: capEval.wayOver ? '#FFECEC' : capEval.anyOver ? '#FFF6E5' : '#E8F5E9',
+        color: capEval.wayOver ? '#8A2C1D' : capEval.anyOver ? '#8a6d1a' : '#2E7D32' }}>
+        {capEval.wayOver
+          ? `Far over the ${capEval.capLabel} budget — around ${capEval.worstRatio}× the cap. At this size the preview may not draw at all, and the model would not load on a phone. Optimize below first; it works from the original geometry, so it does not need the preview.`
+          : capEval.anyOver
+            ? `Over the ${capEval.capLabel} budget on phones. Optimize below, or keep it if this piece truly needs the detail — it's allowed, just flagged.`
+            : `Within the ${capEval.capLabel} budget. Good to go.`}
       </div>
     </>
   );

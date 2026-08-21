@@ -30,6 +30,10 @@ import { ZONE_LIST as ZONES } from '../lib/constants.js';
 // a relief cut perpendicular to flat.normal (the "front" set from the camera) —
 // then (2) smoothing via toCreasedNormals (0 = faceted → 1 = fully smooth). UVs
 // are preserved, so a textured model keeps its texture. Fully reversible.
+// Above this, creasing costs more than it can possibly be worth — see the note in applyGeometry.
+// 300k is well past anything a cake topper needs and well short of where the expansion hurts.
+const CREASE_MAX_TRIS = 300000;
+
 function applyGeometry(root, flat, smooth, flattenSet) {
   root.updateMatrixWorld(true);
   const n = new THREE.Vector3(flat.normal[0], flat.normal[1], flat.normal[2]);
@@ -68,7 +72,25 @@ function applyGeometry(root, flat, smooth, flattenSet) {
       }
       g.attributes.position.needsUpdate = true;
     }
-    const sg = toCreasedNormals(g, creaseAngle); // preserves uv (toNonIndexed)
+    // ⚠️ SKIP CREASING ON VERY DENSE MESHES. toCreasedNormals() calls toNonIndexed()
+    // internally, which expands the shared index into three unique vertices per triangle.
+    // Measured on a 3.14M-triangle scan: 84 MB indexed → 287 MB non-indexed (3.4×), taking
+    // 7.3 seconds of blocking main thread — and that is ONE mesh, rebuilt again on every
+    // flatten or smooth change. Two such meshes put ~575 MB of vertex buffers on the GPU,
+    // which is where the model stops appearing at all.
+    //
+    // Nothing is lost by skipping it. Creasing decides which edges look sharp, and at this
+    // density every face is smaller than a pixel — the crease angle has no visible effect.
+    // Below the threshold the behaviour is exactly as before.
+    let sg;
+    if (triCount(g) > CREASE_MAX_TRIS) {
+      sg = g;                                    // keep it indexed
+      // Flattening moved the vertices, so the normals that came with the file are stale.
+      if (flat.enabled && inSet(o)) sg.computeVertexNormals();
+      else if (!sg.attributes.normal) sg.computeVertexNormals();
+    } else {
+      sg = toCreasedNormals(g, creaseAngle);     // preserves uv (toNonIndexed)
+    }
     sg.computeBoundingBox();
     sg.computeBoundingSphere();
     if (o.geometry && o.geometry !== o.userData._origGeo) o.geometry.dispose();
@@ -443,13 +465,38 @@ function bakeVertexColors(root, pieceId) {
 }
 
 function ModelView({ root, selectedObj, onPickPiece, showCake, placement, ambientInt, keyInt, fillInt, envPreset, containerRef, onReady, height = 360 }) {
+  // ⚠️ A LOST CONTEXT MUST SAY SO. When a model is too big for the GPU, WebGL drops the context and
+  // the canvas simply stops drawing — no error, no console message, just an empty box. The admin is
+  // then looking at a blank viewport with a perfectly healthy-looking panel beside it, with nothing
+  // to suggest the problem is size rather than a broken file. That is the exact report this handler
+  // exists to answer.
+  const [lost, setLost] = useState(false);
+  const onCreated = ({ gl }) => {
+    const c = gl.domElement;
+    c.addEventListener('webglcontextlost', e => { e.preventDefault(); setLost(true); });
+    c.addEventListener('webglcontextrestored', () => setLost(false));
+  };
   return (
-    <div ref={containerRef} style={{ height, borderRadius: 12, overflow: 'hidden', background: '#E8EDE9' }}>
-      <Canvas gl={{ preserveDrawingBuffer: true, alpha: true }} camera={{ position: [0, 0.5, 3], fov: 40 }}>
+    <div ref={containerRef} style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: '#E8EDE9' }}>
+      <Canvas gl={{ preserveDrawingBuffer: true, alpha: true }} camera={{ position: [0, 0.5, 3], fov: 40 }}
+        onCreated={onCreated}>
         <Stage root={root} selectedObj={selectedObj} onPickPiece={onPickPiece} showCake={showCake} placement={placement}
           ambientInt={ambientInt} keyInt={keyInt} fillInt={fillInt} envPreset={envPreset} />
         <CameraRelay onReady={onReady} />
       </Canvas>
+      {lost && (
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center',
+                      padding: 24, background: 'rgba(232,237,233,0.96)' }}>
+          <div>
+            <div style={{ fontWeight: 800, color: '#8A2C1D', marginBottom: 6 }}>The 3D view ran out of memory</div>
+            <div style={{ fontSize: 13, color: '#3D5A44', lineHeight: 1.5, maxWidth: 340 }}>
+              This model is too heavy for the graphics card to draw. It is still loaded and still
+              measured — <b>Optimize below works without the preview</b>, and the view comes back once
+              the triangle count is down. Reload the page if it stays blank after optimizing.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
