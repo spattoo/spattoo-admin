@@ -600,6 +600,13 @@ export default function ManageTemplates() {
                       <span style={s.badge(t.owner_name ? 'neutral' : 'green')}>
                         {t.owner_name ?? 'catalogue'}
                       </span>
+                      {/* This bakery authors the catalogue, so its templates can be published. A
+                          property of the BAKERY rather than of this template, which is why it reads
+                          as a second badge beside the name instead of changing the name's colour —
+                          "31 Bakers, who is an author" rather than a different kind of owner.
+                          Quiet grey: it explains why the button below is here, and is not itself a
+                          state of the template. */}
+                      {t.can_publish && <span style={s.badge()}>author</span>}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
