@@ -483,28 +483,24 @@ export default function ManageTemplates() {
     }
   }
 
-  // Copy a bakery's template into the catalogue. A COPY: the bakery keeps its own row, so a later
-  // edit to the catalogue version cannot rewrite what they see.
+  // Move a bakery's template into the catalogue. A MOVE: the same row, with baker_id cleared, so it
+  // leaves that bakery's library and becomes everyone's. Only ever one of our own bakeries — the
+  // route refuses anyone else, whatever this screen chooses to show.
   //
-  // The interesting failure is 409 — the design uses decorations that belong to that bakery, which
-  // every other bakery would fail to resolve. It renders anyway (the designer tolerates a missing
-  // catalogue row) with caps and clustering silently gone, so the route refuses and names them.
+  // The failure worth handling is 409: the design uses decorations belonging to that bakery, which
+  // no other bakery could resolve. It renders anyway (the designer tolerates a missing catalogue
+  // row) with caps and clustering silently gone, so the route refuses and names them.
   async function handlePublish(t) {
-    // Says what will happen to BOTH rows. "Publish" on its own does not suggest the bakery's copy is
-    // about to be deactivated, and a template disappearing from a studio should never be a surprise.
+    // Says that the template LEAVES the bakery's library. "Publish" alone reads as additive, and
+    // this is not — their row is the row that moves.
     if (!window.confirm(
-      `Copy "${t.name}" into the catalogue?\n\n`
-      + `${t.owner_name}'s own copy is deactivated so the same cake does not appear twice in their `
-      + `studio — it stays here and can be reactivated.`
+      `Move "${t.name}" into the catalogue?\n\n`
+      + `It leaves ${t.owner_name}'s library and becomes available to every bakery.`
     )) return;
     setPublishing(t.id);
     try {
-      const r = await publishTemplate(t.id);
-      setMsg({
-        ok: true,
-        text: r?.warning
-          ?? `"${t.name}" is in the catalogue${r?.deactivated_source ? `, and ${t.owner_name}'s copy is now inactive` : ''}.`,
-      });
+      await publishTemplate(t.id);
+      setMsg({ ok: true, text: `"${t.name}" is now a catalogue template.` });
       await load();
     } catch (e) {
       const names = e?.private_elements?.map(x => x.name).join(', ');
@@ -615,7 +611,7 @@ export default function ManageTemplates() {
                         route refuses it too, because a hidden button is not a rule. */}
                     {t.can_publish && (
                       <button style={s.btn('secondary')} disabled={publishing === t.id}
-                        title="Copy this into the catalogue, leaving the bakery's own copy alone"
+                        title="Move this into the catalogue — it leaves the bakery's library"
                         onClick={() => handlePublish(t)}>
                         {publishing === t.id ? 'Publishing…' : 'Publish to catalogue'}
                       </button>

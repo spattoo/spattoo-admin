@@ -310,9 +310,10 @@ export async function importElements(bundle, { dryRun = false } = {}) {
 // Templates carry their referenced ELEMENTS with them — a design embeds elementId, and a template
 // whose elements are absent renders correctly and misbehaves quietly. Same bundle format as the
 // element export, with the template rows added, so one import screen receives both.
-// Copy a bakery's template into the global catalogue. A COPY — the bakery keeps its own row.
-// Refused unless that bakery is flagged is_catalog_author (migration 070), which is what keeps other
-// bakers' work theirs, and what makes this dev-only without an environment check.
+// Move a bakery's template into the global catalogue — the same row, with baker_id cleared, so it
+// leaves that bakery's library. Refused unless that bakery is flagged is_catalog_author (migration
+// 070), which is what keeps other bakers' work theirs, and what makes this dev-only without an
+// environment check.
 export async function publishTemplate(id) {
   return post(`/api/admin/templates/${id}/publish`, {});
 }
