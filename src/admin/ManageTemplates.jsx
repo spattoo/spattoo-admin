@@ -3,7 +3,8 @@ import { Canvas } from '@react-three/fiber';
 import { useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, saveTemplateTags, saveTemplateAttrs, exportTemplates } from '../lib/api.js';
+import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
+} from '../lib/api.js';
 
 const SHAPES = [
   { value: 'round',      label: 'Round' },
@@ -64,30 +65,6 @@ function CakeTier({ shape, scale, yCenter, color }) {
   const h       = shapeHeight(shape);
   const topY    = isHeart ? yCenter + h : yCenter + h / 2;
   const col     = color || '#F5E6C8';
-  async function handleExport() {
-    if (!picked.size) return;
-    setExporting(true);
-    try {
-      const bundle = await exportTemplates([...picked]);
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `templates-${new Date().toISOString().slice(0, 10)}-${bundle.cake_templates.length}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      // The element count is the number worth showing: a template bundle carries the elements its
-      // design references, so it is routinely far larger than the templates ticked — and those
-      // elements are what stops the templates misbehaving silently at the other end.
-      setMsg({ ok: true, text:
-        `Exported ${bundle.cake_templates.length} template(s) — plus ${bundle.elements.length} element(s), ` +
-        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s). Import under Elements → Import Elements.` });
-    } catch (e) {
-      setMsg({ ok: false, text: e?.message ?? 'Export failed' });
-    } finally {
-      setExporting(false);
-    }
-  }
 
   return (
     <group
@@ -214,10 +191,6 @@ const s = {
 const DEFAULT_TIER_COLOR = '#fefbea';
 
 function TemplateForm({ onSaved, onCancel }) {
-  // Picked for export — separate from anything the editor holds, for the same reason as elements:
-  // ticking a template is not opening it.
-  const [picked, setPicked]           = useState(() => new Set());
-  const [exporting, setExporting]     = useState(false);
   const [name, setName]               = useState('');
   const [shape, setShape]             = useState('round');
   const [tierCount, setTierCount]     = useState(1);
@@ -452,6 +425,17 @@ function TemplateForm({ onSaved, onCancel }) {
 
 export default function ManageTemplates() {
   const [templates, setTemplates] = useState([]);
+  // Picked for export — separate from anything the editor holds, for the same reason as elements:
+  // ticking a template is not opening it.
+  //
+  // ⚠️ These, and handleExport below, were declared in OTHER COMPONENTS: the state in TemplateForm
+  // and the handler inside CakeTier, a three.js mesh 200 lines above. Only the JSX landed here, so
+  // every render threw "picked is not defined" and the screen showed the error boundary. Neither
+  // misplacement is visible when reading either half on its own — a `useState` looks at home at the
+  // top of any component, which is why the anchor a patch attaches to matters more than the patch.
+  const [picked, setPicked]       = useState(() => new Set());
+  const [exporting, setExporting] = useState(false);
+  const [publishing, setPublishing] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [showForm, setShowForm]   = useState(false);
   const [msg, setMsg]             = useState(null);
@@ -463,6 +447,31 @@ export default function ManageTemplates() {
     finally { setLoading(false); }
   }
 
+  async function handleExport() {
+    if (!picked.size) return;
+    setExporting(true);
+    try {
+      const bundle = await exportTemplates([...picked]);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `templates-${new Date().toISOString().slice(0, 10)}-${bundle.cake_templates.length}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      // The element count is the number worth showing: a template bundle carries the elements its
+      // design references, so it is routinely far larger than the templates ticked — and those
+      // elements are what stops the templates misbehaving silently at the other end.
+      setMsg({ ok: true, text:
+        `Exported ${bundle.cake_templates.length} template(s) — plus ${bundle.elements.length} element(s), ` +
+        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s). Import under Elements → Import Elements.` });
+    } catch (e) {
+      setMsg({ ok: false, text: e?.message ?? 'Export failed' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
   useEffect(() => { load(); }, []);
 
   async function toggleActive(t) {
@@ -471,6 +480,33 @@ export default function ManageTemplates() {
       setTemplates(prev => prev.map(x => x.id === t.id ? { ...x, is_active: !x.is_active } : x));
     } catch (err) {
       setMsg({ ok: false, text: err.message });
+    }
+  }
+
+  // Move a bakery's template into the catalogue. A MOVE: the same row, with baker_id cleared, so it
+  // leaves that bakery's library and becomes everyone's. Only ever one of our own bakeries — the
+  // route refuses anyone else, whatever this screen chooses to show.
+  //
+  // The failure worth handling is 409: the design uses decorations belonging to that bakery, which
+  // no other bakery could resolve. It renders anyway (the designer tolerates a missing catalogue
+  // row) with caps and clustering silently gone, so the route refuses and names them.
+  async function handlePublish(t) {
+    // Says that the template LEAVES the bakery's library. "Publish" alone reads as additive, and
+    // this is not — their row is the row that moves.
+    if (!window.confirm(
+      `Move "${t.name}" into the catalogue?\n\n`
+      + `It leaves ${t.owner_name}'s library and becomes available to every bakery.`
+    )) return;
+    setPublishing(t.id);
+    try {
+      await publishTemplate(t.id);
+      setMsg({ ok: true, text: `"${t.name}" is now a catalogue template.` });
+      await load();
+    } catch (e) {
+      const names = e?.private_elements?.map(x => x.name).join(', ');
+      setMsg({ ok: false, text: names ? `${e.message} — ${names}` : (e?.message ?? 'Publish failed') });
+    } finally {
+      setPublishing(null);
     }
   }
 
@@ -557,12 +593,36 @@ export default function ManageTemplates() {
                       ))}
                       <span style={s.badge('green')}>{t.type}</span>
                       <span style={s.badge(t.is_active ? 'green' : 'red')}>{t.is_active ? 'Active' : 'Inactive'}</span>
+                      {/* WHOSE this is. The screen lists every bakery's templates, and two things
+                          here work only on catalogue rows — Export takes global templates only, and
+                          Publish is what makes one. Without the owner on the card both are offered
+                          on rows that cannot do them, and the answer arrives as a 404. */}
+                      <span style={s.badge(t.owner_name ? 'neutral' : 'green')}>
+                        {t.owner_name ?? 'catalogue'}
+                      </span>
+                      {/* This bakery authors the catalogue, so its templates can be published. A
+                          property of the BAKERY rather than of this template, which is why it reads
+                          as a second badge beside the name instead of changing the name's colour —
+                          "31 Bakers, who is an author" rather than a different kind of owner.
+                          Quiet grey: it explains why the button below is here, and is not itself a
+                          state of the template. */}
+                      {t.can_publish && <span style={s.badge()}>author</span>}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button style={s.btn('secondary')} onClick={() => toggleActive(t)}>
                       {t.is_active ? 'Deactivate' : 'Activate'}
                     </button>
+                    {/* Only for a bakery that authors the catalogue (migration 070). Every other
+                        baker's template is their own work, so the button is not offered — and the
+                        route refuses it too, because a hidden button is not a rule. */}
+                    {t.can_publish && (
+                      <button style={s.btn('secondary')} disabled={publishing === t.id}
+                        title="Move this into the catalogue — it leaves the bakery's library"
+                        onClick={() => handlePublish(t)}>
+                        {publishing === t.id ? 'Publishing…' : 'Publish to catalogue'}
+                      </button>
+                    )}
                     <button
                       style={{ ...s.btn('secondary'), color: '#c00', background: '#fdecea' }}
                       onClick={() => handleDelete(t)}

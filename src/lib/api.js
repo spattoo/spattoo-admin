@@ -109,10 +109,33 @@ export async function createElementCategory(name) {
   return post('/api/admin/element-categories', { name });
 }
 
-// Rename, reorder, retire. No delete: the FK is ON DELETE SET NULL, so removing a category would
-// silently strip it off every element it held with no way back.
+// Rename, reorder, retire, re-picture. No delete: the FK is ON DELETE SET NULL, so removing a
+// category would silently strip it off every element it held with no way back.
+//
+// `thumb_key: null` CLEARS the category's own picture and returns it to borrowing an element's
+// thumbnail. That is a real edit, so it must reach the server as an explicit null rather than being
+// dropped as "nothing to change" — see the route, which distinguishes absent from null.
 export async function updateElementCategory(id, fields) {
   return patch(`/api/admin/element-categories/${id}`, fields);
+}
+
+// A category's own menu picture — typically a hand-made collage of a few of its decorations. Its own
+// folder (migration 068), so a category picture is never mistaken for an element's thumbnail when
+// somebody is reading the bucket.
+//
+// Through uploadThumbnail, NOT uploadAsset: this is a thumbnail, and that function is the one place
+// thumbnail uploads pick their format. It re-encodes to WebP with the alpha kept, and derives the
+// extension, the content-type signed into the URL and the PUT header from the encoded blob so the
+// three can never disagree. Uploading the raw file instead — which this did at first — put a 900KB
+// PNG in a menu that loads all eleven categories at once, and did it in a format nothing else here
+// uses.
+//
+// Background is deliberately NOT removed. An element gets that because a photographed decal has to be
+// cut out; a category picture is a collage somebody composed, and its background is part of the
+// composition. It is also a paid call. If one does need cutting out, admin already has a screen for
+// it (BackgroundRemover) — better than spending credits on every upload for the rare case.
+export async function uploadCategoryThumbnail(file) {
+  return uploadThumbnail('categories/thumbnails', file);
 }
 
 // ── Cake textures (cream finish/style config) ──────────────────────────────────
@@ -287,6 +310,14 @@ export async function importElements(bundle, { dryRun = false } = {}) {
 // Templates carry their referenced ELEMENTS with them — a design embeds elementId, and a template
 // whose elements are absent renders correctly and misbehaves quietly. Same bundle format as the
 // element export, with the template rows added, so one import screen receives both.
+// Move a bakery's template into the global catalogue — the same row, with baker_id cleared, so it
+// leaves that bakery's library. Refused unless that bakery is flagged is_catalog_author (migration
+// 070), which is what keeps other bakers' work theirs, and what makes this dev-only without an
+// environment check.
+export async function publishTemplate(id) {
+  return post(`/api/admin/templates/${id}/publish`, {});
+}
+
 export async function exportTemplates(ids) {
   return get(`/api/admin/templates/export?ids=${ids.map(encodeURIComponent).join(',')}`);
 }

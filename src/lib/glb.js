@@ -77,8 +77,17 @@ export function evaluateCaps({ tris, textureMaxDim, decodedMemKB: decoded, sizeK
     { key: 'textureMaxDim', label: 'Texture max',  value: textureMaxDim, cap: cap.textureMaxDim, unit: 'px' },
   ];
   if (sizeKB != null) rows.push({ key: 'sizeKB', label: 'GLB size', value: sizeKB, cap: cap.sizeKB, unit: 'KB' });
-  rows.forEach(r => { r.over = r.value > r.cap; });
-  return { assetClass, capLabel: cap.label, rows, anyOver: rows.some(r => r.over) };
+  rows.forEach(r => { r.over = r.value > r.cap; r.ratio = r.cap ? (r.value ?? 0) / r.cap : 0; });
+  // How far over the worst metric is. A little over is a judgement call about detail; an order of
+  // magnitude over is a different situation entirely — past what a graphics card will draw, so the
+  // preview goes blank and the verdict line has to stop saying "it's allowed, just flagged".
+  const worstRatio = Math.max(0, ...rows.map(r => r.ratio));
+  return {
+    assetClass, capLabel: cap.label, rows,
+    anyOver: rows.some(r => r.over),
+    worstRatio: worstRatio >= 10 ? Math.round(worstRatio) : Math.round(worstRatio * 10) / 10,
+    wayOver: worstRatio >= 10,
+  };
 }
 
 // Human-friendly size: KB under 1 MB, else MB with one decimal.
