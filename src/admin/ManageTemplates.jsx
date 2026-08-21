@@ -3,7 +3,8 @@ import { Canvas } from '@react-three/fiber';
 import { useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, saveTemplateTags, saveTemplateAttrs, exportTemplates } from '../lib/api.js';
+import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
+} from '../lib/api.js';
 
 const SHAPES = [
   { value: 'round',      label: 'Round' },
@@ -434,6 +435,7 @@ export default function ManageTemplates() {
   // top of any component, which is why the anchor a patch attaches to matters more than the patch.
   const [picked, setPicked]       = useState(() => new Set());
   const [exporting, setExporting] = useState(false);
+  const [publishing, setPublishing] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [showForm, setShowForm]   = useState(false);
   const [msg, setMsg]             = useState(null);
@@ -478,6 +480,27 @@ export default function ManageTemplates() {
       setTemplates(prev => prev.map(x => x.id === t.id ? { ...x, is_active: !x.is_active } : x));
     } catch (err) {
       setMsg({ ok: false, text: err.message });
+    }
+  }
+
+  // Copy a bakery's template into the catalogue. A COPY: the bakery keeps its own row, so a later
+  // edit to the catalogue version cannot rewrite what they see.
+  //
+  // The interesting failure is 409 — the design uses decorations that belong to that bakery, which
+  // every other bakery would fail to resolve. It renders anyway (the designer tolerates a missing
+  // catalogue row) with caps and clustering silently gone, so the route refuses and names them.
+  async function handlePublish(t) {
+    if (!window.confirm(`Copy "${t.name}" into the catalogue? ${t.owner_name} keeps their own copy.`)) return;
+    setPublishing(t.id);
+    try {
+      await publishTemplate(t.id);
+      setMsg({ ok: true, text: `"${t.name}" is in the catalogue. ${t.owner_name} still has theirs.` });
+      await load();
+    } catch (e) {
+      const names = e?.private_elements?.map(x => x.name).join(', ');
+      setMsg({ ok: false, text: names ? `${e.message} — ${names}` : (e?.message ?? 'Publish failed') });
+    } finally {
+      setPublishing(null);
     }
   }
 
@@ -564,12 +587,29 @@ export default function ManageTemplates() {
                       ))}
                       <span style={s.badge('green')}>{t.type}</span>
                       <span style={s.badge(t.is_active ? 'green' : 'red')}>{t.is_active ? 'Active' : 'Inactive'}</span>
+                      {/* WHOSE this is. The screen lists every bakery's templates, and two things
+                          here work only on catalogue rows — Export takes global templates only, and
+                          Publish is what makes one. Without the owner on the card both are offered
+                          on rows that cannot do them, and the answer arrives as a 404. */}
+                      <span style={s.badge(t.owner_name ? 'neutral' : 'green')}>
+                        {t.owner_name ?? 'catalogue'}
+                      </span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button style={s.btn('secondary')} onClick={() => toggleActive(t)}>
                       {t.is_active ? 'Deactivate' : 'Activate'}
                     </button>
+                    {/* Only for a bakery that authors the catalogue (migration 070). Every other
+                        baker's template is their own work, so the button is not offered — and the
+                        route refuses it too, because a hidden button is not a rule. */}
+                    {t.can_publish && (
+                      <button style={s.btn('secondary')} disabled={publishing === t.id}
+                        title="Copy this into the catalogue, leaving the bakery's own copy alone"
+                        onClick={() => handlePublish(t)}>
+                        {publishing === t.id ? 'Publishing…' : 'Publish to catalogue'}
+                      </button>
+                    )}
                     <button
                       style={{ ...s.btn('secondary'), color: '#c00', background: '#fdecea' }}
                       onClick={() => handleDelete(t)}
