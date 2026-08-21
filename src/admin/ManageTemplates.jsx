@@ -490,11 +490,21 @@ export default function ManageTemplates() {
   // every other bakery would fail to resolve. It renders anyway (the designer tolerates a missing
   // catalogue row) with caps and clustering silently gone, so the route refuses and names them.
   async function handlePublish(t) {
-    if (!window.confirm(`Copy "${t.name}" into the catalogue? ${t.owner_name} keeps their own copy.`)) return;
+    // Says what will happen to BOTH rows. "Publish" on its own does not suggest the bakery's copy is
+    // about to be deactivated, and a template disappearing from a studio should never be a surprise.
+    if (!window.confirm(
+      `Copy "${t.name}" into the catalogue?\n\n`
+      + `${t.owner_name}'s own copy is deactivated so the same cake does not appear twice in their `
+      + `studio — it stays here and can be reactivated.`
+    )) return;
     setPublishing(t.id);
     try {
-      await publishTemplate(t.id);
-      setMsg({ ok: true, text: `"${t.name}" is in the catalogue. ${t.owner_name} still has theirs.` });
+      const r = await publishTemplate(t.id);
+      setMsg({
+        ok: true,
+        text: r?.warning
+          ?? `"${t.name}" is in the catalogue${r?.deactivated_source ? `, and ${t.owner_name}'s copy is now inactive` : ''}.`,
+      });
       await load();
     } catch (e) {
       const names = e?.private_elements?.map(x => x.name).join(', ');
