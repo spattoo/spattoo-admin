@@ -30,7 +30,9 @@ export default function ImportElements() {
     reset(); setBundle(null); setFileName(file.name);
     try {
       const parsed = JSON.parse(await file.text());
-      if (parsed?.format !== 'spattoo-element-bundle') throw new Error('Not an element bundle');
+      // One format covers both kinds of export, so the message must not say "element" — it would
+      // read as "wrong screen" to somebody holding a template bundle, which is the right screen.
+      if (parsed?.format !== 'spattoo-element-bundle') throw new Error('Not a Spattoo bundle');
       setBundle(parsed);
     } catch (e2) {
       setErr(e2.message || 'Could not read that file');
@@ -65,11 +67,11 @@ export default function ImportElements() {
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>Import elements</h2>
+      <h2 style={s.h2}>Import bundle</h2>
       <p style={s.blurb}>
-        A bundle exported from another environment — elements, or templates with the elements their
-        designs reference. Rows keep their ids, and every asset it names is re-uploaded here under
-        the same key.
+        A bundle exported from another environment — elements, or templates, which arrive with the
+        elements their designs reference. Rows keep their ids, and every asset it names is
+        re-uploaded here under the same key.
       </p>
 
       <input type="file" accept="application/json,.json" onChange={onFile} style={s.file} />
