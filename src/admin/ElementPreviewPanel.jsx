@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ElementPreview } from '@spattoo/designer';
 import { fetchElementForPreview } from '../lib/api.js';
+import { zoneValueModes } from '../lib/placementSeat.js';
 
 /* ── The saved element, on a cake, as a baker will see it ────────────────────────────────────────
  *
@@ -27,6 +28,7 @@ export default function ElementPreviewPanel({ elementId, savedAt }) {
   const [el, setEl]       = useState(null);
   const [err, setErr]     = useState(null);
   const [zone, setZone]   = useState(null);
+  const [pose, setPose]   = useState(null);
   const [tiers, setTiers] = useState(1);
   const [tierIndex, setTierIndex] = useState(0);
 
@@ -37,7 +39,7 @@ export default function ElementPreviewPanel({ elementId, savedAt }) {
     if (!elementId) { setEl(null); return undefined; }
     setErr(null);
     fetchElementForPreview(elementId)
-      .then(row => { if (!cancelled) { setEl(row); setZone(null); setTierIndex(0); } })
+      .then(row => { if (!cancelled) { setEl(row); setZone(null); setPose(null); setTierIndex(0); } })
       .catch(e => { if (!cancelled) setErr(e?.message ?? 'Could not load the element'); });
     return () => { cancelled = true; };
   }, [elementId, savedAt]);
@@ -46,6 +48,10 @@ export default function ElementPreviewPanel({ elementId, savedAt }) {
 
   const zones = el?.allowed_zones ?? [];
   const shownZone = zone ?? zones[0] ?? null;
+  // The poses THIS zone offers, default first. Switching zone drops the pose back to that zone's
+  // default rather than carrying it: the poses of one surface are not the poses of another.
+  const poses = shownZone ? zoneValueModes(el?.placement_config?.[shownZone]) : [];
+  const shownPose = poses.includes(pose) ? pose : (poses[0] ?? null);
 
   return (
     <div style={s.wrap}>
@@ -65,8 +71,20 @@ export default function ElementPreviewPanel({ elementId, savedAt }) {
               <div style={s.group}>
                 <span style={s.groupLabel}>Zone</span>
                 {zones.map(z => (
-                  <button key={z} type="button" onClick={() => setZone(z)}
+                  <button key={z} type="button" onClick={() => { setZone(z); setPose(null); }}
                           style={{ ...s.chip, ...(shownZone === z ? s.chipOn : {}) }}>{z}</button>
+                ))}
+              </div>
+            )}
+            {/* A zone offering two poses (`modes`) is a PROMISE to the customer that both look
+                right, and the only way to know the second one does is to look at it. Shown only when
+                there is a choice, so a single-pose element grows no control. */}
+            {poses.length > 1 && (
+              <div style={s.group}>
+                <span style={s.groupLabel}>Pose</span>
+                {poses.map(m => (
+                  <button key={m} type="button" onClick={() => setPose(m)}
+                          style={{ ...s.chip, ...(shownPose === m ? s.chipOn : {}) }}>{m}</button>
                 ))}
               </div>
             )}
@@ -89,14 +107,18 @@ export default function ElementPreviewPanel({ elementId, savedAt }) {
 
           <div style={s.stage}>
             {el
-              ? <ElementPreview element={el} zone={shownZone} tierCount={tiers} tierIndex={tierIndex} />
+              ? <ElementPreview element={el} zone={shownZone} mode={shownPose} tierCount={tiers} tierIndex={tierIndex} />
               : <div style={s.loading}>Loading…</div>}
           </div>
 
           {el && (
             <div style={s.foot}>
-              {shownZone ?? 'no zone'} · mode{' '}
-              <b>{el.placement_config?.zones?.[shownZone]?.mode ?? el.placement_config?.mode ?? 'stand'}</b>
+              {/* Read through the same helper the renderer uses. This used to look up
+                  `placement_config.zones[zone].mode` — a path that does not exist in the schema
+                  (zones are TOP-LEVEL keys) — so it printed "stand" for every element regardless of
+                  what the element actually did. */}
+              {shownZone ?? 'no zone'} · pose <b>{shownPose ?? poses[0] ?? 'stand'}</b>
+              {poses.length > 1 && <> (of {poses.join(', ')})</>}
               {' '}· tier {tierIndex} of {tiers}
             </div>
           )}
