@@ -464,7 +464,7 @@ export default function ManageTemplates() {
       // elements are what stops the templates misbehaving silently at the other end.
       setMsg({ ok: true, text:
         `Exported ${bundle.cake_templates.length} template(s) — plus ${bundle.elements.length} element(s), ` +
-        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s). Import under Elements → Import Elements.` });
+        `${bundle.tags.length} tag(s), ${bundle.assets.length} asset(s). Import under Elements → Import Bundle.` });
     } catch (e) {
       setMsg({ ok: false, text: e?.message ?? 'Export failed' });
     } finally {

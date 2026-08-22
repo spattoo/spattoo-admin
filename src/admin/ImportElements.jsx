@@ -30,7 +30,9 @@ export default function ImportElements() {
     reset(); setBundle(null); setFileName(file.name);
     try {
       const parsed = JSON.parse(await file.text());
-      if (parsed?.format !== 'spattoo-element-bundle') throw new Error('Not an element bundle');
+      // One format covers both kinds of export, so the message must not say "element" — it would
+      // read as "wrong screen" to somebody holding a template bundle, which is the right screen.
+      if (parsed?.format !== 'spattoo-element-bundle') throw new Error('Not a Spattoo bundle');
       setBundle(parsed);
     } catch (e2) {
       setErr(e2.message || 'Could not read that file');
@@ -65,11 +67,11 @@ export default function ImportElements() {
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>Import elements</h2>
+      <h2 style={s.h2}>Import bundle</h2>
       <p style={s.blurb}>
-        A bundle exported from another environment — elements, or templates with the elements their
-        designs reference. Rows keep their ids, and every asset it names is re-uploaded here under
-        the same key.
+        A bundle exported from another environment — elements, or templates, which arrive with the
+        elements their designs reference. Rows keep their ids, and every asset it names is
+        re-uploaded here under the same key.
       </p>
 
       <input type="file" accept="application/json,.json" onChange={onFile} style={s.file} />
@@ -122,7 +124,12 @@ export default function ImportElements() {
           )}
           <Row k="Tag links"     v={plan.element_tags.rows} />
           <Row k="Craft guides"  v={plan.element_craft_guide.rows} />
-          <Row k="Assets to copy" v={plan.assets.count} />
+          {/* `copy` is absent from a plan an older backend produced — fall back to the total
+              rather than rendering "undefined to copy". */}
+          <Row k="Assets to copy" v={plan.assets.copy ?? plan.assets.count} />
+          {plan.assets.present > 0 && (
+            <Row k="Already here" v={`${plan.assets.present} skipped`} />
+          )}
         </div>
       )}
 
@@ -130,7 +137,7 @@ export default function ImportElements() {
         <div style={s.card}>
           <div style={s.cardTitle}>{result.ok ? 'Imported' : 'Finished with problems'}</div>
           <Row k="Elements" v={`${result.plan.elements.create} new, ${result.plan.elements.update} updated`} />
-          <Row k="Assets" v={result.plan.assets.count} />
+          <Row k="Assets" v={`${result.plan.assets.copy ?? result.plan.assets.count} copied, ${result.plan.assets.present ?? 0} already here`} />
           {result.assetErrors?.length > 0 && (
             <div style={s.warn}>
               {result.assetErrors.length} asset(s) failed to copy. The rows are in place but those

@@ -133,7 +133,10 @@ const NAV_GROUPS = [
   { title: 'Elements', items: [
     { href: '/elements/add',    label: 'Add Element' },
     { href: '/elements/manage', label: 'Manage Elements' },
-    { href: '/elements/import', label: 'Import Elements' },
+    // "Bundle", not "Elements": the same route takes a TEMPLATE bundle too, because a template
+    // export is an element bundle plus the templates — the cake needs its elements to exist or it
+    // renders as gaps. Named for elements, it read as the wrong door and templates looked unimportable.
+    { href: '/elements/import', label: 'Import Bundle' },
     { href: '/elements/types',  label: 'Element Types' },
     { href: '/elements/categories', label: 'Element Categories' },
     { href: '/elements/material-styles', label: 'Material → Styles' },
