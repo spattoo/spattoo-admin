@@ -14,7 +14,9 @@ export default function PlacementZoneRow({ zone, zoneLabel, mode, seat, insert, 
   const insertOn = insert != null;
   // The other pose this surface could offer, or null. Only flat surfaces, only stand <-> hug.
   const altMode = zoneAltMode(zone, mode);
-  const ALT_WORD = { stand: 'stand up', hug: 'lie flat' };
+  // "hug", the word the config and every authoring screen already use for an element laid
+  // against a surface — so the checkbox, the designer's Pose toggle and the JSON all say one thing.
+  const ALT_WORD = { stand: 'stand it up', hug: 'hug the surface' };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -35,7 +37,7 @@ export default function PlacementZoneRow({ zone, zoneLabel, mode, seat, insert, 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 110, fontSize: 12, fontWeight: 600, color: '#2C4433', cursor: 'pointer' }}
           title="The customer picks the pose per decoration. The mode above stays the default.">
           <input type="checkbox" checked={alt === altMode} onChange={e => onAltToggle(e.target.checked ? altMode : null)} />
-          Let the customer also {ALT_WORD[altMode] ?? altMode} it here
+          Let the customer also {ALT_WORD[altMode] ?? altMode} here
         </label>
       )}
       {zoneShowsFullRing(zone) && onFullRingToggle && (

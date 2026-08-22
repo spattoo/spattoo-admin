@@ -48,8 +48,8 @@ export function ringZonePrefix(zone) {
 
 // ── A zone that offers the customer a CHOICE of pose ────────────────────────────────────────────
 // Some elements read equally well two ways on the same surface: a football jersey on the cake top
-// can stand up like a topper or lie flat like a decal. Which is right is the customer's taste, not a
-// property of the jersey — so the zone names both and the designer offers the choice.
+// can stand up like a topper or hug the surface like a decal. Which is right is the customer's taste,
+// not a property of the jersey — so the zone names both and the designer offers the choice.
 //
 // Only on a FLAT surface, and only between stand and hug. A wall has one sensible pose (a jersey
 // standing edge-on out of the side of a cake is not a thing), and perch/verge are rim poses defined
