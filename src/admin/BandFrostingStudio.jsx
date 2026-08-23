@@ -93,7 +93,7 @@ const PRESETS = {
 const clamp01 = v => Math.max(0, Math.min(1, v));
 
 // ── The cake ────────────────────────────────────────────────────────────────────────────────────
-function BandedCake({ bands, topColor, showGrain }) {
+function BandedCake({ bands, topColor, grain }) {
   const wallRef = useRef();
   const matRef  = useRef();
 
@@ -154,11 +154,17 @@ function BandedCake({ bands, topColor, showGrain }) {
         <meshStandardMaterial color="#d9b44a" metalness={0.5} roughness={0.4} />
       </mesh>
 
-      <mesh ref={wallRef} position={[0, BOARD_H, 0]} geometry={wallGeo} castShadow receiveShadow>
+      {/* ⚠️ castShadow but NOT receiveShadow, and this was the "comb ripples".
+          A cylinder lit from above self-shadows against its own triangulation, and with 128×64
+          segments the acne lands as a fine diagonal moiré right across the wall. It looked for all
+          the world like a defect in the band shader — it survived turning the bands off, the wobble
+          off and the grain off, which is how it was finally cornered.
+          The wall still casts onto the board, which is the only shadow that reads anyway. */}
+      <mesh ref={wallRef} position={[0, BOARD_H, 0]} geometry={wallGeo} castShadow>
         <meshPhysicalMaterial ref={matRef} color="#ffffff" side={THREE.DoubleSide}
           {...BUTTERCREAM}
-          normalMap={showGrain ? grainMap : null}
-          normalScale={[0.5, 0.5]} />
+          normalMap={grain > 0 ? grainMap : null}
+          normalScale={[grain, grain]} />
       </mesh>
 
       {/* The top, iced separately — a single colour, as in every reference photo. */}
@@ -195,7 +201,17 @@ export default function BandFrostingStudio() {
   const [weights, setWeights] = useState(PRESETS.unicorn.weights);
   const [softness, setSoftness] = useState(PRESETS.unicorn.softness);
   const [wobble, setWobble]     = useState(PRESETS.unicorn.wobble);
-  const [showGrain, setShowGrain] = useState(true);
+  /* ⚠️ DEFAULT 0 — no grain at all.
+   *
+   * The brief was multi-colour bands. The grain was my own addition, on the reasoning that hard
+   * edges should be judged against a bumpy wall rather than a mirror — which is a fair thought and
+   * still available on the slider, but it was never asked for and it dominated the render. At 120
+   * tiles around the cake it also streaks: the horizontal detail falls far below pixel size and
+   * filtering blurs it away, leaving the vertical tiling as a fine comb across the wall.
+   *
+   * So it starts OFF and it is a dial, not a checkbox. The bands are the feature; the surface it sits
+   * on is a separate judgement, and the person making it should be the one who sets it. */
+  const [grain, setGrain] = useState(0);
   const [topFromTopBand, setTopFromTopBand] = useState(true);
   const [topColor, setTopColor] = useState('#FFFFFF');
 
@@ -272,10 +288,8 @@ export default function BandFrostingStudio() {
                     hint="How much of a band each join eats. Scaled by the THINNEST band, so it means the same thing whether there are three colours or eight." />
             <Slider label="Scraper wobble" value={wobble} onChange={setWobble}
                     hint="Real joins are not spirit-levelled. Enough of this reads as hand-iced; too much reads as a mistake." />
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, cursor: 'pointer', marginTop: 4 }}>
-              <input type="checkbox" checked={showGrain} onChange={e => setShowGrain(e.target.checked)} />
-              Frosting grain — judge hard edges against a bumpy wall, not a mirror
-            </label>
+            <Slider label="Frosting grain" value={grain} onChange={setGrain}
+                    hint="Off by default — the bands are the feature and this is only the surface under them. Dial it up to judge how hard edges hold against a textured wall; past about 0.3 the tiling starts to read as a comb across the cake." />
           </div>
 
           <div style={card}>
@@ -367,13 +381,16 @@ export default function BandFrostingStudio() {
           <Canvas gl={{ preserveDrawingBuffer: true }} shadows camera={{ position: [0, 2.6, 4.6], fov: 40 }}>
             <color attach="background" args={['#efe7ea']} />
             <ambientLight intensity={0.5} />
-            <directionalLight position={[3, 6, 4]} intensity={1.1} castShadow />
+            {/* normalBias as well as the receiveShadow removal above: belt and braces, since anything
+                added to this scene later will otherwise inherit the same acne. */}
+            <directionalLight position={[3, 6, 4]} intensity={1.1} castShadow
+                              shadow-normalBias={0.04} shadow-bias={-0.0005} />
             <Environment resolution={256}>
               <Lightformer form="ring" intensity={2.0} position={[0, 8, 1]} rotation={[-Math.PI / 2, 0, 0]} scale={[14, 14, 1]} />
               <Lightformer form="rect" intensity={2.2} position={[2.8, 3.6, 5]} scale={[2.4, 8, 1]} color="#ffffff" />
               <Lightformer form="rect" intensity={2.0} position={[-3.4, 3.6, 3.6]} scale={[2.2, 8, 1]} color="#ffffff" />
             </Environment>
-            <BandedCake bands={bands} topColor={resolvedTop} showGrain={showGrain} />
+            <BandedCake bands={bands} topColor={resolvedTop} grain={grain} />
             <OrbitControls target={[0, 0.85, 0]} enablePan={false} minDistance={2.4} maxDistance={9} />
           </Canvas>
         </div>
