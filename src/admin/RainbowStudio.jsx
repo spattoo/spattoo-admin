@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // The SAME generator the designer renders, never a divergent copy — the rule ChocolateDripStudio
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
-import { RainbowArch, rainbowBands, rainbowGuide, RAINBOW_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
 
 // ── Rainbow studio ────────────────────────────────────────────────────────────
 // Concentric fondant ropes, arching over the cake.
@@ -57,7 +57,7 @@ const PRESETS = {
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
 };
 
-function Cake({ tiers }) {
+function Cake({ tiers, boardR }) {
   const geo = useMemo(() => {
     const g = [];
     let y = BOARD_H;
@@ -71,7 +71,7 @@ function Cake({ tiers }) {
   return (
     <group>
       <mesh position={[0, BOARD_H / 2, 0]} receiveShadow>
-        <cylinderGeometry args={[BOARD_R, BOARD_R, BOARD_H, 64]} />
+        <cylinderGeometry args={[boardR, boardR, BOARD_H, 64]} />
         <meshStandardMaterial color="#d9c9a3" roughness={0.7} metalness={0.15} />
       </mesh>
       {geo.map((t, i) => (
@@ -96,6 +96,10 @@ export default function RainbowStudio() {
     return { radius: R, topY: top, boardY: BOARD_H };
   }, [tiers]);
 
+  // The board GROWS to hold the rainbow. A standard board is sized for the cake, and a leg that
+  // lands past its edge is a decoration resting on nothing — so the board answers to what is
+  // standing on it. Never shrinks: a small rainbow does not make a cake need a smaller board.
+  const boardR = useMemo(() => Math.max(BOARD_R, rainbowBoardReach(p, cake)), [p, cake]);
   const guide = useMemo(() => rainbowGuide(p, cake), [p, cake]);
   const bandCount = rainbowBands(p, cake).bands.length;
 
@@ -115,7 +119,7 @@ export default function RainbowStudio() {
           <color attach="background" args={['#eceaf3']} />
           <SceneLights />
           <SceneEnv />
-          <Cake tiers={tiers} />
+          <Cake tiers={tiers} boardR={boardR} />
           <RainbowArch params={p} cake={cake} />
           <OrbitControls target={[0, cake.topY * 0.6, 0]} enablePan={false} />
         </Canvas>
@@ -144,7 +148,11 @@ export default function RainbowStudio() {
         </div>
 
         <div style={s.group}>
-          <span style={s.groupLbl}>Cake</span>
+          <span style={s.groupLbl}>
+            Cake · board {boardR > BOARD_R + 1e-6
+              ? `grown to ${(boardR / BOARD_R).toFixed(2)}×`
+              : 'standard'}
+          </span>
           {[1, 2, 3].map(n => (
             <button key={n} onClick={() => setTiers(n)}
               style={{ ...s.chip, ...(tiers === n ? s.chipOn : {}) }}>{n} tier</button>
