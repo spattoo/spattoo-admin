@@ -360,7 +360,10 @@ function TemplateForm({ onSaved, onCancel }) {
           <input style={s.input} type="number" min="0" step="0.5" placeholder="e.g. 1.5" value={weight} onChange={e => setWeight(e.target.value)} />
         </div>
         <div style={s.field}>
-          <label style={s.label}>Age Range (years)</label>
+          {/* "Suits ages" — a property of the DESIGN (cake_template_attrs.min_age/max_age), never
+              of a customer. Same wording as the designer's filter and its save-as-template form, so
+              one fact reads the same everywhere a baker meets it. */}
+          <label style={s.label}>Suits ages (years)</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input style={{ ...s.input, width: '50%' }} type="number" min="0" step="1" placeholder="Min" value={minAge} onChange={e => setMinAge(e.target.value)} />
             <span style={{ color: '#6B8C74', fontWeight: 700 }}>–</span>
