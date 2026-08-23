@@ -38,6 +38,14 @@ import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEF
 const R = 1.2, BOTTOM_H = 1.45, BOARD_H = 0.1, BOARD_R = 1.6, TIER_STEP = 0.28;
 
 const PRESETS = {
+  // ON THE WALL, facing front. Both feet on the board, bent round the tier so it hugs.
+  'On the side (hugging)': { surface: 'side', bands: 6, innerRadius: 0.34, thickness: 0.10,
+    footLeft: 'board', footRight: 'board', offsetX: 0, theta: 0, proud: 0.02, flatten: 0.1,
+    colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
+  // Leaning the OTHER way — left leg down to the board, right foot on the cake.
+  'Over the shoulder, mirrored': { bands: 6, innerRadius: 0.30, thickness: 0.115,
+    footLeft: 'board', footRight: 'top', standoff: 0, topFootAt: 0.28, flatten: 0,
+    colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
   // A BACKDROP: stands behind the cake, springs from about halfway up, and the cake overlaps its
   // lower half. Not a hoop the cake sits inside.
   // The one everybody means: springs off the cake top on one side, sweeps down to the board on the
@@ -147,7 +155,9 @@ export default function RainbowStudio() {
           standing on the cake, so it is fitted to it — placed off to one side there is little cake
           left to stand on and it shrinks, which is what <b>Position</b> costs you there.
           <br /><br />
-          <b>Position</b> is yours alone — no size control moves it. Dragging the inner radius used
+          <b>Position</b> is measured toward the side it FALLS, so swapping the feet mirrors it —
+          left leg on the board and right foot on the cake needs no second number. And no size
+          control moves it. Dragging the inner radius used
           to walk the rainbow across the cake, because the position was derived from the outer
           radius; it is a plain number now.
           <br /><br />
@@ -191,9 +201,19 @@ export default function RainbowStudio() {
           ))}
         </div>
 
+        {/* WHERE it sits. On the wall the arch is bent round the tier so it hugs — against a round
+            cake a flat one touches in the middle and floats at the ends. */}
         <div style={s.group}>
-          <span style={s.groupLbl}>Surface</span>
-          {[[true, 'fondant grain'], [false, 'plain']].map(([v, label]) => (
+          <span style={s.groupLbl}>Sits on</span>
+          {[['top', 'over the cake'], ['side', 'on the wall']].map(([v, label]) => (
+            <button key={v} onClick={() => set('surface', v)}
+              style={{ ...s.chip, ...((p.surface ?? 'top') === v ? s.chipOn : {}) }}>{label}</button>
+          ))}
+        </div>
+
+        <div style={s.group}>
+          <span style={s.groupLbl}>Grain</span>
+          {[[true, 'fondant'], [false, 'plain']].map(([v, label]) => (
             <button key={label} onClick={() => setFondant(v)}
               style={{ ...s.chip, ...(fondant === v ? s.chipOn : {}) }}>{label}</button>
           ))}
@@ -216,6 +236,8 @@ export default function RainbowStudio() {
         {num('Inner radius', 'innerRadius', 0.15, 1.2, 0.01)}
         {num('Thickness', 'thickness', 0.03, 0.2, 0.005)}
         {num('Position', 'offsetX', -0.5, 1.6, 0.02)}
+        {(p.surface ?? 'top') === 'side' && num('Round the cake', 'theta', -3.14, 3.14, 0.05)}
+        {(p.surface ?? 'top') === 'side' && num('Off the wall', 'proud', 0, 0.1, 0.005)}
         {num('Stands back', 'standoff', 0, 2, 0.05)}
         {num('Flatten', 'flatten', 0, 0.9, 0.05)}
 
