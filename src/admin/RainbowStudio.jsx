@@ -40,15 +40,20 @@ const R = 1.2, BOTTOM_H = 1.45, BOARD_H = 0.1, BOARD_R = 1.6, TIER_STEP = 0.28;
 const PRESETS = {
   // A BACKDROP: stands behind the cake, springs from about halfway up, and the cake overlaps its
   // lower half. Not a hoop the cake sits inside.
-  'Backdrop (ref 1)': { bands: 6, innerRadius: 0.62, thickness: 0.085, gap: 0.010, legs: 'board',
-    spring: 0.55, standoff: 0.95, flatten: 0.25,
+  // The one everybody means: springs off the cake top on one side, sweeps down to the board on the
+  // other. Only reachable once the two feet stopped sharing a setting.
+  'Over the shoulder (ref 3)': { bands: 6, innerRadius: 0.45, thickness: 0.075, gap: 0.008,
+    footLeft: 'top', footRight: 'board', spring: 1, standoff: 0.55, flatten: 0.15,
+    colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
+  'Backdrop (ref 1)': { bands: 6, innerRadius: 0.62, thickness: 0.085, gap: 0.010,
+    footLeft: 'board', footRight: 'board', spring: 0.55, standoff: 0.95, flatten: 0.25,
     colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
   // Sitting ON the cake: no legs to speak of, so it wants to be centred rather than set back.
-  'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, gap: 0.006, legs: 'top',
-    spring: 1, standoff: 0.15, flatten: 0,
+  'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, gap: 0.006,
+    footLeft: 'top', footRight: 'top', spring: 1.3, standoff: 0.15, flatten: 0,
     colors: ['#EE6D8E', '#F29B54', '#F6D34F', '#7CC576', '#5BA9DE', '#8E7BC4', '#D98BC4'] },
-  'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, gap: 0.008, legs: 'top',
-    spring: 1, standoff: 0.15, flatten: 0,
+  'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, gap: 0.008,
+    footLeft: 'top', footRight: 'top', spring: 1.3, standoff: 0.15, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
 };
 
@@ -123,10 +128,10 @@ export default function RainbowStudio() {
           cake. Change the tier count and watch the legs stretch while the arch stays put — that is
           the whole reason this is not a GLB.
           <br /><br />
-          <b>Stands back</b> puts it BEHIND the cake, as a backdrop. At 0 it is centred and the legs
-          come down either side, which is a hoop, not a rainbow. <b>Springs at</b> is where the arc
-          begins, measured up the cake: 1 is the top, and around 0.55 gives the reference look with
-          the cake overlapping its lower half.
+          The two feet land INDEPENDENTLY: one on the cake top and the other down on the board is
+          the lopsided shape a real rainbow cake uses. <b>Stands back</b> puts it behind the cake;
+          at 0 it is centred and straddles it. <b>Springs at</b> is where the arc begins, measured
+          up the cake — a foot resting on the top pushes it up to meet that foot.
         </p>
 
         <div style={s.group}>
@@ -144,13 +149,17 @@ export default function RainbowStudio() {
           ))}
         </div>
 
-        <div style={s.group}>
-          <span style={s.groupLbl}>Legs</span>
-          {['board', 'top', 'none'].map(v => (
-            <button key={v} onClick={() => set('legs', v)}
-              style={{ ...s.chip, ...(p.legs === v ? s.chipOn : {}) }}>{v}</button>
-          ))}
-        </div>
+        {/* Each foot lands on its own. One on the cake and one on the board is the lopsided shape a
+            rainbow cake actually uses — a single setting could only ever make a symmetric arch. */}
+        {[['footLeft', 'Left foot'], ['footRight', 'Right foot']].map(([key, label]) => (
+          <div style={s.group} key={key}>
+            <span style={s.groupLbl}>{label}</span>
+            {['top', 'board', 'none'].map(v => (
+              <button key={v} onClick={() => set(key, v)}
+                style={{ ...s.chip, ...(p[key] === v ? s.chipOn : {}) }}>{v}</button>
+            ))}
+          </div>
+        ))}
 
         {num('Bands', 'bands', 3, 9, 1)}
         {num('Inner radius', 'innerRadius', 0.15, 1.2, 0.01)}
