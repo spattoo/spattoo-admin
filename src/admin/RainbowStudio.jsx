@@ -44,9 +44,9 @@ const PRESETS = {
   //   · NO LEGS — `spring: 0` springs the arc straight off the board, so the ends touch it. The
   //     references have no straight legs at all; an arch on a wall is a half-circle, not a doorway.
   //   · FLAT — rolled ribbons pressed onto buttercream, not round ropes lying on it.
-  'On the wall, ends on board': { surface: 'side', bands: 6, innerRadius: 0.30, thickness: 0.115,
-    footLeft: 'board', footRight: 'board', offsetX: 0, theta: 0, proud: 0.02,
-    spring: 0, scale: 0.75, flatten: 0.55,
+  'On the wall, ends on board': { surface: 'side', bands: 6, innerRadius: 0.30, thickness: 0.12,
+    footLeft: 'board', footRight: 'board', offsetX: 0, theta: -0.09, proud: 0.02,
+    spring: 0.18, scale: 0.75, flatten: 0,
     colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
   // The other reference: the arch sits partway UP the wall with nothing under its ends.
   'On the wall, mid-height': { surface: 'side', bands: 6, innerRadius: 0.30, thickness: 0.115,
@@ -117,12 +117,14 @@ const ARRANGEMENTS = [
   // ONE wall tile, not two. The pair that was here differed only in HEIGHT — ends on the board
   // versus floating partway up — and `Springs at` already moves it between them. A chooser offering
   // two points on a slider as though they were different shapes is a chooser with a wasted tile.
-  // scale 0.75 → 70% of the cake's width, 61% of the wall's height. This is the size Sandeep
-  // dialled in by hand before saying it was still small; I had read his screenshot as "too big" and
-  // gone the other way, to 0.5. A number somebody reached for beats one measured off a photo.
+  // Every number here was dialled in by hand and handed over as "take this as the default" — so it
+  // is transcribed, not derived. Two of them are things I would have got wrong on my own: flatten is
+  // ZERO (round ropes read better on a wall than pressed ribbons, whatever the photos suggested to
+  // me), and the arch is rotated slightly off dead-centre, which stops it looking like a diagram.
   { key: 'wall', surface: 'side', label: 'On the wall',
-    params: { footLeft: 'board', footRight: 'board', spring: 0, offsetX: 0, standoff: 0,
-              theta: 0, proud: 0.02, scale: 0.75, flatten: 0.55 },
+    params: { footLeft: 'board', footRight: 'board', spring: 0.18, offsetX: 0, standoff: 0,
+              theta: -0.09, proud: 0.02, scale: 0.75, flatten: 0,
+              bands: 6, innerRadius: 0.30, thickness: 0.12 },
     draw: <path d="M13 40 A7 7 0 0 1 27 40" /> },
 ];
 
