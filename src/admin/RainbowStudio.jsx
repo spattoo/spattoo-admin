@@ -38,9 +38,20 @@ import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEF
 const R = 1.2, BOTTOM_H = 1.45, BOARD_H = 0.1, BOARD_R = 1.6, TIER_STEP = 0.28;
 
 const PRESETS = {
-  // ON THE WALL, facing front. Both feet on the board, bent round the tier so it hugs.
-  'On the side (hugging)': { surface: 'side', bands: 6, innerRadius: 0.34, thickness: 0.10,
-    footLeft: 'board', footRight: 'board', offsetX: 0, theta: 0, proud: 0.02, flatten: 0.1,
+  // ON THE WALL, facing front — the shape in the reference photos. Three things distinguish it from
+  // the arch that goes OVER a cake, and the first version had all three wrong:
+  //   · SMALL — about 56% of the cake's width and half the wall's height, not 93% and 177%.
+  //   · NO LEGS — `spring: 0` springs the arc straight off the board, so the ends touch it. The
+  //     references have no straight legs at all; an arch on a wall is a half-circle, not a doorway.
+  //   · FLAT — rolled ribbons pressed onto buttercream, not round ropes lying on it.
+  'On the wall, ends on board': { surface: 'side', bands: 6, innerRadius: 0.30, thickness: 0.115,
+    footLeft: 'board', footRight: 'board', offsetX: 0, theta: 0, proud: 0.02,
+    spring: 0, scale: 0.6, flatten: 0.55,
+    colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
+  // The other reference: the arch sits partway UP the wall with nothing under its ends.
+  'On the wall, mid-height': { surface: 'side', bands: 6, innerRadius: 0.30, thickness: 0.115,
+    footLeft: 'none', footRight: 'none', offsetX: 0, theta: 0, proud: 0.02,
+    spring: 0.42, scale: 0.5, flatten: 0.55,
     colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
   // Leaning the OTHER way — left leg down to the board, right foot on the cake.
   'Over the shoulder, mirrored': { bands: 6, innerRadius: 0.30, thickness: 0.115,
@@ -205,8 +216,17 @@ export default function RainbowStudio() {
             cake a flat one touches in the middle and floats at the ends. */}
         <div style={s.group}>
           <span style={s.groupLbl}>Sits on</span>
+          {/* Switching surface applies the WHOLE shape, not just the flag. A wall rainbow is a
+              different object — small, legless, flat — and flipping one field left the over-the-cake
+              proportions bent round the tier, which is 177% of the wall's height with straight legs.
+              A default nobody would choose is not a default. */}
           {[['top', 'over the cake'], ['side', 'on the wall']].map(([v, label]) => (
-            <button key={v} onClick={() => set('surface', v)}
+            <button key={v} onClick={() => setP(o => ({
+              ...o,
+              ...(v === 'side'
+                ? PRESETS['On the wall, ends on board']
+                : PRESETS['Over the shoulder (ref 3)']),
+            }))}
               style={{ ...s.chip, ...((p.surface ?? 'top') === v ? s.chipOn : {}) }}>{label}</button>
           ))}
         </div>
