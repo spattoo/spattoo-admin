@@ -103,6 +103,11 @@ export default function RainbowStudio() {
   // lands past its edge is a decoration resting on nothing — so the board answers to what is
   // standing on it. Never shrinks: a small rainbow does not make a cake need a smaller board.
   const boardR = useMemo(() => Math.max(BOARD_R, rainbowBoardReach(p, cake)), [p, cake]);
+  // How far the clearance rule had to move it beyond what was asked for. Zero at any sane setting.
+  const stepped = useMemo(() => {
+    const used = rainbowBands(p, cake).standoff;
+    return Math.max(0, used - (p.standoff ?? 0) * R);
+  }, [p, cake]);
   const guide = useMemo(() => rainbowGuide(p, cake), [p, cake]);
   const bandCount = rainbowBands(p, cake).bands.length;
 
@@ -135,6 +140,10 @@ export default function RainbowStudio() {
           cake. Change the tier count and watch the legs stretch while the arch stays put — that is
           the whole reason this is not a GLB.
           <br /><br />
+          <b>Position</b> is yours alone — no size control moves it. Dragging the inner radius used
+          to walk the rainbow across the cake, because the position was derived from the outer
+          radius; it is a plain number now.
+          <br /><br />
           The two feet land INDEPENDENTLY: one on the cake top and the other down on the board is
           the lopsided shape a real rainbow cake uses. When they differ, the arch leans toward the
           board side on its own, so the resting foot lands ON the cake instead of in mid-air beside
@@ -160,6 +169,10 @@ export default function RainbowStudio() {
             Cake · board {boardR > BOARD_R + 1e-6
               ? `grown to ${(boardR / BOARD_R).toFixed(2)}×`
               : 'standard'}
+            {/* Said out loud rather than done quietly. Stepping back is the one move the geometry
+                makes on its own, and only to avoid a rope through the icing — so when it happens,
+                the screen says so instead of leaving somebody wondering why it drifted. */}
+            {stepped > 0.001 && ` · stepped back ${stepped.toFixed(2)} to clear the cake`}
           </span>
           {[1, 2, 3].map(n => (
             <button key={n} onClick={() => setTiers(n)}
@@ -191,7 +204,7 @@ export default function RainbowStudio() {
         {num('Inner radius', 'innerRadius', 0.15, 1.2, 0.01)}
         {num('Thickness', 'thickness', 0.03, 0.2, 0.005)}
         {num('Gap', 'gap', 0, 0.06, 0.002)}
-        {num('Rests at', 'topFootAt', 0, 1, 0.05)}
+        {num('Position', 'offsetX', -0.5, 1.6, 0.02)}
         {num('Springs at', 'spring', 0, 1.4, 0.05)}
         {num('Stands back', 'standoff', 0, 2, 0.05)}
         {num('Flatten', 'flatten', 0, 0.9, 0.05)}
