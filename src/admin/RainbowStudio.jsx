@@ -42,20 +42,20 @@ const PRESETS = {
   // lower half. Not a hoop the cake sits inside.
   // The one everybody means: springs off the cake top on one side, sweeps down to the board on the
   // other. Only reachable once the two feet stopped sharing a setting.
-  'Over the shoulder (ref 3)': { bands: 6, innerRadius: 0.30, thickness: 0.115, gap: 0.012,
-    footLeft: 'top', footRight: 'board', spring: 1, standoff: 0, topFootAt: 0.28, flatten: 0,
+  'Over the shoulder (ref 3)': { bands: 6, innerRadius: 0.30, thickness: 0.115, 
+    footLeft: 'top', footRight: 'board', standoff: 0, topFootAt: 0.28, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
-  'Backdrop (ref 1)': { bands: 6, innerRadius: 0.34, thickness: 0.115, gap: 0.012,
-    footLeft: 'board', footRight: 'board', spring: 1, standoff: 0, topFootAt: 0.28, flatten: 0.15,
+  'Backdrop (ref 1)': { bands: 6, innerRadius: 0.34, thickness: 0.115, 
+    footLeft: 'board', footRight: 'board', standoff: 0, topFootAt: 0.28, flatten: 0.15,
     colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
   // Sitting ON the cake: no legs to speak of, so it wants to be centred rather than set back.
   // Centred, because a STANDING arch is fitted onto the cake — placed off to one side there is
   // barely any cake left to stand on and it shrinks to a badge.
-  'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, gap: 0.006,
-    footLeft: 'top', footRight: 'top', spring: 1.3, standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
+  'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, 
+    footLeft: 'top', footRight: 'top', standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#EE6D8E', '#F29B54', '#F6D34F', '#7CC576', '#5BA9DE', '#8E7BC4', '#D98BC4'] },
-  'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, gap: 0.008,
-    footLeft: 'top', footRight: 'top', spring: 1.3, standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
+  'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, 
+    footLeft: 'top', footRight: 'top', standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
 };
 
@@ -160,8 +160,12 @@ export default function RainbowStudio() {
           makes the band stack reach past the cake, so the legs come down beside it and nearly touch.
           A wide hole with thin ropes gives a shallow hoop that can only miss the cake by standing
           back — which puts the rainbow at the front of the board with a gap down its side. <b>Stands back</b> puts it behind the cake;
-          at 0 it is centred and straddles it. <b>Springs at</b> is where the arc begins, measured
-          up the cake — a foot resting on the top pushes it up to meet that foot.
+          at 0 it is centred and straddles it.
+          <br /><br />
+          Gone, and worth knowing why: <b>Gap</b> — fondant ropes with daylight between them do not
+          hold each other up, so they touch, always. <b>Lean</b> — nothing wanted it. <b>Springs at</b>
+          — with a foot resting on the cake the springing point is pinned to that foot, so the control
+          did nothing across its whole useful range and only detached the foot beyond it.
         </p>
 
         <div style={s.group}>
@@ -211,12 +215,9 @@ export default function RainbowStudio() {
         {num('Bands', 'bands', 3, 9, 1)}
         {num('Inner radius', 'innerRadius', 0.15, 1.2, 0.01)}
         {num('Thickness', 'thickness', 0.03, 0.2, 0.005)}
-        {num('Gap', 'gap', 0, 0.06, 0.002)}
         {num('Position', 'offsetX', -0.5, 1.6, 0.02)}
-        {num('Springs at', 'spring', 0, 1.4, 0.05)}
         {num('Stands back', 'standoff', 0, 2, 0.05)}
         {num('Flatten', 'flatten', 0, 0.9, 0.05)}
-        {num('Lean°', 'lean', -25, 25, 1)}
 
         <div style={s.colors}>
           <span style={s.groupLbl}>Colours</span>
