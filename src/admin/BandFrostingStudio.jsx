@@ -2,7 +2,8 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, Lightformer } from '@react-three/drei';
 import * as THREE from 'three';
-import { applyBands, areBandsActive, bandBoundaries, blendWidth, MAX_BANDS } from './bandFrosting.js';
+import { applyBands, bandColors, bandBoundaries, blendWidth, MAX_BANDS } from './bandFrosting.js';
+import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 
 /* ── Band Frosting Studio ────────────────────────────────────────────────────────────────────────
  *
@@ -55,25 +56,34 @@ const PRESETS = {
      * the reference has six clearly separate colours whose joins happen to be gentle. Soft COLOURS
      * are not a soft BLEND, and no amount of reading the source would have caught that. */
     note: 'Six pastels with gentle joins. The bands stay countable — soft colours, not a soft blend. Set this above ~0.7 and it collapses into one wash, which is a different cake.',
-    colors: ['#C9AEE0', '#A9C8E8', '#B9E3C6', '#F6EAA8', '#F9C9A3', '#F3AEC0'],
+    palette: ['#C9AEE0', '#A9C8E8', '#B9E3C6', '#F6EAA8', '#F9C9A3', '#F3AEC0'], count: 6,
     softness: 0.5, wobble: 0.25, weights: [1, 1, 1, 1, 1, 1],
   },
   unicorn: {
     label: 'Unicorn (soft joins)',
     note: 'Six colours, scraped so the joins are visible but soft. The middle of the range, and the look most bakers will actually reach for.',
-    colors: ['#C9A9D6', '#9FC7DE', '#BFE0C0', '#F5E3A1', '#F2B98A', '#D9646B'],
+    palette: ['#C9A9D6', '#9FC7DE', '#BFE0C0', '#F5E3A1', '#F2B98A', '#D9646B'], count: 6,
     softness: 0.45, wobble: 0.3, weights: [1, 1, 1, 1, 1, 1],
   },
   sunset: {
     label: 'Sunset ombre (3)',
     note: 'Three colours, fully blended — the classic ombre, and the far end of the slider. Proves the existing vertical gradient is just this with count 3 and softness 1, which is the case for merging the two rather than shipping both.',
-    colors: ['#F7DE8E', '#F4A98C', '#EE9BB0'],
+    palette: ['#F7DE8E', '#F4A98C', '#EE9BB0'], count: 3,
     softness: 1, wobble: 0.15, weights: [1, 1, 1],
+  },
+  stripes: {
+    label: 'Football stripes (2)',
+    /* The case that broke the original model. Two colours and sixteen bands — a "repeat" multiplier
+     * could reach 16, but not 15 or 17, and an ODD count is what puts the same colour top and bottom
+     * on a striped cake. The palette cycles into a count instead. */
+    note: 'Two colours, sixteen thin stripes. Try an odd count — 15 or 17 — to get the same colour at the top and the bottom, which a repeat multiplier cannot express.',
+    palette: ['#FFFFFF', '#A8D96B'], count: 16,
+    softness: 0.18, wobble: 0.3, weights: [1, 1],
   },
   rainbow: {
     label: 'Rainbow (hard edges)',
     note: 'Six saturated stripes, crisp. The case that breaks if the blend maths cannot reach a true zero — watch the joins for fizz against the grain normal.',
-    colors: ['#8E5AA8', '#3F6FD0', '#3FA55B', '#F2D33F', '#EE8B2E', '#D8392F'],
+    palette: ['#8E5AA8', '#3F6FD0', '#3FA55B', '#F2D33F', '#EE8B2E', '#D8392F'], count: 6,
     softness: 0.04, wobble: 0.08, weights: [1, 1, 1, 1, 1, 1],
   },
 };
@@ -101,32 +111,25 @@ function BandedCake({ bands, topColor, showGrain }) {
     return { min: bb.min.clone(), size, center };
   }, [wallGeo]);
 
-  /* A frosting grain, so hard edges are judged against the surface they will actually sit on.
+  /* The REAL cream grain, so hard edges are judged against the surface they will actually sit on.
    *
-   * ⚠️ Without this the studio flatters itself: a crisp join on a mirror-smooth cylinder always looks
-   * clean, and the question that matters is whether it survives a bumpy one. Toggleable so the two
-   * can be compared rather than argued about. */
+   * ⚠️ This was a hand-rolled noise function with a `sin(y * 7.3)` term in it, and it produced a
+   * regular comb ripple right across the wall — corduroy, not buttercream. It looked like a defect in
+   * the band shader and was nothing of the kind; the bands underneath were clean the whole time.
+   *
+   * The lesson is the one this studio is built on: invent nothing that already exists. Core ices its
+   * walls with getCreamGrainNormalMap, admin already carries it for cream-preview.html, and a grain
+   * made up for the studio can only mislead about a look the studio exists to judge.
+   *
+   * Toggleable, because a crisp join on a mirror-smooth cylinder always looks clean and the question
+   * is whether it survives a bumpy one. */
   const grainMap = useMemo(() => {
-    const N = 256;
-    const cvs = Object.assign(document.createElement('canvas'), { width: N, height: N });
-    const ctx = cvs.getContext('2d');
-    const img = ctx.createImageData(N, N);
-    for (let y = 0; y < N; y++) {
-      for (let x = 0; x < N; x++) {
-        // Cheap directional smear: buttercream is scraped around the cake, so the grain runs
-        // horizontally rather than being isotropic noise.
-        const n = Math.sin(x * 0.9) * 0.2 + Math.sin(y * 7.3 + Math.sin(x * 0.4) * 2) * 0.5 + Math.random() * 0.3;
-        const i = (y * N + x) * 4;
-        img.data[i] = 128 + n * 22;
-        img.data[i + 1] = 128 + n * 10;
-        img.data[i + 2] = 255;
-        img.data[i + 3] = 255;
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-    const t = new THREE.CanvasTexture(cvs);
+    const t = getCreamGrainNormalMap().clone();
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(3, 2);
+    // Tiled to the wall's real extent, the way CakeTier's grainNormalMap does it, so the grain is a
+    // constant physical size rather than stretching with the cake.
+    t.repeat.set(Math.round(2 * Math.PI * R * 2.2), Math.round(WALL_H * 2.2));
+    t.needsUpdate = true;
     return t;
   }, []);
 
@@ -175,7 +178,8 @@ function Slider({ label, value, onChange, min = 0, max = 1, step = 0.01, hint })
 
 export default function BandFrostingStudio() {
   const [presetKey, setPresetKey] = useState('unicorn');
-  const [colors, setColors]   = useState(PRESETS.unicorn.colors);
+  const [palette, setPalette] = useState(PRESETS.unicorn.palette);
+  const [count, setCount]     = useState(PRESETS.unicorn.count);
   const [weights, setWeights] = useState(PRESETS.unicorn.weights);
   const [softness, setSoftness] = useState(PRESETS.unicorn.softness);
   const [wobble, setWobble]     = useState(PRESETS.unicorn.wobble);
@@ -186,34 +190,38 @@ export default function BandFrostingStudio() {
   const loadPreset = key => {
     const p = PRESETS[key];
     setPresetKey(key);
-    setColors(p.colors); setWeights(p.weights);
+    setPalette(p.palette); setCount(p.count); setWeights(p.weights);
     setSoftness(p.softness); setWobble(p.wobble);
   };
 
   const bands = useMemo(
-    () => ({ colors, weights, softness, wobble }),
-    [colors, weights, softness, wobble],
+    () => ({ palette, count, weights, softness, wobble }),
+    [palette, count, weights, softness, wobble],
   );
 
-  const count = colors.length;
+  const expanded = bandColors(bands);
   const edges = bandBoundaries(count, weights);
   const blend = blendWidth(softness, count, weights);
-  const resolvedTop = topFromTopBand ? colors[count - 1] : topColor;
+  const resolvedTop = topFromTopBand ? expanded[expanded.length - 1] : topColor;
 
-  const setColorAt = (i, v) => setColors(cs => cs.map((c, j) => (j === i ? v : c)));
+  const setColorAt = (i, v) => setPalette(cs => cs.map((c, j) => (j === i ? v : c)));
   const setWeightAt = (i, v) => setWeights(ws => ws.map((w, j) => (j === i ? v : w)));
-  const addBand = () => {
-    if (count >= MAX_BANDS) return;
-    setColors(cs => [...cs, cs[cs.length - 1]]);
+  const addColor = () => {
+    if (palette.length >= 8) return;
+    setPalette(cs => [...cs, cs[cs.length - 1]]);
     setWeights(ws => [...ws, 1]);
+    // Keep one-band-per-colour while the palette is small, so adding a colour to the rainbow does
+    // what it looks like it should. Once somebody has deliberately set a bigger count, leave it be.
+    setCount(c => (c === palette.length ? c + 1 : c));
   };
-  const removeBand = () => {
-    if (count <= 2) return;
-    setColors(cs => cs.slice(0, -1));
+  const removeColor = () => {
+    if (palette.length <= 2) return;
+    setPalette(cs => cs.slice(0, -1));
     setWeights(ws => ws.slice(0, -1));
+    setCount(c => (c === palette.length ? c - 1 : c));
   };
 
-  const config = JSON.stringify({ bands: { colors, weights, softness: +softness.toFixed(2), wobble: +wobble.toFixed(2) } }, null, 2);
+  const config = JSON.stringify({ bands: { palette, count, weights, softness: +softness.toFixed(2), wobble: +wobble.toFixed(2) } }, null, 2);
 
   return (
     <div style={{ minHeight: '100vh', background: '#f7f2f4', fontFamily: "'Quicksand', system-ui, sans-serif", color: '#3b2b31' }}>
@@ -259,13 +267,15 @@ export default function BandFrostingStudio() {
           </div>
 
           <div style={card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={lbl}>Colours — base at the top of this list is the BOTTOM of the cake</div>
+            <div style={lbl}>Palette — first entry is the BOTTOM of the cake</div>
+            <div style={{ fontSize: 11.5, color: '#9b8189', lineHeight: 1.5, marginBottom: 8 }}>
+              The palette repeats up the cake to fill the band count below. Two colours and sixteen
+              bands is a striped cake; six and six is one band per colour.
             </div>
-            {colors.map((c, i) => (
+            {palette.map((c, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                 <span style={{ fontSize: 11, color: '#9b8189', width: 52 }}>
-                  {i === 0 ? 'base' : i === count - 1 ? 'top' : `#${i + 1}`}
+                  {i === 0 ? 'base' : `#${i + 1}`}
                 </span>
                 <input type="color" value={c} onChange={e => setColorAt(i, e.target.value)}
                        style={{ width: 44, height: 30, border: '1px solid #e2d5da', borderRadius: 6, background: '#fff', cursor: 'pointer' }} />
@@ -280,17 +290,38 @@ export default function BandFrostingStudio() {
               </div>
             ))}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <button onClick={addBand} disabled={count >= MAX_BANDS}
-                style={{ flex: 1, padding: '7px', borderRadius: 8, border: '1px solid #e2d5da', background: '#fff', cursor: count >= MAX_BANDS ? 'default' : 'pointer', opacity: count >= MAX_BANDS ? 0.5 : 1, fontFamily: 'inherit', fontWeight: 700, fontSize: 12 }}>
-                Add band
+              <button onClick={addColor} disabled={palette.length >= 8}
+                style={{ flex: 1, padding: '7px', borderRadius: 8, border: '1px solid #e2d5da', background: '#fff', cursor: palette.length >= 8 ? 'default' : 'pointer', opacity: palette.length >= 8 ? 0.5 : 1, fontFamily: 'inherit', fontWeight: 700, fontSize: 12 }}>
+                Add colour
               </button>
-              <button onClick={removeBand} disabled={count <= 2}
-                style={{ flex: 1, padding: '7px', borderRadius: 8, border: '1px solid #e2d5da', background: '#fff', cursor: count <= 2 ? 'default' : 'pointer', opacity: count <= 2 ? 0.5 : 1, fontFamily: 'inherit', fontWeight: 700, fontSize: 12 }}>
-                Remove band
+              <button onClick={removeColor} disabled={palette.length <= 2}
+                style={{ flex: 1, padding: '7px', borderRadius: 8, border: '1px solid #e2d5da', background: '#fff', cursor: palette.length <= 2 ? 'default' : 'pointer', opacity: palette.length <= 2 ? 0.5 : 1, fontFamily: 'inherit', fontWeight: 700, fontSize: 12 }}>
+                Remove colour
               </button>
             </div>
-            <div style={{ fontSize: 11, color: '#9b8189', marginTop: 8, lineHeight: 1.5 }}>
-              {count} bands · joins at {edges.map(e => e.toFixed(2)).join(', ') || '—'} · blend width {blend.toFixed(3)}
+
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #f0e6ea' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span style={lbl}>How many bands</span>
+                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: '#7a6069' }}>{count}</span>
+              </div>
+              <input type="range" min={2} max={MAX_BANDS} step={1} value={count}
+                     onChange={e => setCount(parseInt(e.target.value, 10))} style={{ width: '100%' }} />
+              <div style={{ fontSize: 11, color: '#9b8189', lineHeight: 1.5, marginTop: 4 }}>
+                {count === palette.length
+                  ? 'One band per colour.'
+                  : `The ${palette.length} colours repeat ${(count / palette.length).toFixed(1)}× up the cake.`}
+                {' '}An <b>odd</b> count with an even palette puts the same colour top and bottom.
+              </div>
+            </div>
+
+            <div style={{ fontSize: 11, color: '#9b8189', marginTop: 10, lineHeight: 1.5 }}>
+              joins at {edges.length > 6 ? `${edges.length} evenly spaced` : (edges.map(e => e.toFixed(2)).join(', ') || '—')} · blend width {blend.toFixed(3)}
+            </div>
+            {/* The swatch strip IS the cake, read bottom-up. Faster to check than counting joins on
+                the render, and it catches a palette that cycles to the wrong colour at the top. */}
+            <div style={{ display: 'flex', flexDirection: 'column-reverse', height: 54, marginTop: 8, borderRadius: 6, overflow: 'hidden', border: '1px solid #eadfe3' }}>
+              {expanded.map((c, i) => <div key={i} style={{ flex: weights[i % weights.length] ?? 1, background: c }} />)}
             </div>
           </div>
 

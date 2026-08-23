@@ -34,12 +34,46 @@ import * as THREE from 'three';
  *          next to applyGradient/applyGlaze.
  */
 
-export const MAX_BANDS = 8;
+/* ⚠️ 24, not 8. A two-colour striped cake — white/green, the football cake — runs to sixteen or
+ * more thin stripes, and the first cut of this capped at eight because it assumed one colour meant
+ * one band. The cap is a shader array size, so it costs uniforms whether used or not; 24 is chosen
+ * as "more than any cake anyone has shown us" rather than as a limit anybody should hit. */
+export const MAX_BANDS = 24;
+
+/* ── Palette × count, not one-colour-one-band ────────────────────────────────────────────────────
+ *
+ * The palette CYCLES to fill `count` bands. Two colours and twelve bands is white/green stripes;
+ * six colours and six bands is the rainbow. `count === palette.length` is one band per colour, which
+ * is what this used to do and every existing preset still means.
+ *
+ * ⚠️ A count, not a "repeat" multiplier. A multiplier can only produce whole turns of the palette —
+ * two colours would give 2, 4, 6, 8 — and it cannot express the case bakers actually want on a
+ * striped cake, which is the SAME colour top and bottom. That needs an odd count from an even
+ * palette (green, white, green), and no multiplier reaches it.
+ */
+export function expandPalette(palette, count) {
+  const p = (palette ?? []).filter(Boolean);
+  if (!p.length) return [];
+  const n = Math.max(2, Math.min(MAX_BANDS, Math.round(count || p.length)));
+  return Array.from({ length: n }, (_, i) => p[i % p.length]);
+}
 
 /* Bands only render once there are two of them; one colour is just a solid wall, which the material
- * already does perfectly well on its own. */
+ * already does perfectly well on its own.
+ *
+ * Accepts either shape: `{ palette, count }` or a literal `{ colors }`. The studio speaks the first,
+ * and the second is what the shader ultimately needs — keeping both readable here means callers do
+ * not each have to remember to expand. */
+export function bandColors(bands) {
+  if (!bands) return [];
+  if (Array.isArray(bands.palette) && bands.palette.filter(Boolean).length) {
+    return expandPalette(bands.palette, bands.count ?? bands.palette.length);
+  }
+  return (bands.colors ?? []).filter(Boolean).slice(0, MAX_BANDS);
+}
+
 export function areBandsActive(bands) {
-  return !!bands && Array.isArray(bands.colors) && bands.colors.filter(Boolean).length >= 2;
+  return bandColors(bands).length >= 2;
 }
 
 /* Where each join sits, as a fraction of the wall's height.
@@ -52,16 +86,32 @@ export function areBandsActive(bands) {
  * is where colour i hands over to colour i+1.
  */
 export function bandBoundaries(count, weights) {
+  const src = (weights ?? []).filter(v => Number.isFinite(Number(v)) && Number(v) > 0);
   const w = [];
   for (let i = 0; i < count; i++) {
-    const v = Number(weights?.[i]);
-    w.push(Number.isFinite(v) && v > 0 ? v : 1);
+    // Weights CYCLE with the palette, so a thick/thin alternation is one pair of numbers rather than
+    // twelve. Indexing straight into `weights` would leave every band past the palette at 1 and the
+    // alternation would quietly stop a third of the way up.
+    w.push(src.length ? Number(src[i % src.length]) : 1);
   }
   const total = w.reduce((a, b) => a + b, 0);
   const out = [];
   let acc = 0;
   for (let i = 0; i < count - 1; i++) { acc += w[i]; out.push(acc / total); }
   return out;
+}
+
+/* How far a join is allowed to wander, in the same 0..1 height units.
+ *
+ * ⚠️ Proportional to the thinnest band, for the same reason the blend is. The wobble used to be a
+ * flat 0.05 of the wall: harmless across six bands, but a sixteen-stripe cake has bands 0.0625 tall,
+ * so at any real wobble the joins CROSS each other and the stripes visibly braid. Tied to band
+ * height it means "how far does the join wander across its own band", which holds at any count.
+ *
+ * The 0.3 keeps existing presets looking as they did — at six even bands it reproduces the old flat
+ * amplitude almost exactly. */
+export function wobbleAmplitude(wobble, count, weights) {
+  return Math.max(0, Math.min(1, wobble ?? 0)) * thinnestBand(count, weights) * 0.3;
 }
 
 /* The blend width, in the same 0..1 height units as the boundaries.
@@ -71,12 +121,15 @@ export function bandBoundaries(count, weights) {
  * it to the narrowest band means `softness` means the same thing — "how much of a band does the join
  * eat" — whatever the count.
  */
-export function blendWidth(softness, count, weights) {
+export function thinnestBand(count, weights) {
   const bounds = bandBoundaries(count, weights);
-  let thinnest = 1;
-  let prev = 0;
+  let thinnest = 1, prev = 0;
   for (const b of [...bounds, 1]) { thinnest = Math.min(thinnest, b - prev); prev = b; }
-  return Math.max(0, Math.min(1, softness)) * thinnest;
+  return thinnest;
+}
+
+export function blendWidth(softness, count, weights) {
+  return Math.max(0, Math.min(1, softness)) * thinnestBand(count, weights);
 }
 
 const VERT_COMMON = '#include <common>\nvarying vec3 vBandLocal;';
@@ -114,7 +167,9 @@ const FRAG_COLOR = `#include <color_fragment>
   // the cake, so the waver reads as a hand rather than a sine wave.
   if (uBWobble > 0.0) {
     float ang = atan(vBandLocal.z - uBCenter.z, vBandLocal.x - uBCenter.x);
-    bt += uBWobble * (sin(ang * 3.0) * 0.6 + sin(ang * 5.0 + 1.7) * 0.4) * 0.05;
+    // uBWobble is already an AMPLITUDE in t units, scaled to band height on the JS side — see
+    // wobbleAmplitude(). A flat fraction of the wall here made sixteen thin stripes braid.
+    bt += uBWobble * (sin(ang * 3.0) * 0.6 + sin(ang * 5.0 + 1.7) * 0.4);
   }
   bt = clamp(bt, 0.0, 1.0);
 
@@ -151,10 +206,11 @@ export function applyBands(material, bands, bbox) {
     return;
   }
 
-  const colors = bands.colors.filter(Boolean).slice(0, MAX_BANDS);
+  const colors = bandColors(bands);          // palette cycled into `count` bands
   const count = colors.length;
   const edges = bandBoundaries(count, bands.weights);
   const blend = blendWidth(bands.softness ?? 0.35, count, bands.weights);
+  const wob   = wobbleAmplitude(bands.wobble, count, bands.weights);
 
   const u = material.userData.__bandUniforms;
   // Already patched: just push the new values. Recompiling on every colour tweak is what makes a
@@ -164,7 +220,7 @@ export function applyBands(material, bands, bbox) {
     for (let i = 0; i < MAX_BANDS; i++) u.uBEdges.value[i] = edges[i] ?? 1;
     u.uBCount.value  = count;
     u.uBBlend.value  = blend;
-    u.uBWobble.value = bands.wobble ?? 0;
+    u.uBWobble.value = wob;
     u.uBMin.value.copy(bbox.min);
     u.uBSize.value.copy(bbox.size);
     u.uBCenter.value.copy(bbox.center);
@@ -176,7 +232,7 @@ export function applyBands(material, bands, bbox) {
     uBEdges:  { value: Array.from({ length: MAX_BANDS }, (_, i) => edges[i] ?? 1) },
     uBCount:  { value: count },
     uBBlend:  { value: blend },
-    uBWobble: { value: bands.wobble ?? 0 },
+    uBWobble: { value: wob },
     uBMin:    { value: bbox.min.clone() },
     uBSize:   { value: bbox.size.clone() },
     uBCenter: { value: bbox.center.clone() },
