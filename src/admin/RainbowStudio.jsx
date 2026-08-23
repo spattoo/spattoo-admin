@@ -105,9 +105,14 @@ const ARRANGEMENTS = [
     params: { footLeft: 'board', footRight: 'board', spring: 0.55, offsetX: 0, standoff: 0,
               scale: 1, flatten: 0.15 },
     draw: <><path d="M8 26 A12 12 0 0 1 32 26 L32 40" /><path d="M8 26 L8 40" /></> },
+  // spring 1, NOT above it. Past 1 the springing point rises above the cake top and the arch grows
+  // LEGS to reach it — it stood on 0.38 of stilt, floating clear of the cake it was supposed to be
+  // sitting on. At 1 the springing point is pinned to the feet, so the arc rests straight on the
+  // surface. scale 0.75 puts the feet at ±0.84 inside a 1.2 rim, and the arch about 61% of the
+  // cake's height — the proportion in references 2 and 4.
   { key: 'on-top', surface: 'top', label: 'Sitting on top',
-    params: { footLeft: 'top', footRight: 'top', spring: 1.3, offsetX: 0, standoff: 0.15,
-              scale: 1, flatten: 0 },
+    params: { footLeft: 'top', footRight: 'top', spring: 1, offsetX: 0, standoff: 0,
+              scale: 0.75, flatten: 0 },
     draw: <path d="M12 22 A8 8 0 0 1 28 22" /> },
   // ONE wall tile, not two. The pair that was here differed only in HEIGHT — ends on the board
   // versus floating partway up — and `Springs at` already moves it between them. A chooser offering
