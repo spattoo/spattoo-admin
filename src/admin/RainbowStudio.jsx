@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // The SAME generator the designer renders, never a divergent copy — the rule ChocolateDripStudio
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
-import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, rainbowFootReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
 
 // ── Rainbow studio ────────────────────────────────────────────────────────────
 // Concentric fondant ropes, arching over the cake.
@@ -96,15 +96,26 @@ const ARRANGEMENTS = [
   { key: 'fall-right', surface: 'top', label: 'Over, falling right',
     params: { footLeft: 'top', footRight: 'board', spring: 1, offsetX: 0.71, standoff: 0,
               scale: 1, flatten: 0 },
-    draw: <><path d="M9 30 A11 11 0 0 1 31 30 L31 40" /><path d="M9 30 L9 22" /></> },
+    draw: (t, floor) => {
+      const [a, b] = leanFeet(t, 1);
+      const r = (b - a) / 2;
+      return <path d={`M${a} ${t.top} A${r} ${r} 0 0 1 ${b} ${t.top} L${b} ${floor}`} />;
+    } },
   { key: 'fall-left', surface: 'top', label: 'Over, falling left',
     params: { footLeft: 'board', footRight: 'top', spring: 1, offsetX: 0.71, standoff: 0,
               scale: 1, flatten: 0 },
-    draw: <><path d="M9 30 A11 11 0 0 1 31 30 L31 22" /><path d="M9 30 L9 40" /></> },
+    draw: (t, floor) => {
+      const [a, b] = leanFeet(t, -1);
+      const r = (b - a) / 2;
+      return <path d={`M${a} ${floor} L${a} ${t.top} A${r} ${r} 0 0 1 ${b} ${t.top}`} />;
+    } },
   { key: 'backdrop', surface: 'top', label: 'Behind, both down',
     params: { footLeft: 'board', footRight: 'board', spring: 0.55, offsetX: 0, standoff: 0,
               scale: 1, flatten: 0.15 },
-    draw: <><path d="M8 26 A12 12 0 0 1 32 26 L32 40" /><path d="M8 26 L8 40" /></> },
+    draw: (t, floor) => {
+      const r = Math.min(t.w * 0.62, 15), y = t.top + (t.base - t.top) * 0.25;
+      return <path d={`M${t.cx - r} ${floor} L${t.cx - r} ${y} A${r} ${r} 0 0 1 ${t.cx + r} ${y} L${t.cx + r} ${floor}`} />;
+    } },
   // spring 1, NOT above it. Past 1 the springing point rises above the cake top and the arch grows
   // LEGS to reach it — it stood on 0.38 of stilt, floating clear of the cake it was supposed to be
   // sitting on. At 1 the springing point is pinned to the feet, so the arc rests straight on the
@@ -113,7 +124,10 @@ const ARRANGEMENTS = [
   { key: 'on-top', surface: 'top', label: 'Sitting on top',
     params: { footLeft: 'top', footRight: 'top', spring: 1, offsetX: 0, standoff: 0,
               scale: 0.75, flatten: 0 },
-    draw: <path d="M12 22 A8 8 0 0 1 28 22" /> },
+    draw: t => {
+      const r = t.w * 0.34;
+      return <path d={`M${t.cx - r} ${t.top} A${r} ${r} 0 0 1 ${t.cx + r} ${t.top}`} />;
+    } },
   // ONE wall tile, not two. The pair that was here differed only in HEIGHT — ends on the board
   // versus floating partway up — and `Springs at` already moves it between them. A chooser offering
   // two points on a slider as though they were different shapes is a chooser with a wasted tile.
@@ -125,22 +139,80 @@ const ARRANGEMENTS = [
     params: { footLeft: 'board', footRight: 'board', spring: 0.18, offsetX: 0, standoff: 0,
               theta: -0.09, proud: 0.02, scale: 0.75, flatten: 0,
               bands: 6, innerRadius: 0.30, thickness: 0.12 },
-    draw: <path d="M13 40 A7 7 0 0 1 27 40" /> },
+    draw: t => {
+      const r = Math.min(t.w * 0.30, (t.base - t.top) * 0.75);
+      return <path d={`M${t.cx - r} ${t.base - 1} A${r} ${r} 0 0 1 ${t.cx + r} ${t.base - 1}`} />;
+    } },
 ];
 
-// A cake in outline with the arrangement drawn against it — the SAME cake in every tile, so the
-// difference between them is the rainbow and nothing else.
-function ArrangementTile({ item, on, onPick }) {
+// The stack as the ICONS draw it — the same shape the studio renders, flattened to a 40×46 box.
+// Heights and widths taper the way the real tiers do, so a 3-tier icon reads as a 3-tier cake and
+// not as a wedding cake drawn by someone who has not seen one.
+const BOARD_Y = 41;
+function iconTiers(tiers) {
+  const boxes = [];
+  let base = BOARD_Y;
+  for (let i = 0; i < tiers; i++) {
+    const w = 24 - i * 5.5;
+    const h = tiers === 1 ? 19 : (tiers === 2 ? 13 - i * 2 : 11 - i * 1.5);
+    boxes.push({ x: 20 - w / 2, w, cx: 20, base, top: base - h });
+    base -= h;
+  }
+  return boxes;
+}
+
+// The two feet of a LEANING arch: one resting on the tier, one hanging past its edge. Defined by
+// where the feet go rather than by a radius, because a radius that suits the top tier of a stack
+// runs the bottom tier's arch off the side of a 40-wide icon — which is what a radius did.
+// `dir` is +1 falling right, -1 falling left.
+function leanFeet(t, dir) {
+  const rest = t.cx + dir * (t.w * 0.5 - t.w * 0.28);   // on the tier, in from the far edge
+  const fall = t.cx + dir * Math.min(t.w * 0.5 + 5, 17); // past the edge, inside the icon
+  return dir > 0 ? [rest, fall] : [fall, rest];
+}
+
+// A cake in outline with the arrangement drawn against it. The stack and the CHOSEN tier are the
+// same in every tile, so the only difference between tiles is the rainbow — and the same drawing
+// answers "which tier" and "which arrangement" at once, which is how the choice is actually made:
+// nobody picks "on the wall" and then wonders whose wall.
+function ArrangementTile({ item, on, onPick, tiers, tierIndex }) {
+  const boxes = iconTiers(tiers);
+  const t = boxes[Math.min(tierIndex, boxes.length - 1)];
+  // What a falling foot lands on: the tier below, or the board when there is nothing below.
+  const floor = tierIndex === 0 ? BOARD_Y : boxes[tierIndex - 1].top;
   return (
     <button type="button" onClick={onPick} title={item.label}
       style={{ ...s.tile, ...(on ? s.tileOn : {}) }}>
       <svg viewBox="0 0 40 46" style={{ width: 46, height: 52 }}>
         <ellipse cx="20" cy="42" rx="17" ry="3" fill="#EDE7DA" />
-        <rect x="8" y="22" width="24" height="19" rx="1.5" fill="#F7F5F1" stroke="#DDD8CF" />
+        {boxes.map((b, i) => (
+          <rect key={i} x={b.x} y={b.top} width={b.w} height={b.base - b.top} rx="1.5"
+                fill={i === tierIndex ? '#FFFFFF' : '#F7F5F1'}
+                stroke={i === tierIndex ? '#C9C1B4' : '#DDD8CF'} />
+        ))}
         <g fill="none" stroke={on ? '#2C4433' : '#B7AEA1'} strokeWidth="2.6"
-           strokeLinecap="round">{item.draw}</g>
+           strokeLinecap="round">{item.draw(t, floor)}</g>
       </svg>
       <span style={s.tileLbl}>{item.label}</span>
+    </button>
+  );
+}
+
+// Which tier, drawn rather than named. "on top" is a phrase that means the top TIER here and the top
+// SURFACE two lines down, and the picture is not ambiguous the way the words are.
+function TierTile({ tiers, index, on, onPick }) {
+  const boxes = iconTiers(tiers);
+  return (
+    <button type="button" onClick={onPick} title={`tier ${index + 1}`}
+      style={{ ...s.tierTile, ...(on ? s.tileOn : {}) }}>
+      <svg viewBox="0 0 40 46" style={{ width: 30, height: 34 }}>
+        <ellipse cx="20" cy="42" rx="17" ry="3" fill="#EDE7DA" />
+        {boxes.map((b, i) => (
+          <rect key={i} x={b.x} y={b.top} width={b.w} height={b.base - b.top} rx="1.5"
+                fill={i === index ? '#2C4433' : '#F7F5F1'}
+                stroke={i === index ? '#2C4433' : '#DDD8CF'} />
+        ))}
+      </svg>
     </button>
   );
 }
@@ -193,8 +265,14 @@ export default function RainbowStudio() {
   // bottom tier and the tier below's top for any other.
   const cake = useMemo(() => {
     const stack = tierStack(tiers);
-    const t = stack[Math.min(tierIndex, stack.length - 1)];
-    return { radius: t.r, topY: t.topY, boardY: t.y };
+    const i = Math.min(tierIndex, stack.length - 1);
+    const t = stack[i];
+    return {
+      radius: t.r, topY: t.topY, boardY: t.y,
+      // What a falling foot lands ON. The board is left out on purpose: it GROWS to catch a foot,
+      // so it is never the thing that limits the rainbow. A tier below cannot grow, so it is.
+      supportRadius: i === 0 ? null : stack[i - 1].r,
+    };
   }, [tiers, tierIndex]);
 
   // The board GROWS to hold the rainbow. A standard board is sized for the cake, and a leg that
@@ -207,14 +285,10 @@ export default function RainbowStudio() {
     [p, cake, tierIndex],
   );
 
-  // Whether the falling foot actually lands on the tier below. A foot in mid-air looks exactly like
-  // a seated one in a still picture, so it has to be a number rather than something to spot.
-  const overhang = useMemo(() => {
-    if (tierIndex === 0 || p.surface === 'side') return null;
-    const support = tierStack(tiers)[tierIndex - 1].r;
-    const foot = rainbowFootReach(p, cake);
-    return foot > support ? { foot, support } : null;
-  }, [p, cake, tiers, tierIndex]);
+  // How much the geometry had to shrink it so the falling foot lands on the tier below. Announced,
+  // not silent — the same rule the step-back follows: the studio says what it did rather than
+  // leaving the author wondering why the size slider stopped doing anything.
+  const fitted = useMemo(() => rainbowBands(p, cake).supportFit, [p, cake]);
   // How far the clearance rule had to move it beyond what was asked for. Zero at any sane setting.
   // Is `spring` doing anything right now? It sets where the arc begins, but a foot RESTING on the
   // cake top pins the springing point to that foot — so in that one arrangement the slider is inert
@@ -319,18 +393,16 @@ export default function RainbowStudio() {
           ))}
           {/* WHICH tier the rainbow belongs to. The geometry asks for { radius, topY, boardY } and
               has never cared whether that is the whole cake or one tier of it — so this passes the
-              chosen tier's numbers and every ratio scales to that tier instead. */}
-          {tiers > 1 && Array.from({ length: tiers }, (_, i) => (
-            <button key={`t${i}`} onClick={() => setTierIndex(i)}
-              style={{ ...s.chip, ...(tierIndex === i ? s.chipOn : {}) }}>
-              on {i === 0 ? 'bottom' : i === tiers - 1 ? 'top' : `tier ${i + 1}`}
-            </button>
+              chosen tier's numbers and every ratio scales to that tier instead. Drawn top-first, so
+              the buttons sit in the order the tiers do. */}
+          {tiers > 1 && Array.from({ length: tiers }, (_, i) => tiers - 1 - i).map(i => (
+            <TierTile key={`t${i}`} tiers={tiers} index={i} on={tierIndex === i}
+                      onPick={() => setTierIndex(i)} />
           ))}
-          {overhang && (
+          {fitted < 0.999 && (
             <span style={{ ...s.tileLbl, width: '100%', textAlign: 'left', marginTop: 2, color: '#b45309' }}>
-              The falling foot reaches {overhang.foot.toFixed(2)} but the tier below ends at{' '}
-              {overhang.support.toFixed(2)} — it is resting on nothing. A board grows to catch a foot;
-              a tier cannot, so make it smaller or move it in.
+              Shrunk to {fitted.toFixed(2)}× so the falling foot lands on the tier below. A board grows
+              to catch a foot; a tier cannot. Move it in (Position) to get more of the size back.
             </span>
           )}
         </div>
@@ -350,7 +422,7 @@ export default function RainbowStudio() {
           <span style={s.groupLbl}>Arrangement</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ARRANGEMENTS.map(a => (
-              <ArrangementTile key={a.key} item={a}
+              <ArrangementTile key={a.key} item={a} tiers={tiers} tierIndex={tierIndex}
                 // On the wall the FEET are not part of the choice — the tile is the surface, and
                 // where it sits up the wall is the slider's job.
                 on={(p.surface ?? 'top') === a.surface
@@ -440,6 +512,8 @@ const s = {
   val:   { width: 48, textAlign: 'right', color: '#9AA79E', fontVariantNumeric: 'tabular-nums' },
   colors:{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0' },
   swatch:{ width: 30, height: 26, border: '1px solid #D9D5CE', borderRadius: 6, padding: 0, cursor: 'pointer' },
+  tierTile: { padding: 2, borderRadius: 8, border: '1px solid #E4E0D8', background: '#fff',
+              cursor: 'pointer', lineHeight: 0 },
   guide: { marginTop: 14, borderTop: '1px solid #EFEDE8', paddingTop: 10 },
   guideRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#5B6B60', padding: '3px 0' },
   guideVal: { marginLeft: 'auto', color: '#9AA79E' },
