@@ -85,24 +85,36 @@ const PRESETS = {
 //
 // Deliberately plain SVG rather than a 3D thumbnail: the point is to tell five silhouettes apart at
 // a glance, and five little renders would cost five canvases to say less.
+// Each carries EVERY field that makes it the shape it is — including where it stands. Setting only
+// the feet left the position behind, so picking "falling right" from a centred arrangement changed
+// the feet and moved nothing: the arch stayed in the middle and the choice looked broken. This is
+// the same rule the surface toggle already followed and these tiles did not.
+//
+// Both leaning tiles use the SAME positive offset: it is measured toward the side the rainbow falls,
+// so "falling left" mirrors without a second number.
 const ARRANGEMENTS = [
   { key: 'fall-right', surface: 'top', label: 'Over, falling right',
-    params: { footLeft: 'top', footRight: 'board', spring: 1 },
+    params: { footLeft: 'top', footRight: 'board', spring: 1, offsetX: 0.71, standoff: 0,
+              scale: 1, flatten: 0 },
     draw: <><path d="M9 30 A11 11 0 0 1 31 30 L31 40" /><path d="M9 30 L9 22" /></> },
   { key: 'fall-left', surface: 'top', label: 'Over, falling left',
-    params: { footLeft: 'board', footRight: 'top', spring: 1 },
+    params: { footLeft: 'board', footRight: 'top', spring: 1, offsetX: 0.71, standoff: 0,
+              scale: 1, flatten: 0 },
     draw: <><path d="M9 30 A11 11 0 0 1 31 30 L31 22" /><path d="M9 30 L9 40" /></> },
   { key: 'backdrop', surface: 'top', label: 'Behind, both down',
-    params: { footLeft: 'board', footRight: 'board', spring: 0.55 },
+    params: { footLeft: 'board', footRight: 'board', spring: 0.55, offsetX: 0, standoff: 0,
+              scale: 1, flatten: 0.15 },
     draw: <><path d="M8 26 A12 12 0 0 1 32 26 L32 40" /><path d="M8 26 L8 40" /></> },
   { key: 'on-top', surface: 'top', label: 'Sitting on top',
-    params: { footLeft: 'top', footRight: 'top', spring: 1.3, offsetX: 0 },
+    params: { footLeft: 'top', footRight: 'top', spring: 1.3, offsetX: 0, standoff: 0.15,
+              scale: 1, flatten: 0 },
     draw: <path d="M12 22 A8 8 0 0 1 28 22" /> },
   // ONE wall tile, not two. The pair that was here differed only in HEIGHT — ends on the board
   // versus floating partway up — and `Springs at` already moves it between them. A chooser offering
   // two points on a slider as though they were different shapes is a chooser with a wasted tile.
   { key: 'wall', surface: 'side', label: 'On the wall',
-    params: { footLeft: 'board', footRight: 'board', spring: 0, scale: 0.6, flatten: 0.55, offsetX: 0 },
+    params: { footLeft: 'board', footRight: 'board', spring: 0, offsetX: 0, standoff: 0,
+              theta: 0, proud: 0.02, scale: 0.6, flatten: 0.55 },
     draw: <path d="M13 40 A7 7 0 0 1 27 40" /> },
 ];
 
