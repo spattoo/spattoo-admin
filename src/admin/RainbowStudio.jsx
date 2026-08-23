@@ -49,11 +49,13 @@ const PRESETS = {
     footLeft: 'board', footRight: 'board', spring: 1, standoff: 0, topFootAt: 0.28, flatten: 0.15,
     colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
   // Sitting ON the cake: no legs to speak of, so it wants to be centred rather than set back.
+  // Centred, because a STANDING arch is fitted onto the cake — placed off to one side there is
+  // barely any cake left to stand on and it shrinks to a badge.
   'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, gap: 0.006,
-    footLeft: 'top', footRight: 'top', spring: 1.3, standoff: 0.15, flatten: 0,
+    footLeft: 'top', footRight: 'top', spring: 1.3, standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#EE6D8E', '#F29B54', '#F6D34F', '#7CC576', '#5BA9DE', '#8E7BC4', '#D98BC4'] },
   'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, gap: 0.008,
-    footLeft: 'top', footRight: 'top', spring: 1.3, standoff: 0.15, flatten: 0,
+    footLeft: 'top', footRight: 'top', spring: 1.3, standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
 };
 
@@ -140,6 +142,11 @@ export default function RainbowStudio() {
           cake. Change the tier count and watch the legs stretch while the arch stays put — that is
           the whole reason this is not a GLB.
           <br /><br />
+          <b>Size</b> scales the whole thing without changing its shape; <b>Inner radius</b> changes
+          the shape (a tighter hole under the same ropes). An arch with BOTH feet on the top is
+          standing on the cake, so it is fitted to it — placed off to one side there is little cake
+          left to stand on and it shrinks, which is what <b>Position</b> costs you there.
+          <br /><br />
           <b>Position</b> is yours alone — no size control moves it. Dragging the inner radius used
           to walk the rainbow across the cake, because the position was derived from the outer
           radius; it is a plain number now.
@@ -200,6 +207,7 @@ export default function RainbowStudio() {
           </div>
         ))}
 
+        {num('Size', 'scale', 0.3, 2.5, 0.05)}
         {num('Bands', 'bands', 3, 9, 1)}
         {num('Inner radius', 'innerRadius', 0.15, 1.2, 0.01)}
         {num('Thickness', 'thickness', 0.03, 0.2, 0.005)}
