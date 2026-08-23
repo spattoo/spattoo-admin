@@ -78,6 +78,51 @@ const PRESETS = {
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
 };
 
+// ── The arrangements a rainbow can actually be in ───────────────────────────────────────────────
+// "top / board / none", twice over, is engineer's vocabulary: it names the two ENDS and leaves the
+// reader to imagine what the pair adds up to. There are only five useful combinations, so they are
+// offered as themselves — each with a drawing, because the whole question is what it will look like.
+//
+// Deliberately plain SVG rather than a 3D thumbnail: the point is to tell five silhouettes apart at
+// a glance, and five little renders would cost five canvases to say less.
+const ARRANGEMENTS = [
+  { key: 'fall-right', surface: 'top', label: 'Over, falling right',
+    params: { footLeft: 'top', footRight: 'board', spring: 1 },
+    draw: <><path d="M9 30 A11 11 0 0 1 31 30 L31 40" /><path d="M9 30 L9 22" /></> },
+  { key: 'fall-left', surface: 'top', label: 'Over, falling left',
+    params: { footLeft: 'board', footRight: 'top', spring: 1 },
+    draw: <><path d="M9 30 A11 11 0 0 1 31 30 L31 22" /><path d="M9 30 L9 40" /></> },
+  { key: 'backdrop', surface: 'top', label: 'Behind, both down',
+    params: { footLeft: 'board', footRight: 'board', spring: 0.55 },
+    draw: <><path d="M8 26 A12 12 0 0 1 32 26 L32 40" /><path d="M8 26 L8 40" /></> },
+  { key: 'on-top', surface: 'top', label: 'Sitting on top',
+    params: { footLeft: 'top', footRight: 'top', spring: 1.3, offsetX: 0 },
+    draw: <path d="M12 22 A8 8 0 0 1 28 22" /> },
+  { key: 'wall-board', surface: 'side', label: 'On the wall, to the board',
+    params: { footLeft: 'board', footRight: 'board', spring: 0, scale: 0.6, flatten: 0.55, offsetX: 0 },
+    draw: <path d="M13 40 A7 7 0 0 1 27 40" /> },
+  { key: 'wall-float', surface: 'side', label: 'On the wall, floating',
+    params: { footLeft: 'none', footRight: 'none', spring: 0.42, scale: 0.5, flatten: 0.55, offsetX: 0 },
+    draw: <path d="M14 32 A6 6 0 0 1 26 32" /> },
+];
+
+// A cake in outline with the arrangement drawn against it — the SAME cake in every tile, so the
+// difference between them is the rainbow and nothing else.
+function ArrangementTile({ item, on, onPick }) {
+  return (
+    <button type="button" onClick={onPick} title={item.label}
+      style={{ ...s.tile, ...(on ? s.tileOn : {}) }}>
+      <svg viewBox="0 0 40 46" style={{ width: 46, height: 52 }}>
+        <ellipse cx="20" cy="42" rx="17" ry="3" fill="#EDE7DA" />
+        <rect x="8" y="22" width="24" height="19" rx="1.5" fill="#F7F5F1" stroke="#DDD8CF" />
+        <g fill="none" stroke={on ? '#2C4433' : '#B7AEA1'} strokeWidth="2.6"
+           strokeLinecap="round">{item.draw}</g>
+      </svg>
+      <span style={s.tileLbl}>{item.label}</span>
+    </button>
+  );
+}
+
 function Cake({ tiers, boardR }) {
   const geo = useMemo(() => {
     const g = [];
@@ -222,25 +267,6 @@ export default function RainbowStudio() {
           ))}
         </div>
 
-        {/* WHERE it sits. On the wall the arch is bent round the tier so it hugs — against a round
-            cake a flat one touches in the middle and floats at the ends. */}
-        <div style={s.group}>
-          <span style={s.groupLbl}>Sits on</span>
-          {/* Switching surface applies the WHOLE shape, not just the flag. A wall rainbow is a
-              different object — small, legless, flat — and flipping one field left the over-the-cake
-              proportions bent round the tier, which is 177% of the wall's height with straight legs.
-              A default nobody would choose is not a default. */}
-          {[['top', 'over the cake'], ['side', 'on the wall']].map(([v, label]) => (
-            <button key={v} onClick={() => setP(o => ({
-              ...o,
-              ...(v === 'side'
-                ? PRESETS['On the wall, ends on board']
-                : PRESETS['Over the shoulder (ref 3)']),
-            }))}
-              style={{ ...s.chip, ...((p.surface ?? 'top') === v ? s.chipOn : {}) }}>{label}</button>
-          ))}
-        </div>
-
         <div style={s.group}>
           <span style={s.groupLbl}>Grain</span>
           {[[true, 'fondant'], [false, 'plain']].map(([v, label]) => (
@@ -251,15 +277,19 @@ export default function RainbowStudio() {
 
         {/* Each foot lands on its own. One on the cake and one on the board is the lopsided shape a
             rainbow cake actually uses — a single setting could only ever make a symmetric arch. */}
-        {[['footLeft', 'Left foot'], ['footRight', 'Right foot']].map(([key, label]) => (
-          <div style={s.group} key={key}>
-            <span style={s.groupLbl}>{label}</span>
-            {['top', 'board', 'none'].map(v => (
-              <button key={v} onClick={() => set(key, v)}
-                style={{ ...s.chip, ...(p[key] === v ? s.chipOn : {}) }}>{v}</button>
+        {/* One question — what does it look like — instead of two enums and a mental model. */}
+        <div style={s.group}>
+          <span style={s.groupLbl}>Arrangement</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {ARRANGEMENTS.map(a => (
+              <ArrangementTile key={a.key} item={a}
+                on={(p.surface ?? 'top') === a.surface
+                    && p.footLeft === a.params.footLeft
+                    && (a.surface === 'side' || p.footRight === a.params.footRight)}
+                onPick={() => setP(o => ({ ...o, surface: a.surface, ...a.params }))} />
             ))}
           </div>
-        ))}
+        </div>
 
         {/* Back after being cut. It was measured in ONE arrangement — an arch leaning over the cake,
             where a resting foot pins it — and cut on that evidence. It is live in the other four. */}
@@ -328,6 +358,11 @@ const s = {
   note:  { margin: '0 0 14px', fontSize: 12, lineHeight: 1.5, color: '#7B8A7F' },
   group: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 12 },
   groupLbl: { fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: '#9AA79E', width: '100%' },
+  tile:  { border: '1.5px solid #E3E0DA', background: '#fff', borderRadius: 10, padding: '6px 4px 4px',
+           cursor: 'pointer', width: 76, display: 'flex', flexDirection: 'column', alignItems: 'center',
+           gap: 2, fontFamily: FONT },
+  tileOn:{ borderColor: '#2C4433', background: '#F4F7F4' },
+  tileLbl:{ fontSize: 9, lineHeight: 1.2, color: '#5B6B60', textAlign: 'center' },
   chip:  { border: '1px solid #D9D5CE', background: '#fff', borderRadius: 20, padding: '5px 11px', cursor: 'pointer', fontSize: 12, fontFamily: FONT },
   chipOn:{ background: '#2C4433', color: '#fff', borderColor: '#2C4433' },
   row:   { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12 },
