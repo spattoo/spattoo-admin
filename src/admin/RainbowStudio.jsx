@@ -98,12 +98,12 @@ const ARRANGEMENTS = [
   { key: 'on-top', surface: 'top', label: 'Sitting on top',
     params: { footLeft: 'top', footRight: 'top', spring: 1.3, offsetX: 0 },
     draw: <path d="M12 22 A8 8 0 0 1 28 22" /> },
-  { key: 'wall-board', surface: 'side', label: 'On the wall, to the board',
+  // ONE wall tile, not two. The pair that was here differed only in HEIGHT — ends on the board
+  // versus floating partway up — and `Springs at` already moves it between them. A chooser offering
+  // two points on a slider as though they were different shapes is a chooser with a wasted tile.
+  { key: 'wall', surface: 'side', label: 'On the wall',
     params: { footLeft: 'board', footRight: 'board', spring: 0, scale: 0.6, flatten: 0.55, offsetX: 0 },
     draw: <path d="M13 40 A7 7 0 0 1 27 40" /> },
-  { key: 'wall-float', surface: 'side', label: 'On the wall, floating',
-    params: { footLeft: 'none', footRight: 'none', spring: 0.42, scale: 0.5, flatten: 0.55, offsetX: 0 },
-    draw: <path d="M14 32 A6 6 0 0 1 26 32" /> },
 ];
 
 // A cake in outline with the arrangement drawn against it — the SAME cake in every tile, so the
@@ -218,8 +218,8 @@ export default function RainbowStudio() {
           <br /><br />
           <b>Size</b> scales the whole thing; <b>Inner radius</b> stretches it from the inside — the
           hole grows and everything outside it moves out with it, so it is not a "hole size" control.
-          <b>Springs at</b> is where the arc begins: 0 puts the ends on the board, higher lifts the
-          arch up the wall. An arch with BOTH feet on the top is
+          <b>Springs at</b> is where the arc begins — on the wall that is the whole vertical story:
+          0 rests the ends on the board, higher floats it partway up. An arch with BOTH feet on the top is
           standing on the cake, so it is fitted to it — placed off to one side there is little cake
           left to stand on and it shrinks, which is what <b>Position</b> costs you there.
           <br /><br />
@@ -283,9 +283,11 @@ export default function RainbowStudio() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ARRANGEMENTS.map(a => (
               <ArrangementTile key={a.key} item={a}
+                // On the wall the FEET are not part of the choice — the tile is the surface, and
+                // where it sits up the wall is the slider's job.
                 on={(p.surface ?? 'top') === a.surface
-                    && p.footLeft === a.params.footLeft
-                    && (a.surface === 'side' || p.footRight === a.params.footRight)}
+                    && (a.surface === 'side'
+                        || (p.footLeft === a.params.footLeft && p.footRight === a.params.footRight))}
                 onPick={() => setP(o => ({ ...o, surface: a.surface, ...a.params }))} />
             ))}
           </div>
