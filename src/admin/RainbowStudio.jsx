@@ -129,7 +129,9 @@ export default function RainbowStudio() {
           the whole reason this is not a GLB.
           <br /><br />
           The two feet land INDEPENDENTLY: one on the cake top and the other down on the board is
-          the lopsided shape a real rainbow cake uses. <b>Stands back</b> puts it behind the cake;
+          the lopsided shape a real rainbow cake uses. When they differ, the arch leans toward the
+          board side on its own, so the resting foot lands ON the cake instead of in mid-air beside
+          it — <b>Rests at</b> is how far out it sits, 0 being the middle of the top and 1 the rim. <b>Stands back</b> puts it behind the cake;
           at 0 it is centred and straddles it. <b>Springs at</b> is where the arc begins, measured
           up the cake — a foot resting on the top pushes it up to meet that foot.
         </p>
@@ -165,6 +167,7 @@ export default function RainbowStudio() {
         {num('Inner radius', 'innerRadius', 0.15, 1.2, 0.01)}
         {num('Thickness', 'thickness', 0.03, 0.2, 0.005)}
         {num('Gap', 'gap', 0, 0.06, 0.002)}
+        {num('Rests at', 'topFootAt', 0, 1, 0.05)}
         {num('Springs at', 'spring', 0, 1.4, 0.05)}
         {num('Stands back', 'standoff', 0, 2, 0.05)}
         {num('Flatten', 'flatten', 0, 0.9, 0.05)}
