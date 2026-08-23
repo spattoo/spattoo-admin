@@ -33,6 +33,8 @@ import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 
 // The cake, matching GlazeStudio so the two studios are looking at the same object.
 const R = 1.2, WALL_H = 1.45, BOARD_H = 0.1, BOARD_R = 1.6;
+// CakeTier.jsx's own constant. Copied, not chosen — see the grain map below.
+const GRAIN_TILES_PER_UNIT = 16;
 
 /* Core's buttercream, copied from spattoo-core/src/designer/frostings.js.
  *
@@ -126,9 +128,19 @@ function BandedCake({ bands, topColor, showGrain }) {
   const grainMap = useMemo(() => {
     const t = getCreamGrainNormalMap().clone();
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    // Tiled to the wall's real extent, the way CakeTier's grainNormalMap does it, so the grain is a
-    // constant physical size rather than stretching with the cake.
-    t.repeat.set(Math.round(2 * Math.PI * R * 2.2), Math.round(WALL_H * 2.2));
+    /* ⚠️ 16 tiles per world unit — CakeTier's GRAIN_TILES_PER_UNIT, not a number of my own.
+     * I first put 2.2 here, which is seven times coarser: the grain blobs came out big enough to
+     * smear the joins, and the wall read as blurry. Twice now the studio has misled by inventing a
+     * material constant instead of reading the one core uses. */
+    t.repeat.set(
+      Math.max(4, Math.round(2 * Math.PI * R * GRAIN_TILES_PER_UNIT)),
+      Math.max(3, Math.round(WALL_H * GRAIN_TILES_PER_UNIT)),
+    );
+    /* Anisotropic filtering, because this is a CURVED wall.
+     * At 120 tiles around the cake the grain is heavily minified towards the silhouette, where each
+     * screen pixel covers many texels. Trilinear alone picks an over-blurred mip there and the
+     * texture turns to mush across exactly the part of the cake you are looking at edge-on. */
+    t.anisotropy = 8;
     t.needsUpdate = true;
     return t;
   }, []);
