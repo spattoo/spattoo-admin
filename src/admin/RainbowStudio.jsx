@@ -87,6 +87,9 @@ function Cake({ tiers, boardR }) {
 export default function RainbowStudio() {
   const [p, setP] = useState({ ...RAINBOW_DEFAULTS });
   const [tiers, setTiers] = useState(1);
+  // On by default — it is what the thing is made of. The toggle exists to see the difference, which
+  // is the only way to judge whether the grain is doing any work at this size.
+  const [fondant, setFondant] = useState(true);
   const set = (k, v) => setP(o => ({ ...o, [k]: v }));
 
   // The cake the rainbow must fit — recomputed from the tier count, which is the point of the screen.
@@ -120,7 +123,7 @@ export default function RainbowStudio() {
           <SceneLights />
           <SceneEnv />
           <Cake tiers={tiers} boardR={boardR} />
-          <RainbowArch params={p} cake={cake} />
+          <RainbowArch params={p} cake={cake} fondant={fondant} />
           <OrbitControls target={[0, cake.topY * 0.6, 0]} enablePan={false} />
         </Canvas>
       </div>
@@ -161,6 +164,14 @@ export default function RainbowStudio() {
           {[1, 2, 3].map(n => (
             <button key={n} onClick={() => setTiers(n)}
               style={{ ...s.chip, ...(tiers === n ? s.chipOn : {}) }}>{n} tier</button>
+          ))}
+        </div>
+
+        <div style={s.group}>
+          <span style={s.groupLbl}>Surface</span>
+          {[[true, 'fondant grain'], [false, 'plain']].map(([v, label]) => (
+            <button key={label} onClick={() => setFondant(v)}
+              style={{ ...s.chip, ...(fondant === v ? s.chipOn : {}) }}>{label}</button>
           ))}
         </div>
 
