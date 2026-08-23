@@ -38,11 +38,17 @@ import { RainbowArch, rainbowBands, rainbowGuide, RAINBOW_DEFAULTS, SceneLights,
 const R = 1.2, BOTTOM_H = 1.45, BOARD_H = 0.1, BOARD_R = 1.6, TIER_STEP = 0.28;
 
 const PRESETS = {
-  'Pastel arch (ref 1)': { bands: 6, innerRadius: 0.62, thickness: 0.085, gap: 0.010, legs: 'board', flatten: 0.25,
+  // A BACKDROP: stands behind the cake, springs from about halfway up, and the cake overlaps its
+  // lower half. Not a hoop the cake sits inside.
+  'Backdrop (ref 1)': { bands: 6, innerRadius: 0.62, thickness: 0.085, gap: 0.010, legs: 'board',
+    spring: 0.55, standoff: 0.95, flatten: 0.25,
     colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
-  'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, gap: 0.006, legs: 'top', flatten: 0,
+  // Sitting ON the cake: no legs to speak of, so it wants to be centred rather than set back.
+  'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, gap: 0.006, legs: 'top',
+    spring: 1, standoff: 0.15, flatten: 0,
     colors: ['#EE6D8E', '#F29B54', '#F6D34F', '#7CC576', '#5BA9DE', '#8E7BC4', '#D98BC4'] },
-  'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, gap: 0.008, legs: 'top', flatten: 0,
+  'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, gap: 0.008, legs: 'top',
+    spring: 1, standoff: 0.15, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
 };
 
@@ -116,6 +122,11 @@ export default function RainbowStudio() {
           Generated, not modelled: the legs reach the board, which is a different distance on every
           cake. Change the tier count and watch the legs stretch while the arch stays put — that is
           the whole reason this is not a GLB.
+          <br /><br />
+          <b>Stands back</b> puts it BEHIND the cake, as a backdrop. At 0 it is centred and the legs
+          come down either side, which is a hoop, not a rainbow. <b>Springs at</b> is where the arc
+          begins, measured up the cake: 1 is the top, and around 0.55 gives the reference look with
+          the cake overlapping its lower half.
         </p>
 
         <div style={s.group}>
@@ -145,6 +156,8 @@ export default function RainbowStudio() {
         {num('Inner radius', 'innerRadius', 0.15, 1.2, 0.01)}
         {num('Thickness', 'thickness', 0.03, 0.2, 0.005)}
         {num('Gap', 'gap', 0, 0.06, 0.002)}
+        {num('Springs at', 'spring', 0, 1.4, 0.05)}
+        {num('Stands back', 'standoff', 0, 2, 0.05)}
         {num('Flatten', 'flatten', 0, 0.9, 0.05)}
         {num('Lean°', 'lean', -25, 25, 1)}
 
