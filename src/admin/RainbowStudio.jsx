@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // The SAME generator the designer renders, never a divergent copy — the rule ChocolateDripStudio
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
-import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, rainbowFootReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
 
 // ── Rainbow studio ────────────────────────────────────────────────────────────
 // Concentric fondant ropes, arching over the cake.
@@ -145,17 +145,22 @@ function ArrangementTile({ item, on, onPick }) {
   );
 }
 
+// The stack, once. The rainbow's geometry comes from the SAME list the mesh is drawn from — two
+// descriptions of where tier 2 starts is how a decoration ends up floating above the tier it is
+// supposed to be standing on.
+function tierStack(tiers) {
+  const g = [];
+  let y = BOARD_H;
+  for (let i = 0; i < tiers; i++) {
+    const h = BOTTOM_H - i * 0.12;
+    g.push({ r: R - i * TIER_STEP, h, y, topY: y + h });
+    y += h;
+  }
+  return g;
+}
+
 function Cake({ tiers, boardR }) {
-  const geo = useMemo(() => {
-    const g = [];
-    let y = BOARD_H;
-    for (let i = 0; i < tiers; i++) {
-      const r = R - i * TIER_STEP;
-      g.push({ r, h: BOTTOM_H - i * 0.12, y });
-      y += BOTTOM_H - i * 0.12;
-    }
-    return g;
-  }, [tiers]);
+  const geo = useMemo(() => tierStack(tiers), [tiers]);
   return (
     <group>
       <mesh position={[0, BOARD_H / 2, 0]} receiveShadow>
@@ -175,22 +180,41 @@ function Cake({ tiers, boardR }) {
 export default function RainbowStudio() {
   const [p, setP] = useState({ ...RAINBOW_DEFAULTS });
   const [tiers, setTiers] = useState(1);
+  const [tierIndex, setTierIndex] = useState(0);
   // On by default — it is what the thing is made of. The toggle exists to see the difference, which
   // is the only way to judge whether the grain is doing any work at this size.
   const [fondant, setFondant] = useState(true);
   const set = (k, v) => setP(o => ({ ...o, [k]: v }));
 
   // The cake the rainbow must fit — recomputed from the tier count, which is the point of the screen.
+  // A rainbow belongs to a TIER, not to the cake. The geometry asks for { radius, topY, boardY } and
+  // has never cared which of the two that describes — so tier 2 is the same code given tier 2's
+  // numbers: its own radius, its own top, and the surface it STANDS on, which is the board for the
+  // bottom tier and the tier below's top for any other.
   const cake = useMemo(() => {
-    let top = BOARD_H;
-    for (let i = 0; i < tiers; i++) top += BOTTOM_H - i * 0.12;
-    return { radius: R, topY: top, boardY: BOARD_H };
-  }, [tiers]);
+    const stack = tierStack(tiers);
+    const t = stack[Math.min(tierIndex, stack.length - 1)];
+    return { radius: t.r, topY: t.topY, boardY: t.y };
+  }, [tiers, tierIndex]);
 
   // The board GROWS to hold the rainbow. A standard board is sized for the cake, and a leg that
   // lands past its edge is a decoration resting on nothing — so the board answers to what is
   // standing on it. Never shrinks: a small rainbow does not make a cake need a smaller board.
-  const boardR = useMemo(() => Math.max(BOARD_R, rainbowBoardReach(p, cake)), [p, cake]);
+  // Only the BOTTOM tier stands on the board, so only a rainbow there can make it grow. One on an
+  // upper tier falls onto the tier below, which cannot be widened.
+  const boardR = useMemo(
+    () => (tierIndex === 0 ? Math.max(BOARD_R, rainbowBoardReach(p, cake)) : BOARD_R),
+    [p, cake, tierIndex],
+  );
+
+  // Whether the falling foot actually lands on the tier below. A foot in mid-air looks exactly like
+  // a seated one in a still picture, so it has to be a number rather than something to spot.
+  const overhang = useMemo(() => {
+    if (tierIndex === 0 || p.surface === 'side') return null;
+    const support = tierStack(tiers)[tierIndex - 1].r;
+    const foot = rainbowFootReach(p, cake);
+    return foot > support ? { foot, support } : null;
+  }, [p, cake, tiers, tierIndex]);
   // How far the clearance rule had to move it beyond what was asked for. Zero at any sane setting.
   // Is `spring` doing anything right now? It sets where the arc begins, but a foot RESTING on the
   // cake top pins the springing point to that foot — so in that one arrangement the slider is inert
@@ -207,6 +231,12 @@ export default function RainbowStudio() {
     return Math.max(0, used - (p.standoff ?? 0) * R);
   }, [p, cake]);
   const guide = useMemo(() => rainbowGuide(p, cake), [p, cake]);
+
+  // WHICH width the guide's ratios are measured against. Every one of them is a fraction of the tier
+  // the rainbow sits on, and on a stack "1.6x the cake's width" names three different numbers — the
+  // one thing a ratio was supposed to stop happening.
+  const tierName = tierIndex === 0 ? 'bottom' : tierIndex === tiers - 1 ? 'top' : `tier ${tierIndex + 1}`;
+  const guideWidth = tiers === 1 ? "the cake's width" : `the ${tierName} tier's width`;
   const bandCount = rainbowBands(p, cake).bands.length;
 
   const num = (label, key, min, max, step) => (
@@ -284,9 +314,25 @@ export default function RainbowStudio() {
             {stepped > 0.001 && ` · stepped back ${stepped.toFixed(2)} to clear the cake`}
           </span>
           {[1, 2, 3].map(n => (
-            <button key={n} onClick={() => setTiers(n)}
+            <button key={n} onClick={() => { setTiers(n); setTierIndex(i => Math.min(i, n - 1)); }}
               style={{ ...s.chip, ...(tiers === n ? s.chipOn : {}) }}>{n} tier</button>
           ))}
+          {/* WHICH tier the rainbow belongs to. The geometry asks for { radius, topY, boardY } and
+              has never cared whether that is the whole cake or one tier of it — so this passes the
+              chosen tier's numbers and every ratio scales to that tier instead. */}
+          {tiers > 1 && Array.from({ length: tiers }, (_, i) => (
+            <button key={`t${i}`} onClick={() => setTierIndex(i)}
+              style={{ ...s.chip, ...(tierIndex === i ? s.chipOn : {}) }}>
+              on {i === 0 ? 'bottom' : i === tiers - 1 ? 'top' : `tier ${i + 1}`}
+            </button>
+          ))}
+          {overhang && (
+            <span style={{ ...s.tileLbl, width: '100%', textAlign: 'left', marginTop: 2, color: '#b45309' }}>
+              The falling foot reaches {overhang.foot.toFixed(2)} but the tier below ends at{' '}
+              {overhang.support.toFixed(2)} — it is resting on nothing. A board grows to catch a foot;
+              a tier cannot, so make it smaller or move it in.
+            </span>
+          )}
         </div>
 
         <div style={s.group}>
@@ -359,7 +405,7 @@ export default function RainbowStudio() {
             <div key={g.index} style={s.guideRow}>
               <span style={{ ...s.dot, background: g.color }} />
               <span>band {g.index + 1}</span>
-              <span style={s.guideVal}>{g.lengthOfCakeWidth}× the cake's width</span>
+              <span style={s.guideVal}>{g.lengthOfCakeWidth}× {guideWidth}</span>
             </div>
           ))}
         </div>
