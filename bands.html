@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Band Frosting Studio (dev harness)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>html,body,#root{margin:0;height:100%}</style>
+</head>
+<body>
+  <div id="root"></div>
+  <!--
+    Standalone and AUTH-FREE, the same way cream-preview.html is.
+
+    The studio itself lives at /elements/band-frosting inside the admin app, which is correct — it
+    belongs in the Editors menu with its siblings. But that route is behind the sign-in, and the whole
+    value of this thing is that somebody LOOKS at it: a shader that renders bands is not the question,
+    whether the bands look like buttercream is. A page anyone can open with one URL is what gets
+    looked at; a page needing credentials gets described instead.
+  -->
+  <script type="module" src="/src/bandsHarness.jsx"></script>
+</body>
+</html>

@@ -56,6 +56,7 @@ const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
 const RainbowStudio         = lazy(() => import('./admin/RainbowStudio.jsx'));
 const LetterBlocksStudio    = lazy(() => import('./admin/LetterBlocksStudio.jsx'));
 const GlazeStudio           = lazy(() => import('./admin/GlazeStudio.jsx'));
+const BandFrostingStudio    = lazy(() => import('./admin/BandFrostingStudio.jsx'));
 const SecondCreamLayerStudio = lazy(() => import('./admin/SecondCreamLayerStudio.jsx'));
 const RolesCapabilities     = lazy(() => import('./admin/RolesCapabilities.jsx'));
 const TextureCalibrator     = lazy(() => import('./admin/TextureCalibrator.jsx'));
@@ -116,6 +117,7 @@ const ROUTES = {
   '/elements/rainbow':           RainbowStudio,
   '/elements/letter-blocks':     LetterBlocksStudio,
   '/elements/glaze':             GlazeStudio,
+  '/elements/band-frosting':     BandFrostingStudio,
   '/elements/second-cream-layer': SecondCreamLayerStudio,
   '/admin/roles':                RolesCapabilities,
 };
@@ -165,6 +167,7 @@ const NAV_GROUPS = [
     { href: '/elements/rainbow',        label: 'Rainbow' },
     { href: '/elements/letter-blocks',  label: 'Letter Blocks' },
     { href: '/elements/glaze',          label: 'Glaze Studio' },
+    { href: '/elements/band-frosting',  label: 'Band Frosting' },
     { href: '/elements/second-cream-layer', label: 'Second Cream Layer' },
     { href: '/elements/folded-sticker', label: 'Folded Butterfly' },
     { href: '/elements/photo-frame',    label: 'Photo Frame Studio' },
