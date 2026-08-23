@@ -42,11 +42,11 @@ const PRESETS = {
   // lower half. Not a hoop the cake sits inside.
   // The one everybody means: springs off the cake top on one side, sweeps down to the board on the
   // other. Only reachable once the two feet stopped sharing a setting.
-  'Over the shoulder (ref 3)': { bands: 6, innerRadius: 0.45, thickness: 0.075, gap: 0.008,
-    footLeft: 'top', footRight: 'board', spring: 1, standoff: 0.55, flatten: 0.15,
+  'Over the shoulder (ref 3)': { bands: 6, innerRadius: 0.30, thickness: 0.115, gap: 0.012,
+    footLeft: 'top', footRight: 'board', spring: 1, standoff: 0, topFootAt: 0.28, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
-  'Backdrop (ref 1)': { bands: 6, innerRadius: 0.62, thickness: 0.085, gap: 0.010,
-    footLeft: 'board', footRight: 'board', spring: 0.55, standoff: 0.95, flatten: 0.25,
+  'Backdrop (ref 1)': { bands: 6, innerRadius: 0.34, thickness: 0.115, gap: 0.012,
+    footLeft: 'board', footRight: 'board', spring: 1, standoff: 0, topFootAt: 0.28, flatten: 0.15,
     colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
   // Sitting ON the cake: no legs to speak of, so it wants to be centred rather than set back.
   'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, gap: 0.006,
@@ -135,7 +135,12 @@ export default function RainbowStudio() {
           The two feet land INDEPENDENTLY: one on the cake top and the other down on the board is
           the lopsided shape a real rainbow cake uses. When they differ, the arch leans toward the
           board side on its own, so the resting foot lands ON the cake instead of in mid-air beside
-          it — <b>Rests at</b> is how far out it sits, 0 being the middle of the top and 1 the rim. <b>Stands back</b> puts it behind the cake;
+          it — <b>Rests at</b> is how far out it sits, 0 being the middle of the top and 1 the rim.
+          <br /><br />
+          The proportion that matters is a <b>tight inner radius under fat ropes</b>: that is what
+          makes the band stack reach past the cake, so the legs come down beside it and nearly touch.
+          A wide hole with thin ropes gives a shallow hoop that can only miss the cake by standing
+          back — which puts the rainbow at the front of the board with a gap down its side. <b>Stands back</b> puts it behind the cake;
           at 0 it is centred and straddles it. <b>Springs at</b> is where the arc begins, measured
           up the cake — a foot resting on the top pushes it up to meet that foot.
         </p>
