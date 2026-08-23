@@ -125,6 +125,16 @@ export default function RainbowStudio() {
   // standing on it. Never shrinks: a small rainbow does not make a cake need a smaller board.
   const boardR = useMemo(() => Math.max(BOARD_R, rainbowBoardReach(p, cake)), [p, cake]);
   // How far the clearance rule had to move it beyond what was asked for. Zero at any sane setting.
+  // Is `spring` doing anything right now? It sets where the arc begins, but a foot RESTING on the
+  // cake top pins the springing point to that foot — so in that one arrangement the slider is inert
+  // and the screen should say so rather than let somebody drag a dead control. It is live in every
+  // other arrangement: backdrop, no feet, and both wall shapes.
+  const springPinned = useMemo(() => {
+    const b = rainbowBands(p, cake);
+    const asked = cake.boardY + (cake.topY - cake.boardY) * (p.spring ?? 1);
+    return b.archY > asked + 1e-6;
+  }, [p, cake]);
+
   const stepped = useMemo(() => {
     const used = rainbowBands(p, cake).standoff;
     return Math.max(0, used - (p.standoff ?? 0) * R);
@@ -161,8 +171,10 @@ export default function RainbowStudio() {
           cake. Change the tier count and watch the legs stretch while the arch stays put — that is
           the whole reason this is not a GLB.
           <br /><br />
-          <b>Size</b> scales the whole thing without changing its shape; <b>Inner radius</b> changes
-          the shape (a tighter hole under the same ropes). An arch with BOTH feet on the top is
+          <b>Size</b> scales the whole thing; <b>Inner radius</b> stretches it from the inside — the
+          hole grows and everything outside it moves out with it, so it is not a "hole size" control.
+          <b>Springs at</b> is where the arc begins: 0 puts the ends on the board, higher lifts the
+          arch up the wall. An arch with BOTH feet on the top is
           standing on the cake, so it is fitted to it — placed off to one side there is little cake
           left to stand on and it shrinks, which is what <b>Position</b> costs you there.
           <br /><br />
@@ -184,9 +196,7 @@ export default function RainbowStudio() {
           at 0 it is centred and straddles it.
           <br /><br />
           Gone, and worth knowing why: <b>Gap</b> — fondant ropes with daylight between them do not
-          hold each other up, so they touch, always. <b>Lean</b> — nothing wanted it. <b>Springs at</b>
-          — with a foot resting on the cake the springing point is pinned to that foot, so the control
-          did nothing across its whole useful range and only detached the foot beyond it.
+          hold each other up, so they touch, always. <b>Lean</b> — nothing wanted it.
         </p>
 
         <div style={s.group}>
@@ -251,6 +261,17 @@ export default function RainbowStudio() {
           </div>
         ))}
 
+        {/* Back after being cut. It was measured in ONE arrangement — an arch leaning over the cake,
+            where a resting foot pins it — and cut on that evidence. It is live in the other four. */}
+        {num('Springs at', 'spring', 0, 1.4, 0.02)}
+        {springPinned && (
+          <div style={{ ...s.row, marginTop: -4, marginBottom: 10 }}>
+            <span style={s.lbl} />
+            <span style={{ fontSize: 10.5, color: '#B08A6A' }}>
+              pinned by the foot resting on the cake — free it by putting both feet on the board
+            </span>
+          </div>
+        )}
         {num('Size', 'scale', 0.3, 2.5, 0.05)}
         {num('Bands', 'bands', 3, 9, 1)}
         {num('Inner radius', 'innerRadius', 0.15, 1.2, 0.01)}
