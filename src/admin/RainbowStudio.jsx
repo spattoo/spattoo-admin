@@ -57,8 +57,6 @@ const PRESETS = {
   'Over the shoulder, mirrored': { bands: 6, innerRadius: 0.30, thickness: 0.115,
     footLeft: 'board', footRight: 'top', standoff: 0, topFootAt: 0.28, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
-  // A BACKDROP: stands behind the cake, springs from about halfway up, and the cake overlaps its
-  // lower half. Not a hoop the cake sits inside.
   // The one everybody means: springs off the cake top on one side, sweeps down to the board on the
   // other. Only reachable once the two feet stopped sharing a setting.
   'Over the shoulder (ref 3)': { bands: 6, innerRadius: 0.30, thickness: 0.115, 
@@ -95,7 +93,7 @@ const PRESETS = {
 const ARRANGEMENTS = [
   { key: 'fall-right', surface: 'top', label: 'Over, falling right',
     params: { footLeft: 'top', footRight: 'board', spring: 1, offsetX: 0.71, standoff: 0,
-              scale: 1, flatten: 0, behind: false },
+              scale: 1, flatten: 0 },
     draw: (t, floor) => {
       const [a, b] = leanFeet(t, 1);
       const r = (b - a) / 2;
@@ -103,22 +101,11 @@ const ARRANGEMENTS = [
     } },
   { key: 'fall-left', surface: 'top', label: 'Over, falling left',
     params: { footLeft: 'board', footRight: 'top', spring: 1, offsetX: 0.71, standoff: 0,
-              scale: 1, flatten: 0, behind: false },
+              scale: 1, flatten: 0 },
     draw: (t, floor) => {
       const [a, b] = leanFeet(t, -1);
       const r = (b - a) / 2;
       return <path d={`M${a} ${floor} L${a} ${t.top} A${r} ${r} 0 0 1 ${b} ${t.top}`} />;
-    } },
-  // The only one that stands on the far side of the cake, which is what makes it a backdrop rather
-  // than an arch in the way. `spring` is a MINIMUM here: the geometry raises the crown until it
-  // clears the tier, because the value that framed a whole cake leaves an upper tier's arch stopping
-  // level with its own top — two legs either side of a tier and no rainbow between them.
-  { key: 'backdrop', surface: 'top', label: 'Behind, both down', behind: true,
-    params: { footLeft: 'board', footRight: 'board', spring: 0.55, offsetX: 0, standoff: 0,
-              scale: 1, flatten: 0.15, behind: true },
-    draw: (t, floor) => {
-      const r = Math.min(t.w * 0.62, 15), y = t.top + (t.base - t.top) * 0.25;
-      return <path d={`M${t.cx - r} ${floor} L${t.cx - r} ${y} A${r} ${r} 0 0 1 ${t.cx + r} ${y} L${t.cx + r} ${floor}`} />;
     } },
   // spring 1, NOT above it. Past 1 the springing point rises above the cake top and the arch grows
   // LEGS to reach it — it stood on 0.38 of stilt, floating clear of the cake it was supposed to be
@@ -127,7 +114,7 @@ const ARRANGEMENTS = [
   // cake's height — the proportion in references 2 and 4.
   { key: 'on-top', surface: 'top', label: 'Sitting on top',
     params: { footLeft: 'top', footRight: 'top', spring: 1, offsetX: 0, standoff: 0,
-              scale: 0.75, flatten: 0, behind: false },
+              scale: 0.75, flatten: 0 },
     draw: t => {
       const r = t.w * 0.34;
       return <path d={`M${t.cx - r} ${t.top} A${r} ${r} 0 0 1 ${t.cx + r} ${t.top}`} />;
@@ -142,7 +129,7 @@ const ARRANGEMENTS = [
   { key: 'wall', surface: 'side', label: 'On the wall',
     params: { footLeft: 'board', footRight: 'board', spring: 0.18, offsetX: 0, standoff: 0,
               theta: -0.09, proud: 0.02, scale: 0.75, flatten: 0,
-              bands: 6, innerRadius: 0.30, thickness: 0.12, behind: false },
+              bands: 6, innerRadius: 0.30, thickness: 0.12 },
     draw: t => {
       const r = Math.min(t.w * 0.30, (t.base - t.top) * 0.75);
       return <path d={`M${t.cx - r} ${t.base - 1} A${r} ${r} 0 0 1 ${t.cx + r} ${t.base - 1}`} />;
@@ -184,8 +171,6 @@ function ArrangementTile({ item, on, onPick, tiers, tierIndex }) {
   const t = boxes[Math.min(tierIndex, boxes.length - 1)];
   // What a falling foot lands on: the tier below, or the board when there is nothing below.
   const floor = tierIndex === 0 ? BOARD_Y : boxes[tierIndex - 1].top;
-  // Drawn UNDER the cake for a backdrop and over it otherwise, because that is the difference the
-  // tile exists to show — an arch on the far side is hidden where the cake covers it.
   const rainbow = (
     <g fill="none" stroke={on ? '#2C4433' : '#B7AEA1'} strokeWidth="2.6"
        strokeLinecap="round">{item.draw(t, floor)}</g>
@@ -195,13 +180,12 @@ function ArrangementTile({ item, on, onPick, tiers, tierIndex }) {
       style={{ ...s.tile, ...(on ? s.tileOn : {}) }}>
       <svg viewBox="0 0 40 46" style={{ width: 46, height: 52 }}>
         <ellipse cx="20" cy="42" rx="17" ry="3" fill="#EDE7DA" />
-        {item.behind && rainbow}
         {boxes.map((b, i) => (
           <rect key={i} x={b.x} y={b.top} width={b.w} height={b.base - b.top} rx="1.5"
                 fill={i === tierIndex ? '#FFFFFF' : '#F7F5F1'}
                 stroke={i === tierIndex ? '#C9C1B4' : '#DDD8CF'} />
         ))}
-        {!item.behind && rainbow}
+        {rainbow}
       </svg>
       <span style={s.tileLbl}>{item.label}</span>
     </button>
@@ -303,7 +287,7 @@ export default function RainbowStudio() {
   // Is `spring` doing anything right now? It sets where the arc begins, but a foot RESTING on the
   // cake top pins the springing point to that foot — so in that one arrangement the slider is inert
   // and the screen should say so rather than let somebody drag a dead control. It is live in every
-  // other arrangement: backdrop, no feet, and both wall shapes.
+  // other arrangement: a leaning arch whose top foot is off the cake, and both wall shapes.
   const springPinned = useMemo(() => {
     const b = rainbowBands(p, cake);
     const asked = cake.boardY + (cake.topY - cake.boardY) * (p.spring ?? 1);
@@ -374,10 +358,7 @@ export default function RainbowStudio() {
           makes the band stack reach past the cake, so the legs come down beside it and nearly touch.
           A wide hole with thin ropes gives a shallow hoop that can only miss the cake by standing
           back — which puts the rainbow at the front of the board with a gap down its side. <b>Stands back</b>
-          is how far off the cake's middle it stands, and at 0 it is centred and straddles it. Which
-          SIDE it stands on belongs to the arrangement, not to this slider: only <b>Behind, both
-          down</b> goes to the far side, which is what makes it a backdrop rather than an arch in the
-          way.
+          is how far off the cake's middle it stands, and at 0 it is centred and straddles it.
           <br /><br />
           Gone, and worth knowing why: <b>Gap</b> — fondant ropes with daylight between them do not
           hold each other up, so they touch, always. <b>Lean</b> — nothing wanted it.
