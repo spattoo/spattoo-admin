@@ -38,7 +38,7 @@ import * as THREE from 'three';
  * more thin stripes, and the first cut of this capped at eight because it assumed one colour meant
  * one band. The cap is a shader array size, so it costs uniforms whether used or not; 24 is chosen
  * as "more than any cake anyone has shown us" rather than as a limit anybody should hit. */
-export const MAX_BANDS = 24;
+export const MAX_STRIPES = 24;
 
 /* ── Palette × count, not one-colour-one-band ────────────────────────────────────────────────────
  *
@@ -54,7 +54,7 @@ export const MAX_BANDS = 24;
 export function expandPalette(palette, count) {
   const p = (palette ?? []).filter(Boolean);
   if (!p.length) return [];
-  const n = Math.max(2, Math.min(MAX_BANDS, Math.round(count || p.length)));
+  const n = Math.max(2, Math.min(MAX_STRIPES, Math.round(count || p.length)));
   return Array.from({ length: n }, (_, i) => p[i % p.length]);
 }
 
@@ -64,16 +64,16 @@ export function expandPalette(palette, count) {
  * Accepts either shape: `{ palette, count }` or a literal `{ colors }`. The studio speaks the first,
  * and the second is what the shader ultimately needs — keeping both readable here means callers do
  * not each have to remember to expand. */
-export function bandColors(bands) {
-  if (!bands) return [];
-  if (Array.isArray(bands.palette) && bands.palette.filter(Boolean).length) {
-    return expandPalette(bands.palette, bands.count ?? bands.palette.length);
+export function stripeColors(stripes) {
+  if (!stripes) return [];
+  if (Array.isArray(stripes.palette) && stripes.palette.filter(Boolean).length) {
+    return expandPalette(stripes.palette, stripes.count ?? stripes.palette.length);
   }
-  return (bands.colors ?? []).filter(Boolean).slice(0, MAX_BANDS);
+  return (stripes.colors ?? []).filter(Boolean).slice(0, MAX_STRIPES);
 }
 
-export function areBandsActive(bands) {
-  return bandColors(bands).length >= 2;
+export function areStripesActive(stripes) {
+  return stripeColors(stripes).length >= 2;
 }
 
 /* Where each join sits, as a fraction of the wall's height.
@@ -85,7 +85,7 @@ export function areBandsActive(bands) {
  * Returned as cumulative boundaries (count - 1 of them), which is what the shader wants: boundary i
  * is where colour i hands over to colour i+1.
  */
-export function bandBoundaries(count, weights) {
+export function stripeBoundaries(count, weights) {
   const src = (weights ?? []).filter(v => Number.isFinite(Number(v)) && Number(v) > 0);
   const w = [];
   for (let i = 0; i < count; i++) {
@@ -111,7 +111,7 @@ export function bandBoundaries(count, weights) {
  * The 0.3 keeps existing presets looking as they did — at six even bands it reproduces the old flat
  * amplitude almost exactly. */
 export function wobbleAmplitude(wobble, count, weights) {
-  return Math.max(0, Math.min(1, wobble ?? 0)) * thinnestBand(count, weights) * 0.3;
+  return Math.max(0, Math.min(1, wobble ?? 0)) * thinnestStripe(count, weights) * 0.3;
 }
 
 /* The blend width, in the same 0..1 height units as the boundaries.
@@ -121,31 +121,31 @@ export function wobbleAmplitude(wobble, count, weights) {
  * it to the narrowest band means `softness` means the same thing — "how much of a band does the join
  * eat" — whatever the count.
  */
-export function thinnestBand(count, weights) {
-  const bounds = bandBoundaries(count, weights);
+export function thinnestStripe(count, weights) {
+  const bounds = stripeBoundaries(count, weights);
   let thinnest = 1, prev = 0;
   for (const b of [...bounds, 1]) { thinnest = Math.min(thinnest, b - prev); prev = b; }
   return thinnest;
 }
 
 export function blendWidth(softness, count, weights) {
-  return Math.max(0, Math.min(1, softness)) * thinnestBand(count, weights);
+  return Math.max(0, Math.min(1, softness)) * thinnestStripe(count, weights);
 }
 
-const VERT_COMMON = '#include <common>\nvarying vec3 vBandLocal;';
-const VERT_BEGIN  = '#include <begin_vertex>\nvBandLocal = position;';
+const VERT_COMMON = '#include <common>\nvarying vec3 vStripeLocal;';
+const VERT_BEGIN  = '#include <begin_vertex>\nvStripeLocal = position;';
 
 const FRAG_COMMON = [
   '#include <common>',
-  'varying vec3 vBandLocal;',
-  `uniform vec3  uBColors[${MAX_BANDS}];`,
-  `uniform float uBEdges[${MAX_BANDS}];`,   // count - 1 used
-  'uniform int   uBCount;',
-  'uniform float uBBlend;',
-  'uniform float uBWobble;',
-  'uniform vec3  uBMin;',
-  'uniform vec3  uBSize;',
-  'uniform vec3  uBCenter;',
+  'varying vec3 vStripeLocal;',
+  `uniform vec3  uSColors[${MAX_STRIPES}];`,
+  `uniform float uSEdges[${MAX_STRIPES}];`,   // count - 1 used
+  'uniform int   uSCount;',
+  'uniform float uSBlend;',
+  'uniform float uSWobble;',
+  'uniform vec3  uSMin;',
+  'uniform vec3  uSSize;',
+  'uniform vec3  uSCenter;',
 ].join('\n');
 
 /* Progressive mix, band by band.
@@ -155,30 +155,30 @@ const FRAG_COMMON = [
  * and in between only the nearby boundaries contribute — which is exactly the "poured one on top of
  * the other" look, and needs no branching or sorting.
  *
- * ⚠️ `uBBlend` can be 0 (hard edges). smoothstep with equal endpoints is undefined, hence the
+ * ⚠️ `uSBlend` can be 0 (hard edges). smoothstep with equal endpoints is undefined, hence the
  * epsilon — without it the crisp rainbow, the very look someone reaches for first, renders as
  * garbage on some drivers while looking fine on others.
  */
 const FRAG_COLOR = `#include <color_fragment>
 {
-  float bt = (vBandLocal.y - uBMin.y) / max(uBSize.y, 1e-4);
+  float bt = (vStripeLocal.y - uSMin.y) / max(uSSize.y, 1e-4);
 
   // Scraper wobble: a real cake's joins are not spirit-levelled. Two harmonics of the angle around
   // the cake, so the waver reads as a hand rather than a sine wave.
-  if (uBWobble > 0.0) {
-    float ang = atan(vBandLocal.z - uBCenter.z, vBandLocal.x - uBCenter.x);
-    // uBWobble is already an AMPLITUDE in t units, scaled to band height on the JS side — see
+  if (uSWobble > 0.0) {
+    float ang = atan(vStripeLocal.z - uSCenter.z, vStripeLocal.x - uSCenter.x);
+    // uSWobble is already an AMPLITUDE in t units, scaled to band height on the JS side — see
     // wobbleAmplitude(). A flat fraction of the wall here made sixteen thin stripes braid.
-    bt += uBWobble * (sin(ang * 3.0) * 0.6 + sin(ang * 5.0 + 1.7) * 0.4);
+    bt += uSWobble * (sin(ang * 3.0) * 0.6 + sin(ang * 5.0 + 1.7) * 0.4);
   }
   bt = clamp(bt, 0.0, 1.0);
 
-  vec3 bcol = uBColors[0];
-  float half_ = max(uBBlend, 1e-5) * 0.5;
-  for (int i = 0; i < ${MAX_BANDS} - 1; i++) {
-    if (i >= uBCount - 1) break;
-    float e = uBEdges[i];
-    bcol = mix(bcol, uBColors[i + 1], smoothstep(e - half_, e + half_, bt));
+  vec3 bcol = uSColors[0];
+  float half_ = max(uSBlend, 1e-5) * 0.5;
+  for (int i = 0; i < ${MAX_STRIPES} - 1; i++) {
+    if (i >= uSCount - 1) break;
+    float e = uSEdges[i];
+    bcol = mix(bcol, uSColors[i + 1], smoothstep(e - half_, e + half_, bt));
   }
   diffuseColor.rgb = bcol;
 }`;
@@ -189,57 +189,57 @@ const FRAG_COLOR = `#include <color_fragment>
  * `position` attribute and needs to know what the bottom and top of THIS wall are. The caller owns
  * it; the material has no idea what geometry it is on.
  */
-export function applyBands(material, bands, bbox) {
+export function applyStripes(material, stripes, bbox) {
   if (!material) return;
-  const active = areBandsActive(bands) && !!bbox;
+  const active = areStripesActive(stripes) && !!bbox;
 
   if (!active) {
     // Put the material back exactly as it was. A stale onBeforeCompile keeps injecting long after
     // the bands are gone, and the wall stays striped with nothing in the config to explain it.
-    if (material.userData.__bandsPatched) {
-      material.onBeforeCompile = material.userData.__bandsPrevOBC ?? (() => {});
-      delete material.userData.__bandsPrevOBC;
-      material.userData.__bandsPatched = false;
-      material.userData.__bandUniforms = null;
+    if (material.userData.__stripesPatched) {
+      material.onBeforeCompile = material.userData.__stripesPrevOBC ?? (() => {});
+      delete material.userData.__stripesPrevOBC;
+      material.userData.__stripesPatched = false;
+      material.userData.__stripeUniforms = null;
       material.needsUpdate = true;
     }
     return;
   }
 
-  const colors = bandColors(bands);          // palette cycled into `count` bands
+  const colors = stripeColors(stripes);          // palette cycled into `count` bands
   const count = colors.length;
-  const edges = bandBoundaries(count, bands.weights);
-  const blend = blendWidth(bands.softness ?? 0.35, count, bands.weights);
-  const wob   = wobbleAmplitude(bands.wobble, count, bands.weights);
+  const edges = stripeBoundaries(count, stripes.weights);
+  const blend = blendWidth(stripes.softness ?? 0.35, count, stripes.weights);
+  const wob   = wobbleAmplitude(stripes.wobble, count, stripes.weights);
 
-  const u = material.userData.__bandUniforms;
+  const u = material.userData.__stripeUniforms;
   // Already patched: just push the new values. Recompiling on every colour tweak is what makes a
   // colour picker feel like it is chewing through treacle.
-  if (u && material.userData.__bandsPatched) {
-    for (let i = 0; i < MAX_BANDS; i++) u.uBColors.value[i].set(colors[Math.min(i, count - 1)]);
-    for (let i = 0; i < MAX_BANDS; i++) u.uBEdges.value[i] = edges[i] ?? 1;
-    u.uBCount.value  = count;
-    u.uBBlend.value  = blend;
-    u.uBWobble.value = wob;
-    u.uBMin.value.copy(bbox.min);
-    u.uBSize.value.copy(bbox.size);
-    u.uBCenter.value.copy(bbox.center);
+  if (u && material.userData.__stripesPatched) {
+    for (let i = 0; i < MAX_STRIPES; i++) u.uSColors.value[i].set(colors[Math.min(i, count - 1)]);
+    for (let i = 0; i < MAX_STRIPES; i++) u.uSEdges.value[i] = edges[i] ?? 1;
+    u.uSCount.value  = count;
+    u.uSBlend.value  = blend;
+    u.uSWobble.value = wob;
+    u.uSMin.value.copy(bbox.min);
+    u.uSSize.value.copy(bbox.size);
+    u.uSCenter.value.copy(bbox.center);
     return;
   }
 
   const uniforms = {
-    uBColors: { value: Array.from({ length: MAX_BANDS }, (_, i) => new THREE.Color(colors[Math.min(i, count - 1)])) },
-    uBEdges:  { value: Array.from({ length: MAX_BANDS }, (_, i) => edges[i] ?? 1) },
-    uBCount:  { value: count },
-    uBBlend:  { value: blend },
-    uBWobble: { value: wob },
-    uBMin:    { value: bbox.min.clone() },
-    uBSize:   { value: bbox.size.clone() },
-    uBCenter: { value: bbox.center.clone() },
+    uSColors: { value: Array.from({ length: MAX_STRIPES }, (_, i) => new THREE.Color(colors[Math.min(i, count - 1)])) },
+    uSEdges:  { value: Array.from({ length: MAX_STRIPES }, (_, i) => edges[i] ?? 1) },
+    uSCount:  { value: count },
+    uSBlend:  { value: blend },
+    uSWobble: { value: wob },
+    uSMin:    { value: bbox.min.clone() },
+    uSSize:   { value: bbox.size.clone() },
+    uSCenter: { value: bbox.center.clone() },
   };
 
   const prev = material.onBeforeCompile;
-  material.userData.__bandsPrevOBC = prev;
+  material.userData.__stripesPrevOBC = prev;
   material.onBeforeCompile = (shader, renderer) => {
     prev?.(shader, renderer);
     Object.assign(shader.uniforms, uniforms);
@@ -250,7 +250,7 @@ export function applyBands(material, bands, bbox) {
       .replace('#include <common>', FRAG_COMMON)
       .replace('#include <color_fragment>', FRAG_COLOR);
   };
-  material.userData.__bandUniforms = uniforms;
-  material.userData.__bandsPatched = true;
+  material.userData.__stripeUniforms = uniforms;
+  material.userData.__stripesPatched = true;
   material.needsUpdate = true;
 }

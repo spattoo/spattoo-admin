@@ -2,10 +2,10 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, Lightformer } from '@react-three/drei';
 import * as THREE from 'three';
-import { applyBands, bandColors, bandBoundaries, blendWidth, MAX_BANDS } from './bandFrosting.js';
+import { applyStripes, stripeColors, stripeBoundaries, blendWidth, MAX_STRIPES } from './stripeFrosting.js';
 import { getCreamGrainNormalMap } from '../lib/creamWaveTexture.js';
 
-/* ── Band Frosting Studio ────────────────────────────────────────────────────────────────────────
+/* ── Stripe Frosting Studio ────────────────────────────────────────────────────────────────────────
  *
  * Prove multi-colour horizontal bands on a frosted wall BEFORE porting to core.
  *
@@ -47,8 +47,13 @@ const BUTTERCREAM = {
   clearcoat: 0, clearcoatRoughness: 0.45, envMapIntensity: 0.65,
 };
 
-/* The four reference photos, as configs. Colours sampled from the images; listed BASE → TOP, which is
- * the direction the shader reads and the direction a baker ices in. */
+/* The reference photos, as configs. Listed BASE → TOP, which is the direction the shader reads and the
+ * direction a baker ices in.
+ *
+ * ⚠️ PROVENANCE, because it decides whether these are fit to ship: only `stripes` has colours MEASURED
+ * off its photo. The other three were picked by eye from the images, and measuring the one exposed a
+ * systematic error in that method — the eye chose #FFFFFF where the real icing is a warm off-white.
+ * Assume the same bias sits in the others until they are sampled too. */
 const PRESETS = {
   pastel: {
     label: 'Pastel rainbow',
@@ -57,7 +62,7 @@ const PRESETS = {
      * that is plainly wrong: at 0.95 the bands stop existing and it becomes a single wash, whereas
      * the reference has six clearly separate colours whose joins happen to be gentle. Soft COLOURS
      * are not a soft BLEND, and no amount of reading the source would have caught that. */
-    note: 'Six pastels with gentle joins. The bands stay countable — soft colours, not a soft blend. Set this above ~0.7 and it collapses into one wash, which is a different cake.',
+    note: 'Six pastels with gentle joins. The stripes stay countable — soft colours, not a soft blend. Set this above ~0.7 and it collapses into one wash, which is a different cake.',
     palette: ['#C9AEE0', '#A9C8E8', '#B9E3C6', '#F6EAA8', '#F9C9A3', '#F3AEC0'], count: 6,
     softness: 0.5, wobble: 0.25, weights: [1, 1, 1, 1, 1, 1],
   },
@@ -78,8 +83,14 @@ const PRESETS = {
     /* The case that broke the original model. Two colours and sixteen bands — a "repeat" multiplier
      * could reach 16, but not 15 or 17, and an ODD count is what puts the same colour top and bottom
      * on a striped cake. The palette cycles into a count instead. */
-    note: 'Two colours, sixteen thin stripes. Try an odd count — 15 or 17 — to get the same colour at the top and the bottom, which a repeat multiplier cannot express.',
-    palette: ['#FFFFFF', '#A8D96B'], count: 16,
+    /* ⚠️ SAMPLED from the reference photo, not picked by eye — and the eye had it wrong.
+     * The green was close (#A8D96B guessed, #ABD76B measured). The "white" was not: it measures as a
+     * warm, faintly green off-white (#E2E5BE–#E7E5C3 in shadow), never anything near #FFFFFF. Pure
+     * white against a green stripe reads as printed vinyl; real buttercream white is warm.
+     * The value here is lifted for the unshadowed icing colour, since the sample includes the drip's
+     * shadow. */
+    note: 'Two colours, sixteen thin stripes — sampled from the reference photo. Note the white is a warm off-white, not #FFF; pure white against green reads as vinyl rather than buttercream. Try an odd count (15 or 17) for the same colour top and bottom, which a repeat multiplier cannot express.',
+    palette: ['#F1EEDC', '#ABD76B'], count: 16,
     softness: 0.18, wobble: 0.3, weights: [1, 1],
   },
   rainbow: {
@@ -93,7 +104,7 @@ const PRESETS = {
 const clamp01 = v => Math.max(0, Math.min(1, v));
 
 // ── The cake ────────────────────────────────────────────────────────────────────────────────────
-function BandedCake({ bands, topColor, grain }) {
+function StripedCake({ stripes, topColor, grain }) {
   const wallRef = useRef();
   const matRef  = useRef();
 
@@ -145,7 +156,7 @@ function BandedCake({ bands, topColor, grain }) {
     return t;
   }, []);
 
-  useEffect(() => { applyBands(matRef.current, bands, bbox); }, [bands, bbox]);
+  useEffect(() => { applyStripes(matRef.current, stripes, bbox); }, [stripes, bbox]);
 
   return (
     <group>
@@ -194,7 +205,7 @@ function Slider({ label, value, onChange, min = 0, max = 1, step = 0.01, hint })
   );
 }
 
-export default function BandFrostingStudio() {
+export default function StripeFrostingStudio() {
   const [presetKey, setPresetKey] = useState('unicorn');
   const [palette, setPalette] = useState(PRESETS.unicorn.palette);
   const [count, setCount]     = useState(PRESETS.unicorn.count);
@@ -222,13 +233,13 @@ export default function BandFrostingStudio() {
     setSoftness(p.softness); setWobble(p.wobble);
   };
 
-  const bands = useMemo(
+  const stripes = useMemo(
     () => ({ palette, count, weights, softness, wobble }),
     [palette, count, weights, softness, wobble],
   );
 
-  const expanded = bandColors(bands);
-  const edges = bandBoundaries(count, weights);
+  const expanded = stripeColors(stripes);
+  const edges = stripeBoundaries(count, weights);
   const blend = blendWidth(softness, count, weights);
   const resolvedTop = topFromTopBand ? expanded[expanded.length - 1] : topColor;
 
@@ -249,12 +260,12 @@ export default function BandFrostingStudio() {
     setCount(c => (c === palette.length ? c - 1 : c));
   };
 
-  const config = JSON.stringify({ bands: { palette, count, weights, softness: +softness.toFixed(2), wobble: +wobble.toFixed(2) } }, null, 2);
+  const config = JSON.stringify({ stripes: { palette, count, weights, softness: +softness.toFixed(2), wobble: +wobble.toFixed(2) } }, null, 2);
 
   return (
     <div style={{ minHeight: '100vh', background: '#f7f2f4', fontFamily: "'Quicksand', system-ui, sans-serif", color: '#3b2b31' }}>
       <div style={{ padding: '18px 22px 8px' }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Band Frosting Studio</h1>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Stripe Frosting Studio</h1>
         <p style={{ margin: '6px 0 0', fontSize: 13, color: '#7a6069', maxWidth: 780, lineHeight: 1.6 }}>
           Several colours stacked up the side of the cake, scraped smooth. <b>Softness</b> is the whole
           idea: at 0 the joins are crisp stripes, at 1 each join blends across a full band and it
@@ -289,14 +300,14 @@ export default function BandFrostingStudio() {
             <Slider label="Scraper wobble" value={wobble} onChange={setWobble}
                     hint="Real joins are not spirit-levelled. Enough of this reads as hand-iced; too much reads as a mistake." />
             <Slider label="Frosting grain" value={grain} onChange={setGrain}
-                    hint="Off by default — the bands are the feature and this is only the surface under them. Dial it up to judge how hard edges hold against a textured wall; past about 0.3 the tiling starts to read as a comb across the cake." />
+                    hint="Off by default — the stripes are the feature and this is only the surface under them. Dial it up to judge how hard edges hold against a textured wall; past about 0.3 the tiling starts to read as a comb across the cake." />
           </div>
 
           <div style={card}>
             <div style={lbl}>Palette — first entry is the BOTTOM of the cake</div>
             <div style={{ fontSize: 11.5, color: '#9b8189', lineHeight: 1.5, marginBottom: 8 }}>
               The palette repeats up the cake to fill the band count below. Two colours and sixteen
-              bands is a striped cake; six and six is one band per colour.
+              stripes is a striped cake; six and six is one stripe per colour.
             </div>
             {palette.map((c, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
@@ -328,14 +339,14 @@ export default function BandFrostingStudio() {
 
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #f0e6ea' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span style={lbl}>How many bands</span>
+                <span style={lbl}>How many stripes</span>
                 <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: '#7a6069' }}>{count}</span>
               </div>
-              <input type="range" min={2} max={MAX_BANDS} step={1} value={count}
+              <input type="range" min={2} max={MAX_STRIPES} step={1} value={count}
                      onChange={e => setCount(parseInt(e.target.value, 10))} style={{ width: '100%' }} />
               <div style={{ fontSize: 11, color: '#9b8189', lineHeight: 1.5, marginTop: 4 }}>
                 {count === palette.length
-                  ? 'One band per colour.'
+                  ? 'One stripe per colour.'
                   : `The ${palette.length} colours repeat ${(count / palette.length).toFixed(1)}× up the cake.`}
                 {' '}An <b>odd</b> count with an even palette puts the same colour top and bottom.
               </div>
@@ -363,7 +374,7 @@ export default function BandFrostingStudio() {
             )}
             <div style={{ fontSize: 11, color: '#9b8189', marginTop: 6, lineHeight: 1.5 }}>
               A real cake's top is iced separately from its sides, so it is a flat colour rather than a
-              continuation of the bands.
+              continuation of the stripes.
             </div>
           </div>
 
@@ -390,7 +401,7 @@ export default function BandFrostingStudio() {
               <Lightformer form="rect" intensity={2.2} position={[2.8, 3.6, 5]} scale={[2.4, 8, 1]} color="#ffffff" />
               <Lightformer form="rect" intensity={2.0} position={[-3.4, 3.6, 3.6]} scale={[2.2, 8, 1]} color="#ffffff" />
             </Environment>
-            <BandedCake bands={bands} topColor={resolvedTop} grain={grain} />
+            <StripedCake stripes={stripes} topColor={resolvedTop} grain={grain} />
             <OrbitControls target={[0, 0.85, 0]} enablePan={false} minDistance={2.4} maxDistance={9} />
           </Canvas>
         </div>
