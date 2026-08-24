@@ -425,6 +425,19 @@ function GLBPreview({ file, url, color, roughness, metalness, envPreset, camRef,
   );
 }
 
+// Which studio authored a generated element, by the generator it names. The key is
+// `placement_config.procedural` — the same value the designer's PROCEDURAL_TOOLS registry looks up
+// to place one, so the two cannot drift about what exists.
+const PROCEDURAL_STUDIOS = {
+  rainbow:       { href: '/elements/rainbow',        label: 'Rainbow Studio' },
+  cloud:         { href: '/elements/cloud',          label: 'Cloud Studio' },
+  grass:         { href: '/elements/grass',          label: 'Grass Studio' },
+  letter_blocks: { href: '/elements/letter-blocks',  label: 'Letter Blocks Studio' },
+};
+// Chocolate drip is deliberately absent, the same way it is absent from PROCEDURAL_TOOLS: it writes
+// a piping layer rather than placing a decoration, and its config says `top_drip` rather than naming
+// a generator. An entry for it would be a key nothing ever matches.
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ManageElements() {
   const [elementTypes, setElementTypes] = useState([]);
@@ -1530,6 +1543,25 @@ export default function ManageElements() {
                     {/* Relief authoring is a 2D-image capability (the studio bakes displacement from the
                         image's alpha + luminance), so this is gated on the ASSET KIND — not on the element
                         type. The studio loads this element and pre-fills from its placement_config. */}
+                    {/* ── Back to the studio that authored it ──────────────────────────────────
+                        A generated element has NO asset, so the relief link below — gated on
+                        image_url — never showed for one, and this screen offered no way into its
+                        studio at all. Typing the URL by hand was the only route, which is not a
+                        route.
+
+                        Keyed off `placement_config.procedural`, the same value the designer's
+                        PROCEDURAL_TOOLS registry reads to place one. A new generated element is an
+                        entry here and nothing else — no branch on element type, and no separate
+                        list of which things are generated. */}
+                    {PROCEDURAL_STUDIOS[selectedEl.placement_config?.procedural] && (
+                      <a
+                        href={`${PROCEDURAL_STUDIOS[selectedEl.placement_config.procedural].href}?element=${selectedEl.id}`}
+                        style={{ ...s.smallBtn, display: 'inline-block', marginTop: 8, marginBottom: 0, textDecoration: 'none' }}
+                        title="Open this element in the studio that made it — tuning and thumbnail"
+                      >
+                        Open in {PROCEDURAL_STUDIOS[selectedEl.placement_config.procedural].label}
+                      </a>
+                    )}
                     {!isGlb && selectedEl.image_url && (
                       <a
                         href={`/elements/relief-sticker?element=${selectedEl.id}`}
