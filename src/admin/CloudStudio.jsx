@@ -58,11 +58,11 @@ const PRESETS = [
   // Both transcribed off the sun-and-rainbow cake: a small nearly-round bunch at the front of the
   // board, and a wider, flatter one up beside the sun.
   { key: 'puff-board', label: 'Puffy, on the board',
-    p: { variant: 'puff', surface: 'board', width: 0.40, height: 0.30, lobes: 3, rows: 2,
-         variation: 0.22, taper: 0.2, puffDepth: 0.55, offsetX: -0.35, scale: 1 } },
+    p: { variant: 'puff', surface: 'board', width: 0.34, height: 0.24, lobes: 3, rows: 2,
+         variation: 0.22, taper: 0.2, puffDepth: 0.24, offsetX: -0.35, scale: 1 } },
   { key: 'puff-top', label: 'Puffy, on the top',
     p: { variant: 'puff', surface: 'top', width: 0.52, height: 0.28, lobes: 4, rows: 2,
-         variation: 0.25, taper: 0.2, puffDepth: 0.6, offsetX: 0.2, standoff: 0.3, scale: 1 } },
+         variation: 0.25, taper: 0.2, puffDepth: 0.26, offsetX: 0.2, standoff: 0.3, scale: 1 } },
   { key: 'flat-wall', label: 'Cut-out, on the wall',
     p: { variant: 'flat', surface: 'side', width: 0.55, height: 0.24, lobes: 4, rows: 1,
          variation: 0.3, taper: 0.45, depth: 0.08, theta: -0.5, offsetX: 0, scale: 1 } },
@@ -228,7 +228,7 @@ export default function CloudStudio() {
         {num('Variation', 'variation', 0, 1, 0.05)}
         {p.variant === 'flat' && num('Thickness', 'depth', 0.02, 0.25, 0.01)}
         {p.variant === 'flat' && num('Soft edge', 'bevel', 0, 0.9, 0.05)}
-        {p.variant === 'puff' && num('Depth', 'puffDepth', 0, 1.4, 0.05)}
+        {p.variant === 'puff' && num('Depth', 'puffDepth', 0.05, 0.7, 0.02)}
         {num('Position', 'offsetX', -1.2, 1.2, 0.02)}
         {p.surface === 'top' && num('Stands back', 'standoff', -1, 1, 0.05)}
         {p.surface === 'side' && num('Round the cake', 'theta', -3.14, 3.14, 0.05)}
