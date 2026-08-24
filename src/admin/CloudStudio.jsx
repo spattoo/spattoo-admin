@@ -55,18 +55,20 @@ const R = 1.2, TIER_H = 1.45, BOARD_H = 0.1, BOARD_R = 1.6;
 // rainbow's arrangements make. A tile that sets one number and leaves the rest is a tile that shows
 // the previous cloud with a tweak.
 const PRESETS = [
+  // Both transcribed off the sun-and-rainbow cake: a small nearly-round bunch at the front of the
+  // board, and a wider, flatter one up beside the sun.
   { key: 'puff-board', label: 'Puffy, on the board',
-    p: { variant: 'puff', surface: 'board', width: 0.62, height: 0.30, lobes: 5, variation: 0.35,
-         offsetX: -0.35, scale: 1 } },
+    p: { variant: 'puff', surface: 'board', width: 0.40, height: 0.30, lobes: 3, rows: 2,
+         variation: 0.22, taper: 0.2, puffDepth: 0.55, offsetX: -0.35, scale: 1 } },
   { key: 'puff-top', label: 'Puffy, on the top',
-    p: { variant: 'puff', surface: 'top', width: 0.52, height: 0.26, lobes: 6, variation: 0.4,
-         offsetX: 0.2, standoff: 0.3, scale: 1 } },
+    p: { variant: 'puff', surface: 'top', width: 0.52, height: 0.28, lobes: 4, rows: 2,
+         variation: 0.25, taper: 0.2, puffDepth: 0.6, offsetX: 0.2, standoff: 0.3, scale: 1 } },
   { key: 'flat-wall', label: 'Cut-out, on the wall',
-    p: { variant: 'flat', surface: 'side', width: 0.55, height: 0.24, lobes: 4, variation: 0.3,
-         depth: 0.08, theta: -0.5, offsetX: 0, scale: 1 } },
+    p: { variant: 'flat', surface: 'side', width: 0.55, height: 0.24, lobes: 4, rows: 1,
+         variation: 0.3, taper: 0.45, depth: 0.08, theta: -0.5, offsetX: 0, scale: 1 } },
   { key: 'flat-board', label: 'Cut-out, on the board',
-    p: { variant: 'flat', surface: 'board', width: 0.60, height: 0.26, lobes: 5, variation: 0.3,
-         depth: 0.08, offsetX: 0.4, scale: 1 } },
+    p: { variant: 'flat', surface: 'board', width: 0.60, height: 0.26, lobes: 5, rows: 1,
+         variation: 0.3, taper: 0.45, depth: 0.08, offsetX: 0.4, scale: 1 } },
 ];
 
 function VariantTile({ item, on, onPick }) {
@@ -82,10 +84,13 @@ function VariantTile({ item, on, onPick }) {
           <path d="M8 25 L8 20 A6 6 0 0 1 19 15 A8 8 0 0 1 33 19 A5 5 0 0 1 36 25 Z"
                 fill={on ? '#2C4433' : '#C7C0B4'} />
         ) : (
-          <g fill={on ? '#2C4433' : '#C7C0B4'} stroke="#fff" strokeWidth="0.8">
-            <circle cx="14" cy="19" r="6" />
-            <circle cx="31" cy="19" r="6" />
-            <circle cx="22" cy="15" r="8" />
+          // A bunch: a bottom row with the next row nestled into its gaps.
+          <g fill={on ? '#2C4433' : '#C7C0B4'} stroke="#fff" strokeWidth="0.7">
+            <circle cx="14" cy="20" r="5" />
+            <circle cx="22" cy="20" r="5" />
+            <circle cx="30" cy="20" r="5" />
+            <circle cx="18" cy="14" r="5" />
+            <circle cx="26" cy="14" r="5" />
           </g>
         )}
       </svg>
@@ -217,7 +222,9 @@ export default function CloudStudio() {
         {num('Size', 'scale', 0.3, 2.2, 0.05)}
         {num('Width', 'width', 0.2, 1.2, 0.02)}
         {num('Height', 'height', 0.08, 0.7, 0.02)}
-        {num('Lumps', 'lobes', 2, 9, 1)}
+        {num('Balls across', 'lobes', 2, 8, 1)}
+        {p.variant === 'puff' && num('Rows', 'rows', 1, 3, 1)}
+        {num('Taper', 'taper', 0, 0.8, 0.05)}
         {num('Variation', 'variation', 0, 1, 0.05)}
         {p.variant === 'flat' && num('Thickness', 'depth', 0.02, 0.25, 0.01)}
         {p.variant === 'flat' && num('Soft edge', 'bevel', 0, 0.9, 0.05)}
