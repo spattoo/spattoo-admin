@@ -5,7 +5,8 @@ import * as THREE from 'three';
 // The SAME generator the designer renders, never a divergent copy — the rule ChocolateDripStudio
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
-import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv,
+         RAINBOW_ARRANGEMENTS, ArrangementTile, iconTiers } from '@spattoo/designer';
 import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Rainbow studio ────────────────────────────────────────────────────────────
@@ -77,124 +78,15 @@ const PRESETS = {
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
 };
 
-// ── The arrangements a rainbow can actually be in ───────────────────────────────────────────────
-// "top / board / none", twice over, is engineer's vocabulary: it names the two ENDS and leaves the
-// reader to imagine what the pair adds up to. There are only five useful combinations, so they are
-// offered as themselves — each with a drawing, because the whole question is what it will look like.
-//
-// Deliberately plain SVG rather than a 3D thumbnail: the point is to tell five silhouettes apart at
-// a glance, and five little renders would cost five canvases to say less.
-// Each carries EVERY field that makes it the shape it is — including where it stands. Setting only
-// the feet left the position behind, so picking "falling right" from a centred arrangement changed
-// the feet and moved nothing: the arch stayed in the middle and the choice looked broken. This is
-// the same rule the surface toggle already followed and these tiles did not.
-//
-// Both leaning tiles use the SAME positive offset: it is measured toward the side the rainbow falls,
-// so "falling left" mirrors without a second number.
-const ARRANGEMENTS = [
-  { key: 'fall-right', surface: 'top', label: 'Over, falling right',
-    params: { footLeft: 'top', footRight: 'board', spring: 1, offsetX: 0.71, standoff: 0,
-              scale: 1, flatten: 0 },
-    draw: (t, floor) => {
-      const [a, b] = leanFeet(t, 1);
-      const r = (b - a) / 2;
-      return <path d={`M${a} ${t.top} A${r} ${r} 0 0 1 ${b} ${t.top} L${b} ${floor}`} />;
-    } },
-  { key: 'fall-left', surface: 'top', label: 'Over, falling left',
-    params: { footLeft: 'board', footRight: 'top', spring: 1, offsetX: 0.71, standoff: 0,
-              scale: 1, flatten: 0 },
-    draw: (t, floor) => {
-      const [a, b] = leanFeet(t, -1);
-      const r = (b - a) / 2;
-      return <path d={`M${a} ${floor} L${a} ${t.top} A${r} ${r} 0 0 1 ${b} ${t.top}`} />;
-    } },
-  // spring 1, NOT above it. Past 1 the springing point rises above the cake top and the arch grows
-  // LEGS to reach it — it stood on 0.38 of stilt, floating clear of the cake it was supposed to be
-  // sitting on. At 1 the springing point is pinned to the feet, so the arc rests straight on the
-  // surface. scale 0.75 puts the feet at ±0.84 inside a 1.2 rim, and the arch about 61% of the
-  // cake's height — the proportion in references 2 and 4.
-  { key: 'on-top', surface: 'top', label: 'Sitting on top',
-    params: { footLeft: 'top', footRight: 'top', spring: 1, offsetX: 0, standoff: 0,
-              scale: 0.75, flatten: 0 },
-    draw: t => {
-      const r = t.w * 0.34;
-      return <path d={`M${t.cx - r} ${t.top} A${r} ${r} 0 0 1 ${t.cx + r} ${t.top}`} />;
-    } },
-  // ONE wall tile, not two. The pair that was here differed only in HEIGHT — ends on the board
-  // versus floating partway up — and `Springs at` already moves it between them. A chooser offering
-  // two points on a slider as though they were different shapes is a chooser with a wasted tile.
-  // Every number here was dialled in by hand and handed over as "take this as the default" — so it
-  // is transcribed, not derived. Two of them are things I would have got wrong on my own: flatten is
-  // ZERO (round ropes read better on a wall than pressed ribbons, whatever the photos suggested to
-  // me), and the arch is rotated slightly off dead-centre, which stops it looking like a diagram.
-  { key: 'wall', surface: 'side', label: 'On the wall',
-    params: { footLeft: 'board', footRight: 'board', spring: 0.18, offsetX: 0, standoff: 0,
-              theta: -0.09, proud: 0.02, scale: 0.75, flatten: 0,
-              bands: 6, innerRadius: 0.30, thickness: 0.12 },
-    draw: t => {
-      const r = Math.min(t.w * 0.30, (t.base - t.top) * 0.75);
-      return <path d={`M${t.cx - r} ${t.base - 1} A${r} ${r} 0 0 1 ${t.cx + r} ${t.base - 1}`} />;
-    } },
-];
-
-// The stack as the ICONS draw it — the same shape the studio renders, flattened to a 40×46 box.
-// Heights and widths taper the way the real tiers do, so a 3-tier icon reads as a 3-tier cake and
-// not as a wedding cake drawn by someone who has not seen one.
-const BOARD_Y = 41;
-function iconTiers(tiers) {
-  const boxes = [];
-  let base = BOARD_Y;
-  for (let i = 0; i < tiers; i++) {
-    const w = 24 - i * 5.5;
-    const h = tiers === 1 ? 19 : (tiers === 2 ? 13 - i * 2 : 11 - i * 1.5);
-    boxes.push({ x: 20 - w / 2, w, cx: 20, base, top: base - h });
-    base -= h;
-  }
-  return boxes;
-}
-
-// The two feet of a LEANING arch: one resting on the tier, one hanging past its edge. Defined by
-// where the feet go rather than by a radius, because a radius that suits the top tier of a stack
-// runs the bottom tier's arch off the side of a 40-wide icon — which is what a radius did.
-// `dir` is +1 falling right, -1 falling left.
-function leanFeet(t, dir) {
-  const rest = t.cx + dir * (t.w * 0.5 - t.w * 0.28);   // on the tier, in from the far edge
-  const fall = t.cx + dir * Math.min(t.w * 0.5 + 5, 17); // past the edge, inside the icon
-  return dir > 0 ? [rest, fall] : [fall, rest];
-}
-
-// A cake in outline with the arrangement drawn against it. The stack and the CHOSEN tier are the
-// same in every tile, so the only difference between tiles is the rainbow — and the same drawing
-// answers "which tier" and "which arrangement" at once, which is how the choice is actually made:
-// nobody picks "on the wall" and then wonders whose wall.
-function ArrangementTile({ item, on, onPick, tiers, tierIndex }) {
-  const boxes = iconTiers(tiers);
-  const t = boxes[Math.min(tierIndex, boxes.length - 1)];
-  // What a falling foot lands on: the tier below, or the board when there is nothing below.
-  const floor = tierIndex === 0 ? BOARD_Y : boxes[tierIndex - 1].top;
-  const rainbow = (
-    <g fill="none" stroke={on ? '#2C4433' : '#B7AEA1'} strokeWidth="2.6"
-       strokeLinecap="round">{item.draw(t, floor)}</g>
-  );
-  return (
-    <button type="button" onClick={onPick} title={item.label}
-      style={{ ...s.tile, ...(on ? s.tileOn : {}) }}>
-      <svg viewBox="0 0 40 46" style={{ width: 46, height: 52 }}>
-        <ellipse cx="20" cy="42" rx="17" ry="3" fill="#EDE7DA" />
-        {boxes.map((b, i) => (
-          <rect key={i} x={b.x} y={b.top} width={b.w} height={b.base - b.top} rx="1.5"
-                fill={i === tierIndex ? '#FFFFFF' : '#F7F5F1'}
-                stroke={i === tierIndex ? '#C9C1B4' : '#DDD8CF'} />
-        ))}
-        {rainbow}
-      </svg>
-      <span style={s.tileLbl}>{item.label}</span>
-    </button>
-  );
-}
-
-// Which tier, drawn rather than named. "on top" is a phrase that means the top TIER here and the top
-// SURFACE two lines down, and the picture is not ambiguous the way the words are.
+// The arrangements live in CORE now — a customer picks from this same list in the designer's edit
+// card, so two copies would be a studio tuned to one shape and a cake showing another (INVARIANTS
+// #3). The tile component comes with them, which is why this file no longer draws its own.
+// The stack, once. The rainbow's geometry comes from the SAME list the mesh is drawn from — two
+// descriptions of where tier 2 starts is how a decoration ends up floating above the tier it is
+// Which tier, drawn rather than named. "on top" is a phrase that means the top TIER here and the
+// top SURFACE two lines down, and the picture is not ambiguous the way the words are. Studio-only —
+// a customer never chooses a tier, they drag the rainbow onto the one they want — so it stays here
+// rather than moving to core with the arrangement tiles.
 function TierTile({ tiers, index, on, onPick }) {
   const boxes = iconTiers(tiers);
   return (
@@ -212,8 +104,6 @@ function TierTile({ tiers, index, on, onPick }) {
   );
 }
 
-// The stack, once. The rainbow's geometry comes from the SAME list the mesh is drawn from — two
-// descriptions of where tier 2 starts is how a decoration ends up floating above the tier it is
 // supposed to be standing on.
 function tierStack(tiers) {
   const g = [];
@@ -456,7 +346,7 @@ export default function RainbowStudio() {
         <div style={s.group}>
           <span style={s.groupLbl}>Arrangement</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {ARRANGEMENTS.map(a => (
+            {RAINBOW_ARRANGEMENTS.map(a => (
               <ArrangementTile key={a.key} item={a} tiers={tiers} tierIndex={tierIndex}
                 // On the wall the FEET are not part of the choice — the tile is the surface, and
                 // where it sits up the wall is the slider's job.
