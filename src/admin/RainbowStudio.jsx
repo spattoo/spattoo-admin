@@ -208,6 +208,7 @@ export default function RainbowStudio() {
     // `placement_config.procedural` on the element — the type is how a thing BEHAVES, and these two
     // behave identically.
     typeSlug: 'fondant_decor',
+    categorySlug: 'unicorn-rainbow',   // where a customer browses to find it
     canvasRef: canvasWrapRef,
     buildPayload: () => ({
       // All three, because the geometry genuinely does all three — the wall version is a different

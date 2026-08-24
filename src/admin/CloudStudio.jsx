@@ -152,6 +152,7 @@ export default function CloudStudio() {
   // Which generator draws it is `placement_config.procedural`; what it depicts is its category.
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'fondant_decor',
+    categorySlug: 'unicorn-rainbow',   // where a customer browses to find it
     canvasRef: canvasWrapRef,
     // The SHAPE, and only the shape. Where it sits — surface, yaw, standoff, theta — is the
     // customer's decision on their own cake, and freezing it here would author a cloud that can only

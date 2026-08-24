@@ -131,6 +131,7 @@ export default function ChocolateDripStudio() {
   // Moving to the hook fixes both here.
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'drip',
+    categorySlug: 'chocolate',   // where a customer browses to find it
     canvasRef: canvasWrapRef,
     buildPayload: () => ({
       allowed_zones: ['rim'],

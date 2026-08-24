@@ -73,6 +73,7 @@ export default function LetterBlocksStudio() {
   // Same hook the grass studio uses — create once, update thereafter (INVARIANTS #3).
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'letter_blocks',
+    categorySlug: 'numbers-letters',   // where a customer browses to find it
     canvasRef: canvasWrapRef,
     // What makes a cube read as FONDANT: the chamfer, how the letter sits on the face, the spacing.
     // NOT the name, the size or the colours — those are the card's, and they change per cake.

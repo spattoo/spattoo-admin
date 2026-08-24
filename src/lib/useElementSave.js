@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchElementTypes, createGlobalElement, updateGlobalElement, fetchGlobalElement, uploadThumbnail } from './api.js';
+import { fetchElementTypes, fetchAdminElementCategories, createGlobalElement, updateGlobalElement, fetchGlobalElement, uploadThumbnail } from './api.js';
 
 // ── Author a file-less catalogue element from a studio ────────────────────────────────────────────
 //
@@ -21,7 +21,9 @@ import { fetchElementTypes, createGlobalElement, updateGlobalElement, fetchGloba
 // function. Fixing it here fixed the drip too.
 //
 // ── THE CONTRACT ────────────────────────────────────────────────────────────────────────────────
-//   typeSlug    the element_types slug this studio authors under ('drip', 'grass', …)
+//   typeSlug      the element_types slug this studio authors under ('fondant_decor', 'grass', …)
+//   categorySlug  where a customer BROWSES to find it ('unicorn-rainbow', …). Optional, and the
+//                 studio that leaves it out gets an element nobody can find — see below.
 //   canvasRef   a ref to a node CONTAINING the canvas — the thumbnail is literally what it shows
 //   buildPayload()  → { placement_config, default_color?, allowed_zones? } — the per-studio bits
 //   onHydrate(el)   ← called when opened with ?element=<id>, to load the row back into the sliders
@@ -46,7 +48,18 @@ import { fetchElementTypes, createGlobalElement, updateGlobalElement, fetchGloba
 //
 // `startNew()` is the way out, and it must be rendered wherever Save is. The pair is the point:
 // which row you are about to write is visible, and both directions are reachable.
-export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate }) {
+// ── WHY A CATEGORY IS SET HERE AND NOT LEFT TO AN ADMIN ─────────────────────────────────────────
+// A created row used to carry no category at all, and the designer FILTERS by the open one
+// (`el.category_id !== activeCategory.id`). So a freshly saved element appeared under no category
+// whatsoever — reachable only by somebody typing its name into the search box, which nobody does
+// for a thing they have not seen. It looked saved, it WAS saved, and it was invisible.
+//
+// Migration 065's name-matching backfill cannot cover this: it runs once, and a row saved afterwards
+// arrives too late for it. Nor can "the admin sets it on Manage Elements" — that is a step with no
+// feedback when it is skipped, which is the definition of the gap this tool should not have.
+//
+// So the studio names the shelf its work belongs on, and the save puts it there.
+export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload, onHydrate }) {
   // `?element=<id>` opens a studio against a saved row — the Relief Sticker Studio's pattern.
   const elementId = useMemo(() => new URLSearchParams(window.location.search).get('element'), []);
   const [editing, setEditing]   = useState(null);   // { id, name } once revising a real row
@@ -108,9 +121,21 @@ export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate })
           (t) => t.slug === typeSlug || (t.name ?? '').trim().toLowerCase() === typeSlug,
         );
         if (!type) throw new Error(`No "${typeSlug}" element type found - create it first in Element Types.`);
+        // Best-effort, deliberately: an element with no category is still fully placeable and still
+        // findable by search, so a categories endpoint having a bad day must not cost somebody the
+        // tuning they just did. It says so rather than failing silently.
+        let category_id = null;
+        if (categorySlug) {
+          try {
+            const cats = await fetchAdminElementCategories();
+            category_id = (cats ?? []).find(c => c.slug === categorySlug)?.id ?? null;
+          } catch { /* reported below */ }
+        }
+
         const created = await createGlobalElement({
           name: saveName.trim(),
           element_type_id: type.id,
+          category_id,
           allowed_zones: allowed_zones ?? [],
           default_color: default_color ?? null,
           image_url: null,          // generated — there is no asset; the thumbnail carries the look
@@ -124,7 +149,13 @@ export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate })
           setEditing({ id: created.id, name: saveName.trim() });
           rememberInUrl(created.id);
         }
-        setMsg({ ok: true, text: `Saved "${saveName.trim()}" - saving again updates it.` });
+        setMsg({
+          ok: true,
+          text: categorySlug && !category_id
+            // Named, because "saved" and "nobody can find it" must not look the same.
+            ? `Saved "${saveName.trim()}", but it has no category — set one in Manage Elements or a customer will only find it by searching.`
+            : `Saved "${saveName.trim()}" - saving again updates it.`,
+        });
       }
     } catch (e) {
       setMsg({ ok: false, text: e.message });
