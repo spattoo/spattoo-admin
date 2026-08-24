@@ -224,7 +224,9 @@ export default function GrassStudio() {
       </div>
 
       <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative' }}>
-        <Canvas shadows camera={{ position: [0, 2.9, 4.6], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
+        {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png — WebGL clears the
+            drawing buffer after compositing and toBlob() reads an empty one. */}
+        <Canvas gl={{ preserveDrawingBuffer: true }} shadows camera={{ position: [0, 2.9, 4.6], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
           <color attach="background" args={[bg]} />
           <SceneLights shadows />
           <SceneEnv />

@@ -254,7 +254,10 @@ export default function RainbowStudio() {
   return (
     <div style={s.wrap}>
       <div style={s.stage} ref={canvasWrapRef}>
-        <Canvas shadows camera={{ position: [0, 2.4, 7.2], fov: 38 }} gl={{ antialias: true }}>
+        {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png: WebGL clears the drawing
+            buffer after compositing, so canvas.toBlob() reads an empty one. The capture succeeds,
+            uploads, and stores nothing. */}
+        <Canvas shadows camera={{ position: [0, 2.4, 7.2], fov: 38 }} gl={{ antialias: true, preserveDrawingBuffer: true }}>
           <color attach="background" args={['#eceaf3']} />
           <SceneLights />
           <SceneEnv />

@@ -87,11 +87,23 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elementId]);
 
+  // ── The capture, and why it checks what it caught ───────────────────────────────────────────────
+  // A studio's <Canvas> MUST set `gl={{ preserveDrawingBuffer: true }}`. WebGL clears the drawing
+  // buffer after compositing, so `toBlob` on a canvas without it reads an EMPTY one — and every step
+  // after that succeeds. A blank png uploads, the row saves, the message says "Saved", and the
+  // element sits in the customer's picker as a white square.
+  //
+  // Four of the five studios were missing the flag and nobody knew until three elements reached the
+  // catalogue with empty tiles. A comment telling the next studio to remember would not have helped,
+  // because the failure is silent — so this LOOKS at the pixels instead.
   async function captureThumbnail() {
     const cnv = canvasRef?.current?.querySelector('canvas');
     if (!cnv) return null;
     const blob = await new Promise((res) => cnv.toBlob(res, 'image/png'));
-    return blob ? uploadThumbnail('elements/thumbnails', blob) : null;
+    if (!blob) return null;
+    if (await isBlank(cnv)) throw new Error(
+      'The thumbnail came out blank — the studio canvas needs gl={{ preserveDrawingBuffer: true }}.');
+    return uploadThumbnail('elements/thumbnails', blob);
   }
 
   async function save() {
@@ -99,9 +111,13 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
     setBusy(true); setMsg(null);
     try {
       const { placement_config, default_color, allowed_zones } = buildPayload();
-      // Best-effort: a failed capture must never lose the tuning.
+      // Best-effort: a failed capture must never lose the tuning. But it must not be SILENT either —
+      // swallowing it whole is how three elements reached the catalogue as white squares while the
+      // screen said "Saved". The reason is kept and reported below.
       let thumbnail_url = null;
-      try { thumbnail_url = await captureThumbnail(); } catch { /* keep whatever is there */ }
+      let thumbWarning = null;
+      try { thumbnail_url = await captureThumbnail(); }
+      catch (e) { thumbWarning = e.message; }
 
       if (editing) {
         await updateGlobalElement(editing.id, {
@@ -114,7 +130,7 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
           ...(thumbnail_url ? { thumbnail_url } : {}),
         });
         setEditing({ id: editing.id, name: saveName.trim() });
-        setMsg({ ok: true, text: `Updated "${saveName.trim()}".` });
+        setMsg({ ok: true, text: [`Updated "${saveName.trim()}".`, thumbWarning].filter(Boolean).join(' ') });
       } else {
         const types = await fetchElementTypes();
         const type = (types ?? []).find(
@@ -151,10 +167,14 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
         }
         setMsg({
           ok: true,
-          text: categorySlug && !category_id
-            // Named, because "saved" and "nobody can find it" must not look the same.
-            ? `Saved "${saveName.trim()}", but it has no category — set one in Manage Elements or a customer will only find it by searching.`
-            : `Saved "${saveName.trim()}" - saving again updates it.`,
+          // Named, because "saved" and "saved but nobody can see or find it" must not look the same.
+          text: [
+            `Saved "${saveName.trim()}" - saving again updates it.`,
+            thumbWarning,
+            categorySlug && !category_id
+              ? 'It has no category — set one in Manage Elements, or a customer will only find it by searching.'
+              : null,
+          ].filter(Boolean).join(' '),
         });
       }
     } catch (e) {
@@ -172,6 +192,29 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
   }
 
   return { elementId, editing, saveName, setSaveName, busy, msg, save, startNew };
+}
+
+// Every pixel the same? Then nothing was drawn. Sampled small, because a 32x32 downscale of a cake
+// on a background is never uniform, and reading a full-size buffer to answer a yes/no question would
+// be the expensive way to be careful.
+async function isBlank(canvas) {
+  try {
+    const s = 32;
+    const c = document.createElement('canvas');
+    c.width = s; c.height = s;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(canvas, 0, 0, s, s);
+    const { data } = ctx.getImageData(0, 0, s, s);
+    for (let i = 4; i < data.length; i += 4) {
+      if (data[i] !== data[0] || data[i + 1] !== data[1]
+        || data[i + 2] !== data[2] || data[i + 3] !== data[3]) return false;
+    }
+    return true;
+  } catch {
+    // Never let the CHECK be what fails a save. If the pixels cannot be read, assume the picture is
+    // fine — the thing being guarded against is a silent blank, not a strict-mode canvas.
+    return false;
+  }
 }
 
 // replaceState, not pushState: the studio is one screen being pointed at different rows, so Back
