@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 // The SAME generator the designer renders, never a divergent copy — the rule ChocolateDripStudio
 // states and RainbowStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
 import { FondantCloud, cloudPlacement, cloudGuide, CLOUD_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Cloud studio ──────────────────────────────────────────────────────────────
 // Fondant clouds. Its own element and its own screen, NOT a checkbox on the rainbow — clouds turn up
@@ -131,6 +132,7 @@ export default function CloudStudio() {
   const [tiers, setTiers] = useState(1);
   const [fondant, setFondant] = useState(true);
   const [count, setCount] = useState(1);
+  const canvasWrapRef = useRef(null);
 
   const cake = useMemo(() => {
     let top = BOARD_H;
@@ -140,6 +142,43 @@ export default function CloudStudio() {
 
   const fit = useMemo(() => cloudPlacement(p, cake).fit, [p, cake]);
   const guide = useMemo(() => cloudGuide(p, cake), [p, cake]);
+
+  // The same hook every procedural studio uses — create once, update thereafter, and the address
+  // remembers which row this is so a reload does not quietly author a second one.
+  //
+  // The type is `fondant_decor`, shared with the rainbow (migration 073). One type per generated
+  // shape was the first instinct and the wrong one: a type is how a thing BEHAVES, and a cloud and a
+  // rainbow behave identically — same three surfaces, same `stand`, both movable, neither uploaded.
+  // Which generator draws it is `placement_config.procedural`; what it depicts is its category.
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
+    typeSlug: 'fondant_decor',
+    canvasRef: canvasWrapRef,
+    // The SHAPE, and only the shape. Where it sits — surface, yaw, standoff, theta — is the
+    // customer's decision on their own cake, and freezing it here would author a cloud that can only
+    // ever stand in one place.
+    buildPayload: () => ({
+      allowed_zones: ['top_surface', 'side', 'board'],
+      default_color: p.color,
+      placement_config: {
+        procedural: 'cloud',
+        cloud: {
+          variant: p.variant,
+          width: +Number(p.width).toFixed(3),
+          height: +Number(p.height).toFixed(3),
+          lobes: p.lobes,
+          rows: p.rows,
+          variation: +Number(p.variation).toFixed(3),
+          taper: +Number(p.taper).toFixed(3),
+          puffDepth: +Number(p.puffDepth).toFixed(3),
+          depth: +Number(p.depth).toFixed(3),
+          bevel: +Number(p.bevel).toFixed(3),
+          scale: +Number(p.scale).toFixed(3),
+          color: p.color,
+        },
+      },
+    }),
+    onHydrate: (el) => setP(o => ({ ...o, ...(el.placement_config?.cloud ?? {}) })),
+  });
 
   // Several clouds at once, which is how they actually turn up — one is not the question. Spread
   // round the cake rather than stacked, so the copies do not hide each other.
@@ -163,7 +202,7 @@ export default function CloudStudio() {
 
   return (
     <div style={s.wrap}>
-      <div style={s.stage}>
+      <div style={s.stage} ref={canvasWrapRef}>
         <Canvas shadows camera={{ position: [0, 2.0, 6.4], fov: 38 }} gl={{ antialias: true }}>
           <color attach="background" args={['#eceaf3']} />
           <SceneLights />
@@ -256,6 +295,37 @@ export default function CloudStudio() {
           ))}
         </div>
 
+        {/* Save. The look has been judged, so the row is what makes it a real catalogue element:
+            searchable, taggable, tunable without a deploy. */}
+        <div style={s.save}>
+          <div style={s.saveLbl}>{editing ? 'EDITING A SAVED ELEMENT' : 'SAVE AS ELEMENT'}</div>
+          {editing && (
+            <p style={s.saveNote}>
+              Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather than
+              adding another row.
+            </p>
+          )}
+          <input value={saveName} onChange={e => setSaveName(e.target.value)}
+            placeholder="e.g. Small puffy cloud" style={s.saveInput} />
+          <button onClick={save} disabled={busy || !saveName.trim()}
+            style={{ ...s.saveBtn, ...(busy || !saveName.trim() ? s.saveBtnOff : {}) }}>
+            {busy ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update this element' : 'Save to catalogue')}
+          </button>
+          {msg && <p style={{ ...s.saveNote, color: msg.ok ? '#2e7d32' : '#c0392b' }}>{msg.text}</p>}
+          {editing && (
+            <button onClick={startNew}
+              style={{ marginTop: 6, width: '100%', padding: '6px 0', fontSize: 11.5, borderRadius: 7,
+                border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+                fontFamily: 'inherit', cursor: 'pointer' }}>
+              Start a new element instead
+            </button>
+          )}
+          <p style={s.saveNote}>
+            The row carries the SHAPE — which kind, how many balls, how big. Not where it sits: that
+            is the customer's decision on their own cake.
+          </p>
+        </div>
+
         <pre style={s.json}>{JSON.stringify(p, null, 1)}</pre>
       </div>
     </div>
@@ -286,5 +356,14 @@ const s = {
   guideRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#5B6B60', padding: '3px 0' },
   guideVal: { marginLeft: 'auto', color: '#9AA79E' },
   dot:   { width: 12, height: 12, borderRadius: '50%', display: 'inline-block' },
+  save:  { marginTop: 16, paddingTop: 14, borderTop: '1px solid #EFEDE8' },
+  saveLbl: { fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: '#9AA79E', marginBottom: 5 },
+  saveNote: { fontSize: 10.5, color: '#7B8A7F', margin: '0 0 6px', lineHeight: 1.45 },
+  saveInput: { width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: FONT,
+               border: '1.5px solid #D9D5CE', borderRadius: 7, boxSizing: 'border-box' },
+  saveBtn: { marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
+             border: '1.5px solid #2C4433', background: '#2C4433', color: '#fff', fontWeight: 700,
+             fontFamily: FONT, cursor: 'pointer' },
+  saveBtnOff: { background: '#E8E4DC', borderColor: '#E8E4DC', color: '#aaa', cursor: 'default' },
   json:  { fontSize: 11, background: '#F7F6F2', padding: 10, borderRadius: 8, overflowX: 'auto', marginTop: 12 },
 };

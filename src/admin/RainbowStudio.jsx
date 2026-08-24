@@ -203,7 +203,11 @@ export default function RainbowStudio() {
   // only ever be in one place. `scale` stays for the same reason `surface` goes — an author tuning
   // "small pastel arch" is describing the thing, not where it lives.
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
-    typeSlug: 'rainbow',
+    // ONE type for every generated fondant shape, not one per shape (migration 073). What differs
+    // between a rainbow and a cloud is which generator draws it, and that is
+    // `placement_config.procedural` on the element — the type is how a thing BEHAVES, and these two
+    // behave identically.
+    typeSlug: 'fondant_decor',
     canvasRef: canvasWrapRef,
     buildPayload: () => ({
       // All three, because the geometry genuinely does all three — the wall version is a different
@@ -411,7 +415,7 @@ export default function RainbowStudio() {
         {/* Save. The look has been judged, so the row is what makes it a real catalogue element:
             searchable, taggable, tunable without a deploy. Create once, update thereafter — see
             useElementSave for why that matters. Needs an element type with slug `rainbow`
-            (migration 072). */}
+            (migration 073). */}
         <div style={s.save}>
           <div style={s.saveLbl}>{editing ? 'EDITING A SAVED ELEMENT' : 'SAVE AS ELEMENT'}</div>
           {editing && (
