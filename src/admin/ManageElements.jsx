@@ -15,7 +15,7 @@ import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 import { statsFromElement } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
-import { serializeZone, zoneValueMode, zoneValueSeat, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
+import { serializeZone, zoneValueMode, zoneValueSeat, zoneValueAlt, zoneAltMode, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
 import ElementPreviewPanel from './ElementPreviewPanel.jsx';
 
@@ -425,6 +425,19 @@ function GLBPreview({ file, url, color, roughness, metalness, envPreset, camRef,
   );
 }
 
+// Which studio authored a generated element, by the generator it names. The key is
+// `placement_config.procedural` — the same value the designer's PROCEDURAL_TOOLS registry looks up
+// to place one, so the two cannot drift about what exists.
+const PROCEDURAL_STUDIOS = {
+  rainbow:       { href: '/elements/rainbow',        label: 'Rainbow Studio' },
+  cloud:         { href: '/elements/cloud',          label: 'Cloud Studio' },
+  grass:         { href: '/elements/grass',          label: 'Grass Studio' },
+  letter_blocks: { href: '/elements/letter-blocks',  label: 'Letter Blocks Studio' },
+};
+// Chocolate drip is deliberately absent, the same way it is absent from PROCEDURAL_TOOLS: it writes
+// a piping layer rather than placing a decoration, and its config says `top_drip` rather than naming
+// a generator. An entry for it would be a key nothing ever matches.
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ManageElements() {
   const [elementTypes, setElementTypes] = useState([]);
@@ -558,6 +571,9 @@ export default function ManageElements() {
   // MODIFIER now (rides `placement_config[zone].insert`, like `seat`), NOT a global position. One
   // entry per zone that has it on: { [zone]: { depth?, lean_deg?, jitter_deg? } } ({} = on, defaults).
   const [insertConfig,  setInsertConfig]   = useState({});
+  // Per-zone SECOND pose the customer may pick: { top_surface: 'hug' }. Absent = one pose, which is
+  // every element authored so far — the control only appears where a choice is possible at all.
+  const [altConfig,     setAltConfig]      = useState({});
   const [fullRingConfig, setFullRingConfig] = useState({});   // per ring-zone { rim, board } — mirrors top_/bottom_ring_finish==='element'
   // Folded sticker (2D) + pixel-recolour region — config-driven capabilities (see spattoo-core).
   const [foldable,      setFoldable]      = useState(false);
@@ -768,11 +784,15 @@ export default function ManageElements() {
   // into { mode:<stand|hug>, insert:{…} }. Migrates the legacy global `side_proud` flag → a per-zone
   // 'proud' seat when no explicit seat is authored.
   function loadZonesFromPc(pc, zones) {
-    const modeConf = {}, seatConf = {}, insertConf = {};
+    const modeConf = {}, seatConf = {}, insertConf = {}, altConf = {};
     (zones ?? []).forEach(z => {
       const raw = pc[z];
       const { mode, insert } = splitZoneValue(raw, z, pc.insert);
       if (raw != null) modeConf[z] = mode;
+      // Only keep a stored alternate the zone could actually offer — an author may have hand-edited
+      // the JSON, and a pose the renderer has no branch for would be a promise we cannot keep.
+      const alt = zoneValueAlt(raw);
+      if (alt && alt === zoneAltMode(z, mode)) altConf[z] = alt;
       let seat = zoneValueSeat(raw);
       if (seat === 'auto' && pc.side_proud === true && zoneShowsSeat(z, mode)) seat = 'proud';
       if (seat !== 'auto') seatConf[z] = seat;
@@ -781,6 +801,7 @@ export default function ManageElements() {
     setPlacementZoneConfig(modeConf);
     setSeatConfig(seatConf);
     setInsertConfig(insertConf);
+    setAltConfig(altConf);
     // Full ring is a FLAT top_/bottom_ config, not a per-zone value — read it straight off the pc.
     setFullRingConfig({ rim: pc.top_ring_finish === 'element', board: pc.bottom_ring_finish === 'element' });
   }
@@ -801,9 +822,17 @@ export default function ManageElements() {
   // an insert modifier only on a pose that supports it (stand/hug). `insert` is null (off) or a params
   // object (on; {} = defaults). Also clears the LEGACY global `side_proud`/`insert` keys — they're
   // per-zone now, so any zone edit migrates them away. The JSON stores the string-or-object form.
-  function commitZone(zone, mode, seat, insert) {
+  function commitZone(zone, mode, seat, insert, alt) {
     const effSeat = zoneShowsSeat(zone, mode) ? seat : 'auto';
     const effInsert = zoneShowsInsert(mode) ? (insert ?? null) : null;
+    // A stored alternate stops being valid when the mode changes under it (stand's other pose is hug
+    // and vice versa; a wall or a rim pose has none), so it is re-derived here rather than carried.
+    const effAlt = (alt && alt === zoneAltMode(zone, mode)) ? alt : null;
+    setAltConfig(c => {
+      const next = { ...c };
+      if (effAlt) next[zone] = effAlt; else delete next[zone];
+      return next;
+    });
     setPlacementZoneConfig(c => ({ ...c, [zone]: mode }));
     setSeatConfig(c => {
       const next = { ...c };
@@ -816,7 +845,7 @@ export default function ManageElements() {
       if (effInsert) next[zone] = effInsert; else delete next[zone];
       return next;
     });
-    patchPc({ [zone]: serializeZone(mode, effSeat, effInsert), side_proud: null, insert: null });
+    patchPc({ [zone]: serializeZone(mode, effSeat, effInsert, effAlt), side_proud: null, insert: null });
   }
   // A single insert param field edit for a zone: blank removes the key, else parse. Passing {} (all
   // blank) keeps insert ON with defaults.
@@ -825,7 +854,7 @@ export default function ManageElements() {
     const next = { ...cur };
     if (value === '' || value == null) delete next[field];
     else next[field] = parseFloat(value);
-    commitZone(zone, mode, seatConfig[zone], next);
+    commitZone(zone, mode, seatConfig[zone], next, altConfig[zone]);
   }
   // Reflect placement_config.print_finish into its controls (used by both load + JSON-edit sync — one
   // helper, so the two paths can't drift). Blank when absent: the designer's defaults then apply.
@@ -953,6 +982,7 @@ export default function ManageElements() {
         mode,
         zoneShowsSeat(z, mode) ? seatConfig[z] : undefined,
         zoneShowsInsert(mode) ? insertConfig[z] : undefined,
+        altConfig[z] ?? null,
       );
     });
     delete parsedConfig.insert;
@@ -1513,6 +1543,25 @@ export default function ManageElements() {
                     {/* Relief authoring is a 2D-image capability (the studio bakes displacement from the
                         image's alpha + luminance), so this is gated on the ASSET KIND — not on the element
                         type. The studio loads this element and pre-fills from its placement_config. */}
+                    {/* ── Back to the studio that authored it ──────────────────────────────────
+                        A generated element has NO asset, so the relief link below — gated on
+                        image_url — never showed for one, and this screen offered no way into its
+                        studio at all. Typing the URL by hand was the only route, which is not a
+                        route.
+
+                        Keyed off `placement_config.procedural`, the same value the designer's
+                        PROCEDURAL_TOOLS registry reads to place one. A new generated element is an
+                        entry here and nothing else — no branch on element type, and no separate
+                        list of which things are generated. */}
+                    {PROCEDURAL_STUDIOS[selectedEl.placement_config?.procedural] && (
+                      <a
+                        href={`${PROCEDURAL_STUDIOS[selectedEl.placement_config.procedural].href}?element=${selectedEl.id}`}
+                        style={{ ...s.smallBtn, display: 'inline-block', marginTop: 8, marginBottom: 0, textDecoration: 'none' }}
+                        title="Open this element in the studio that made it — tuning and thumbnail"
+                      >
+                        Open in {PROCEDURAL_STUDIOS[selectedEl.placement_config.procedural].label}
+                      </a>
+                    )}
                     {!isGlb && selectedEl.image_url && (
                       <a
                         href={`/elements/relief-sticker?element=${selectedEl.id}`}
@@ -2069,13 +2118,15 @@ export default function ManageElements() {
                             mode={mode}
                             seat={seatConfig[zone]}
                             insert={insertConfig[zone] ?? null}
+                            alt={altConfig[zone] ?? null}
                             fullRing={fullRingConfig[zone] ?? false}
                             modes={PLACEMENT_MODES}
                             selectStyle={s.select}
                             inputStyle={s.input}
-                            onModeChange={v => commitZone(zone, v, seatConfig[zone], insertConfig[zone])}
-                            onSeatChange={v => commitZone(zone, mode, v, insertConfig[zone])}
-                            onInsertToggle={on => commitZone(zone, mode, seatConfig[zone], on ? (insertConfig[zone] ?? {}) : null)}
+                            onModeChange={v => commitZone(zone, v, seatConfig[zone], insertConfig[zone], altConfig[zone])}
+                            onSeatChange={v => commitZone(zone, mode, v, insertConfig[zone], altConfig[zone])}
+                            onInsertToggle={on => commitZone(zone, mode, seatConfig[zone], on ? (insertConfig[zone] ?? {}) : null, altConfig[zone])}
+                            onAltToggle={v => commitZone(zone, mode, seatConfig[zone], insertConfig[zone], v)}
                             onInsertField={(field, val) => setZoneInsertField(zone, mode, field, val)}
                             onFullRingToggle={on => setZoneFullRing(zone, on)} />
                         );

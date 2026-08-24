@@ -129,8 +129,9 @@ export default function ChocolateDripStudio() {
   // save and carried two faults nobody had noticed: every press made ANOTHER row (no uniqueness
   // constraint, no upsert), and a saved drip could never be corrected because nothing called PATCH.
   // Moving to the hook fixes both here.
-  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'drip',
+    categorySlug: 'chocolate',   // where a customer browses to find it
     canvasRef: canvasWrapRef,
     buildPayload: () => ({
       allowed_zones: ['rim'],
@@ -223,13 +224,27 @@ export default function ChocolateDripStudio() {
           <button style={S.ghost} onClick={copyJson}>Copy JSON</button>
 
           <div style={{ marginTop: 14, borderTop: '1px solid #E3EAE5', paddingTop: 12 }}>
-            <label style={S.label}>Save as Drip element</label>
+            {/* Which row this is about to write. The button's own text has always said "Update this
+                element", but with nothing naming WHICH — and now that a reload comes back as an edit
+                (see useElementSave), a nameless "update" is a trap for whoever inherits this tool. */}
+            <label style={S.label}>{editing ? 'Editing a saved element' : 'Save as Drip element'}</label>
+            {editing && (
+              <div style={{ ...S.hint, marginBottom: 6 }}>
+                Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather
+                than adding another row.
+              </div>
+            )}
             <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Element name"
               style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', fontSize: 13, fontFamily: 'Quicksand, sans-serif', color: '#2C4433', boxSizing: 'border-box' }} />
             <button style={{ ...S.btn, opacity: busy ? 0.6 : 1 }} onClick={save} disabled={busy || !saveName.trim()}>
               {busy ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update this element' : 'Save to library')}
             </button>
             {msg && <div style={{ ...S.hint, color: msg.ok ? '#2C7A3F' : '#C0392B', fontWeight: 700 }}>{msg.text}</div>}
+            {editing && (
+              <button style={{ ...S.ghost, marginTop: 6 }} onClick={startNew}>
+                Start a new element instead
+              </button>
+            )}
             <div style={S.hint}>Saves the tuned drip as a file-less element under the “Drip” type (rim only). Customers control colour, length and gloss; the rest is baked here.</div>
           </div>
         </div>

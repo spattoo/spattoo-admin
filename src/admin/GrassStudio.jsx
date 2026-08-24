@@ -90,8 +90,9 @@ export default function GrassStudio() {
 
   // Authoring a catalogue row is the same job in every procedural studio, so it lives in one hook
   // (INVARIANTS #3) — create the first time, update every time after, thumbnail included.
-  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'grass',
+    categorySlug: 'finishes',   // where a customer browses to find it
     canvasRef: canvasWrapRef,
     // The LOOK, and only the look. Density, height and colour are what the baker's card exposes;
     // freezing them here would take away a per-cake choice.
@@ -207,6 +208,14 @@ export default function GrassStudio() {
               {msg.text}
             </p>
           )}
+          {editing && (
+            <button onClick={startNew}
+              style={{ marginTop: 6, width: '100%', padding: '6px 0', fontSize: 11.5, borderRadius: 7,
+                border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+                fontFamily: 'inherit', cursor: 'pointer' }}>
+              Start a new element instead
+            </button>
+          )}
           <p style={{ fontSize: 10.5, color: '#a98', marginTop: 8, lineHeight: 1.5 }}>
             Density, height and colour are <b>not</b> saved - those are the three a baker sets per
             cake. Everything above them is what this row fixes.
@@ -215,7 +224,9 @@ export default function GrassStudio() {
       </div>
 
       <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative' }}>
-        <Canvas shadows camera={{ position: [0, 2.9, 4.6], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
+        {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png — WebGL clears the
+            drawing buffer after compositing and toBlob() reads an empty one. */}
+        <Canvas gl={{ preserveDrawingBuffer: true }} shadows camera={{ position: [0, 2.9, 4.6], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
           <color attach="background" args={[bg]} />
           <SceneLights shadows />
           <SceneEnv />

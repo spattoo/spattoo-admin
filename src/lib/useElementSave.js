@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchElementTypes, createGlobalElement, updateGlobalElement, fetchGlobalElement, uploadThumbnail } from './api.js';
+import { fetchElementTypes, fetchAdminElementCategories, createGlobalElement, updateGlobalElement, fetchGlobalElement, uploadThumbnail } from './api.js';
 
 // ── Author a file-less catalogue element from a studio ────────────────────────────────────────────
 //
@@ -21,14 +21,45 @@ import { fetchElementTypes, createGlobalElement, updateGlobalElement, fetchGloba
 // function. Fixing it here fixed the drip too.
 //
 // ── THE CONTRACT ────────────────────────────────────────────────────────────────────────────────
-//   typeSlug    the element_types slug this studio authors under ('drip', 'grass', …)
+//   typeSlug      the element_types slug this studio authors under ('fondant_decor', 'grass', …)
+//   categorySlug  where a customer BROWSES to find it ('unicorn-rainbow', …). Optional, and the
+//                 studio that leaves it out gets an element nobody can find — see below.
 //   canvasRef   a ref to a node CONTAINING the canvas — the thumbnail is literally what it shows
 //   buildPayload()  → { placement_config, default_color?, allowed_zones? } — the per-studio bits
 //   onHydrate(el)   ← called when opened with ?element=<id>, to load the row back into the sliders
 //
-// Returns the save state plus `save()`. The caller renders its own name field and button, because
-// the copy differs per studio and a shared widget would be a worse fit than a shared behaviour.
-export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate }) {
+// Returns the save state plus `save()` and `startNew()`. The caller renders its own name field and
+// buttons, because the copy differs per studio and a shared widget would be a worse fit than a
+// shared behaviour.
+//
+// ── WHY SAVING WRITES THE URL ───────────────────────────────────────────────────────────────────
+// `editing` used to live only in memory, so a reload came back as a FRESH studio against a row that
+// already existed — and the next press of Save made a second one. Nothing said so: the name was
+// still typed in, the sliders still where you left them, and the only clue was a heading that no
+// longer said EDITING. That is a trap for whoever uses this tool without having built it.
+//
+// So a create rewrites the address to `?element=<id>`. Reload, bookmark, or send the link to someone
+// else, and it opens as a revision of that row.
+//
+// ── AND WHY `startNew` HAD TO COME WITH IT ──────────────────────────────────────────────────────
+// That fix alone trades one silent failure for a worse one. Somebody authoring a SECOND variant —
+// tune, rename, Save — would now quietly overwrite the first instead of adding a row, and an
+// overwrite cannot be undone by deleting a duplicate.
+//
+// `startNew()` is the way out, and it must be rendered wherever Save is. The pair is the point:
+// which row you are about to write is visible, and both directions are reachable.
+// ── WHY A CATEGORY IS SET HERE AND NOT LEFT TO AN ADMIN ─────────────────────────────────────────
+// A created row used to carry no category at all, and the designer FILTERS by the open one
+// (`el.category_id !== activeCategory.id`). So a freshly saved element appeared under no category
+// whatsoever — reachable only by somebody typing its name into the search box, which nobody does
+// for a thing they have not seen. It looked saved, it WAS saved, and it was invisible.
+//
+// Migration 065's name-matching backfill cannot cover this: it runs once, and a row saved afterwards
+// arrives too late for it. Nor can "the admin sets it on Manage Elements" — that is a step with no
+// feedback when it is skipped, which is the definition of the gap this tool should not have.
+//
+// So the studio names the shelf its work belongs on, and the save puts it there.
+export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload, onHydrate }) {
   // `?element=<id>` opens a studio against a saved row — the Relief Sticker Studio's pattern.
   const elementId = useMemo(() => new URLSearchParams(window.location.search).get('element'), []);
   const [editing, setEditing]   = useState(null);   // { id, name } once revising a real row
@@ -56,11 +87,23 @@ export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elementId]);
 
+  // ── The capture, and why it checks what it caught ───────────────────────────────────────────────
+  // A studio's <Canvas> MUST set `gl={{ preserveDrawingBuffer: true }}`. WebGL clears the drawing
+  // buffer after compositing, so `toBlob` on a canvas without it reads an EMPTY one — and every step
+  // after that succeeds. A blank png uploads, the row saves, the message says "Saved", and the
+  // element sits in the customer's picker as a white square.
+  //
+  // Four of the five studios were missing the flag and nobody knew until three elements reached the
+  // catalogue with empty tiles. A comment telling the next studio to remember would not have helped,
+  // because the failure is silent — so this LOOKS at the pixels instead.
   async function captureThumbnail() {
     const cnv = canvasRef?.current?.querySelector('canvas');
     if (!cnv) return null;
     const blob = await new Promise((res) => cnv.toBlob(res, 'image/png'));
-    return blob ? uploadThumbnail('elements/thumbnails', blob) : null;
+    if (!blob) return null;
+    if (await isBlank(cnv)) throw new Error(
+      'The thumbnail came out blank — the studio canvas needs gl={{ preserveDrawingBuffer: true }}.');
+    return uploadThumbnail('elements/thumbnails', blob);
   }
 
   async function save() {
@@ -68,9 +111,13 @@ export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate })
     setBusy(true); setMsg(null);
     try {
       const { placement_config, default_color, allowed_zones } = buildPayload();
-      // Best-effort: a failed capture must never lose the tuning.
+      // Best-effort: a failed capture must never lose the tuning. But it must not be SILENT either —
+      // swallowing it whole is how three elements reached the catalogue as white squares while the
+      // screen said "Saved". The reason is kept and reported below.
       let thumbnail_url = null;
-      try { thumbnail_url = await captureThumbnail(); } catch { /* keep whatever is there */ }
+      let thumbWarning = null;
+      try { thumbnail_url = await captureThumbnail(); }
+      catch (e) { thumbWarning = e.message; }
 
       if (editing) {
         await updateGlobalElement(editing.id, {
@@ -83,16 +130,28 @@ export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate })
           ...(thumbnail_url ? { thumbnail_url } : {}),
         });
         setEditing({ id: editing.id, name: saveName.trim() });
-        setMsg({ ok: true, text: `Updated "${saveName.trim()}".` });
+        setMsg({ ok: true, text: [`Updated "${saveName.trim()}".`, thumbWarning].filter(Boolean).join(' ') });
       } else {
         const types = await fetchElementTypes();
         const type = (types ?? []).find(
           (t) => t.slug === typeSlug || (t.name ?? '').trim().toLowerCase() === typeSlug,
         );
         if (!type) throw new Error(`No "${typeSlug}" element type found - create it first in Element Types.`);
+        // Best-effort, deliberately: an element with no category is still fully placeable and still
+        // findable by search, so a categories endpoint having a bad day must not cost somebody the
+        // tuning they just did. It says so rather than failing silently.
+        let category_id = null;
+        if (categorySlug) {
+          try {
+            const cats = await fetchAdminElementCategories();
+            category_id = (cats ?? []).find(c => c.slug === categorySlug)?.id ?? null;
+          } catch { /* reported below */ }
+        }
+
         const created = await createGlobalElement({
           name: saveName.trim(),
           element_type_id: type.id,
+          category_id,
           allowed_zones: allowed_zones ?? [],
           default_color: default_color ?? null,
           image_url: null,          // generated — there is no asset; the thumbnail carries the look
@@ -102,13 +161,68 @@ export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate })
         // Become an EDIT of what was just made, so the next press revises this row instead of
         // cloning it. The common path is author-then-immediately-adjust, so this is the line that
         // actually prevents the duplicates.
-        if (created?.id) setEditing({ id: created.id, name: saveName.trim() });
-        setMsg({ ok: true, text: `Saved "${saveName.trim()}" - saving again updates it.` });
+        if (created?.id) {
+          setEditing({ id: created.id, name: saveName.trim() });
+          rememberInUrl(created.id);
+        }
+        setMsg({
+          ok: true,
+          // Named, because "saved" and "saved but nobody can see or find it" must not look the same.
+          text: [
+            `Saved "${saveName.trim()}" - saving again updates it.`,
+            thumbWarning,
+            categorySlug && !category_id
+              ? 'It has no category — set one in Manage Elements, or a customer will only find it by searching.'
+              : null,
+          ].filter(Boolean).join(' '),
+        });
       }
     } catch (e) {
       setMsg({ ok: false, text: e.message });
     } finally { setBusy(false); }
   }
 
-  return { elementId, editing, saveName, setSaveName, busy, msg, save };
+  // Stop revising the saved row and author a fresh one. Clears the name too: keeping it is how you
+  // end up with two rows called the same thing, which is the confusion this was avoiding.
+  function startNew() {
+    setEditing(null);
+    setSaveName('');
+    setMsg(null);
+    rememberInUrl(null);
+  }
+
+  return { elementId, editing, saveName, setSaveName, busy, msg, save, startNew };
+}
+
+// Every pixel the same? Then nothing was drawn. Sampled small, because a 32x32 downscale of a cake
+// on a background is never uniform, and reading a full-size buffer to answer a yes/no question would
+// be the expensive way to be careful.
+async function isBlank(canvas) {
+  try {
+    const s = 32;
+    const c = document.createElement('canvas');
+    c.width = s; c.height = s;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(canvas, 0, 0, s, s);
+    const { data } = ctx.getImageData(0, 0, s, s);
+    for (let i = 4; i < data.length; i += 4) {
+      if (data[i] !== data[0] || data[i + 1] !== data[1]
+        || data[i + 2] !== data[2] || data[i + 3] !== data[3]) return false;
+    }
+    return true;
+  } catch {
+    // Never let the CHECK be what fails a save. If the pixels cannot be read, assume the picture is
+    // fine — the thing being guarded against is a silent blank, not a strict-mode canvas.
+    return false;
+  }
+}
+
+// replaceState, not pushState: the studio is one screen being pointed at different rows, so Back
+// should leave it rather than walk through everything that was saved in this session.
+function rememberInUrl(id) {
+  if (typeof window === 'undefined' || !window.history?.replaceState) return;
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set('element', id);
+  else url.searchParams.delete('element');
+  window.history.replaceState(null, '', url);
 }

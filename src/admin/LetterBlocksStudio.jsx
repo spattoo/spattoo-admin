@@ -71,8 +71,9 @@ export default function LetterBlocksStudio() {
   const canvasWrapRef = useRef(null);
 
   // Same hook the grass studio uses — create once, update thereafter (INVARIANTS #3).
-  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'letter_blocks',
+    categorySlug: 'numbers-letters',   // where a customer browses to find it
     canvasRef: canvasWrapRef,
     // What makes a cube read as FONDANT: the chamfer, how the letter sits on the face, the spacing.
     // NOT the name, the size or the colours — those are the card's, and they change per cake.
@@ -187,6 +188,14 @@ export default function LetterBlocksStudio() {
               {msg.text}
             </p>
           )}
+          {editing && (
+            <button onClick={startNew}
+              style={{ marginTop: 6, width: '100%', padding: '6px 0', fontSize: 11.5, borderRadius: 7,
+                border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+                fontFamily: 'inherit', cursor: 'pointer' }}>
+              Start a new element instead
+            </button>
+          )}
           <p style={{ fontSize: 10.5, color: '#a98', marginTop: 8, lineHeight: 1.5 }}>
             The name, block size and colours are <b>not</b> saved — a baker sets those per cake. This
             row fixes the chamfer, the letter's relief and the spacing.
@@ -195,7 +204,9 @@ export default function LetterBlocksStudio() {
       </div>
 
       <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative' }}>
-        <Canvas shadows camera={{ position: [0, 2.2, 4.4], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
+        {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png — WebGL clears the
+            drawing buffer after compositing and toBlob() reads an empty one. */}
+        <Canvas gl={{ preserveDrawingBuffer: true }} shadows camera={{ position: [0, 2.2, 4.4], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
           <color attach="background" args={[bg]} />
           <SceneLights shadows />
           <SceneEnv />

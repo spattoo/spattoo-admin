@@ -46,9 +46,44 @@ export function ringZonePrefix(zone) {
   return zone === 'rim' ? 'top' : zone === 'board' ? 'bottom' : null;
 }
 
-// Read the placement mode from a stored zone value (string or { mode, seat }).
+// ── A zone that offers the customer a CHOICE of pose ────────────────────────────────────────────
+// Some elements read equally well two ways on the same surface: a football jersey on the cake top
+// can stand up like a topper or hug the surface like a decal. Which is right is the customer's taste,
+// not a property of the jersey — so the zone names both and the designer offers the choice.
+//
+// Only on a FLAT surface, and only between stand and hug. A wall has one sensible pose (a jersey
+// standing edge-on out of the side of a cake is not a thing), and perch/verge are rim poses defined
+// by the edge they sit on. Offering more than is real would author configs the renderer cannot
+// honour.
+export function zoneAltMode(zone, mode) {
+  if (WALL_HUG_ZONES.includes(zone)) return null;
+  if (mode === 'stand') return 'hug';
+  if (mode === 'hug')   return 'stand';
+  return null;
+}
+
+// The poses a stored zone value allows, DEFAULT FIRST. Mirrors core's `zoneModes` — this module is
+// the WRITE/inverse side.
+export function zoneValueModes(value, fallback = 'hug') {
+  if (value && typeof value === 'object' && Array.isArray(value.modes) && value.modes.length) {
+    return value.modes.filter(Boolean);
+  }
+  return [zoneValueMode(value, fallback)];
+}
+
+// The chosen alternate pose of a stored value, or null when the zone offers just one.
+export function zoneValueAlt(value) {
+  const list = zoneValueModes(value);
+  return list.length > 1 ? list[1] : null;
+}
+
+// Read the placement mode from a stored zone value (string or { mode, seat } or { modes }).
+// With a `modes` list this is the FIRST — the default a drop gets.
 export function zoneValueMode(value, fallback = 'hug') {
-  if (value && typeof value === 'object') return value.mode ?? fallback;
+  if (value && typeof value === 'object') {
+    if (Array.isArray(value.modes) && value.modes.length) return value.modes[0];
+    return value.mode ?? fallback;
+  }
   return value ?? fallback;
 }
 
@@ -93,10 +128,14 @@ export function splitZoneValue(value, zone, globalInsert = null) {
 // only when the pose supports it (zoneShowsInsert) and the toggle is on (a non-null object — `{}`
 // means on-with-defaults and IS written). With no modifiers it stays the plain mode string so the
 // config reads cleanly.
-export function serializeZone(mode, seat, insert = null) {
+// `alt` is a second pose the customer may pick (see zoneAltMode). It writes the `modes` LIST instead
+// of `mode`, default first — never both keys, so there is one place the answer lives and no way for
+// the two to disagree.
+export function serializeZone(mode, seat, insert = null, alt = null) {
   const m = mode || 'hug';
   const extra = {};
   if (m === 'hug' && (seat === 'proud' || seat === 'flush')) extra.seat = seat;
   if (insert && typeof insert === 'object' && zoneShowsInsert(m)) extra.insert = insert;
+  if (alt && alt !== m) return { modes: [m, alt], ...extra };
   return Object.keys(extra).length ? { mode: m, ...extra } : m;
 }
