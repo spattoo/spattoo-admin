@@ -62,6 +62,7 @@ export default function ImportElements() {
     tags: bundle.tags?.length ?? 0,
     element_tags: bundle.element_tags?.length ?? 0,
     element_craft_guide: bundle.element_craft_guide?.length ?? 0,
+    element_categories: bundle.element_categories?.length ?? 0,
     assets: bundle.assets?.length ?? 0,
   };
 
@@ -85,6 +86,11 @@ export default function ImportElements() {
           {counts.templates > 0 && <Row k="Templates" v={counts.templates} />}
           <Row k="Elements" v={counts.elements} />
           <Row k="Element types" v={counts.element_types} />
+          {/* Categories were missing from both panels while the backend was planning them all along.
+              A category is the difference between an element a customer can browse to and one only
+              findable by typing its name — so it is exactly the line you want to read before
+              importing, not the one to leave out. */}
+          <Row k="Categories" v={counts.element_categories} />
           <Row k="Tags" v={counts.tags} />
           <Row k="Tag links" v={counts.element_tags} />
           <Row k="Craft guides" v={counts.element_craft_guide} />
@@ -117,6 +123,12 @@ export default function ImportElements() {
             </div>
           )}
           <Row k="Element types" v={`${plan.element_types.create} new, ${plan.element_types.update} updated`} />
+          {/* `reused`, not `updated`: a category arrives WITHOUT an id and is matched by slug, so an
+              existing one is joined rather than rewritten. Guarded because an older backend's plan
+              has no such key. */}
+          {plan.element_categories && (
+            <Row k="Categories"  v={`${plan.element_categories.create} new, ${plan.element_categories.reused} reused`} />
+          )}
           <Row k="Tags"          v={`${plan.tags.create} new, ${plan.tags.update} updated`} />
           <Row k="Elements"      v={`${plan.elements.create} new, ${plan.elements.update} updated`} />
           {plan.cake_templates && (
