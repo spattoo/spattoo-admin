@@ -24,20 +24,25 @@ import { FondantCloud, cloudPlacement, cloudGuide, CLOUD_DEFAULTS, SceneLights, 
 //
 // ── TWO VARIANTS, FROM TWO REFERENCES ───────────────────────────────────────────
 // They are different objects, not one at two sizes:
-//   PUFF — a bunch of balls, fully three-dimensional, sitting ON the top or the board. It reads from
-//          any angle, and its underside is scalloped because that is what balls set down on a
-//          surface look like.
-//   FLAT — one plaque with a bumpy top and a STRAIGHT bottom, pressed on the wall, standing on the
-//          board. A silhouette cut with a knife.
+//   PUFF — balls rolled and pressed together. SEPARATE lumps at different depths, so the cluster
+//          self-shadows and reads as a bunch. The seams between balls are the point, and its
+//          underside is scalloped because that is what balls set down on a surface look like.
+//   FLAT — ONE piece, rolled out and cut: the outline is traced round the whole cluster and extruded
+//          once, bevelled. No seams anywhere, and a soft lip all the way round the edge.
+//
+// The flat one was overlapping discs on a box slab first, and it read as cut paper — every pair of
+// discs left a visible circle where they met and the slab left a knife edge across the front.
 //
 // WHAT TO JUDGE, in the order most likely to be wrong:
-//   1. Does the puff read as several balls pressed together, or as one blobby potato? `Variation`
-//      and `Lumps` are the two controls that decide it.
-//   2. Does the flat one read as a cut-out, or as balls seen edge-on? The straight bottom is the
-//      whole difference — watch where it meets the board.
-//   3. On the wall: does it HUG? Every lump goes to its own angle round the tier, so the ends should
-//      curve away rather than lift off.
-//   4. Next to the rainbow. They share the fondant grain on purpose; a cloud that is subtly smoother
+//   1. Does the puff read as several balls pressed together, or as one blobby potato? `Variation`,
+//      `Lumps` and `Depth` are the three controls that decide it.
+//   2. Does the flat one read as ROLLED fondant or as cut paper? The bevel is the whole of that —
+//      it is the only thing catching a highlight along the cut edge.
+//   3. The grain. It repeated once across a whole ball in the first cut, which turned sugar into
+//      embossed fabric; it is built from the CIRCUMFERENCE now. It should be barely visible.
+//   4. On the wall: does it HUG? The flat sheet is bent whole, so its ends should curve away rather
+//      than lift off.
+//   5. Next to the rainbow. They share the fondant grain on purpose; a cloud that is subtly smoother
 //      reads as a different material and the pair falls apart.
 //
 // Nothing here saves to the catalogue yet — deliberately, the same order the rainbow follows: the
@@ -70,15 +75,19 @@ function VariantTile({ item, on, onPick }) {
     <button type="button" onClick={onPick} title={item.label}
       style={{ ...s.tile, ...(on ? s.tileOn : {}) }}>
       <svg viewBox="0 0 44 30" style={{ width: 52, height: 36 }}>
-        <rect x="2" y="24" width="40" height="4" rx="1" fill="#EDE7DA" />
-        {/* The tile shows the DIFFERENCE and nothing else: the same lumps, scalloped underneath for
-            the puff and cut straight for the plaque. */}
-        <g fill={on ? '#2C4433' : '#C7C0B4'}>
-          <circle cx="14" cy="18" r="6" />
-          <circle cx="22" cy="14" r="8" />
-          <circle cx="31" cy="18" r="6" />
-          {flat && <rect x="8" y="18" width="29" height="6" />}
-        </g>
+        <rect x="2" y="25" width="40" height="3" rx="1" fill="#EDE7DA" />
+        {/* The tile shows the DIFFERENCE and nothing else. The puff keeps its seams and its
+            scalloped underside; the cut piece is one outline with a straight bottom. */}
+        {flat ? (
+          <path d="M8 25 L8 20 A6 6 0 0 1 19 15 A8 8 0 0 1 33 19 A5 5 0 0 1 36 25 Z"
+                fill={on ? '#2C4433' : '#C7C0B4'} />
+        ) : (
+          <g fill={on ? '#2C4433' : '#C7C0B4'} stroke="#fff" strokeWidth="0.8">
+            <circle cx="14" cy="19" r="6" />
+            <circle cx="31" cy="19" r="6" />
+            <circle cx="22" cy="15" r="8" />
+          </g>
+        )}
       </svg>
       <span style={s.tileLbl}>{item.label}</span>
     </button>
@@ -211,6 +220,8 @@ export default function CloudStudio() {
         {num('Lumps', 'lobes', 2, 9, 1)}
         {num('Variation', 'variation', 0, 1, 0.05)}
         {p.variant === 'flat' && num('Thickness', 'depth', 0.02, 0.25, 0.01)}
+        {p.variant === 'flat' && num('Soft edge', 'bevel', 0, 0.9, 0.05)}
+        {p.variant === 'puff' && num('Depth', 'puffDepth', 0, 1.4, 0.05)}
         {num('Position', 'offsetX', -1.2, 1.2, 0.02)}
         {p.surface === 'top' && num('Stands back', 'standoff', -1, 1, 0.05)}
         {p.surface === 'side' && num('Round the cake', 'theta', -3.14, 3.14, 0.05)}
