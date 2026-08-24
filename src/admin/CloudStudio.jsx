@@ -127,12 +127,23 @@ function Cake({ tiers }) {
   );
 }
 
+// ── The picker tile is a picture of the DECORATION ──────────────────────────────────────────────
+// Not of a cake with a decoration on it. The tile is about 60px: a whole cake with a small white
+// cloud on its board is unreadable at that size, and white fondant against a white cake on a pale
+// background is unreadable at any size.
+//
+// `preserveDrawingBuffer` fixes a BLANK capture. This fixes an EMPTY-LOOKING one, which the blank
+// check cannot catch — those pixels differ, they just all differ by nothing anybody can see.
+//
+// One click, and what is on screen is exactly what gets captured. Automating it at save time was the
+// alternative and it hides the one thing worth seeing: the picture you are about to store.
 export default function CloudStudio() {
   const [p, setP] = useState({ ...CLOUD_DEFAULTS, ...PRESETS[0].p });
   const [tiers, setTiers] = useState(1);
   const [fondant, setFondant] = useState(true);
   const [count, setCount] = useState(1);
   const canvasWrapRef = useRef(null);
+  const [thumbView, setThumbView] = useState(false);
 
   const cake = useMemo(() => {
     let top = BOARD_H;
@@ -141,6 +152,22 @@ export default function CloudStudio() {
   }, [tiers]);
 
   const fit = useMemo(() => cloudPlacement(p, cake).fit, [p, cake]);
+
+  // Where the cloud actually IS, and how big — so the thumbnail can frame the object rather than the
+  // corner of a cake it happens to be standing on. Placement is not saved on the row, so a tile
+  // showing one is describing something the customer will never get.
+  const shot = useMemo(() => {
+    const { lobes } = cloudPlacement(p, cake);
+    if (!lobes.length) return { centre: [0, 0.4, 0], dist: 2 };
+    const xs = lobes.map(l => l.position.x), ys = lobes.map(l => l.position.y), zs = lobes.map(l => l.position.z);
+    const c = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2,
+               (Math.min(...zs) + Math.max(...zs)) / 2];
+    const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys),
+                          ...lobes.map(l => l.r * 2));
+    // A little over twice the span: enough that the fondant grain still reads, close enough that the
+    // cloud fills a 60px tile instead of sitting in the middle of one.
+    return { centre: c, dist: Math.max(0.8, span * 2.2) };
+  }, [p, cake]);
   const guide = useMemo(() => cloudGuide(p, cake), [p, cake]);
 
   // The same hook every procedural studio uses — create once, update thereafter, and the address
@@ -207,13 +234,19 @@ export default function CloudStudio() {
         {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png: WebGL clears the drawing
             buffer after compositing, so canvas.toBlob() reads an empty one. The capture succeeds,
             uploads, and stores nothing. */}
-        <Canvas shadows camera={{ position: [0, 2.0, 6.4], fov: 38 }} gl={{ antialias: true, preserveDrawingBuffer: true }}>
-          <color attach="background" args={['#eceaf3']} />
+        {/* Keyed on the view, because a Canvas takes its camera on mount only — remounting is the
+            honest way to move it, and a studio can afford it. */}
+        <Canvas key={thumbView ? 'thumb' : 'scene'} shadows
+          camera={thumbView
+            ? { position: [shot.centre[0], shot.centre[1] + shot.dist * 0.25, shot.centre[2] + shot.dist], fov: 38 }
+            : { position: [0, 2.0, 6.4], fov: 38 }}
+          gl={{ antialias: true, preserveDrawingBuffer: true }}>
+          <color attach="background" args={[thumbView ? '#BFD8EA' : '#eceaf3']} />
           <SceneLights />
           <SceneEnv />
-          <Cake tiers={tiers} />
+          {!thumbView && <Cake tiers={tiers} />}
           {copies.map((c, i) => <FondantCloud key={i} params={c} cake={cake} fondant={fondant} />)}
-          <OrbitControls target={[0, cake.topY * 0.5, 0]} enablePan={false} />
+          <OrbitControls target={thumbView ? shot.centre : [0, cake.topY * 0.5, 0]} enablePan={false} />
         </Canvas>
       </div>
 
@@ -309,6 +342,11 @@ export default function CloudStudio() {
               adding another row.
             </p>
           )}
+          <button onClick={() => setThumbView(v => !v)}
+            style={{ ...s.saveInput, marginBottom: 6, cursor: 'pointer', fontWeight: 700,
+              background: thumbView ? '#2C4433' : '#fff', color: thumbView ? '#fff' : '#2C4433' }}>
+            {thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+          </button>
           <input value={saveName} onChange={e => setSaveName(e.target.value)}
             placeholder="e.g. Small puffy cloud" style={s.saveInput} />
           <button onClick={save} disabled={busy || !saveName.trim()}

@@ -134,9 +134,20 @@ function Cake({ tiers, boardR }) {
   );
 }
 
+// ── The picker tile is a picture of the DECORATION ──────────────────────────────────────────────
+// Not of a cake with a decoration on it. The tile is about 60px: a whole cake with a small white
+// cloud on its board is unreadable at that size, and white fondant against a white cake on a pale
+// background is unreadable at any size.
+//
+// `preserveDrawingBuffer` fixes a BLANK capture. This fixes an EMPTY-LOOKING one, which the blank
+// check cannot catch — those pixels differ, they just all differ by nothing anybody can see.
+//
+// One click, and what is on screen is exactly what gets captured. Automating it at save time was the
+// alternative and it hides the one thing worth seeing: the picture you are about to store.
 export default function RainbowStudio() {
   const [p, setP] = useState({ ...RAINBOW_DEFAULTS });
   const canvasWrapRef = useRef(null);
+  const [thumbView, setThumbView] = useState(false);
   const [tiers, setTiers] = useState(1);
   const [tierIndex, setTierIndex] = useState(0);
   // On by default — it is what the thing is made of. The toggle exists to see the difference, which
@@ -193,6 +204,20 @@ export default function RainbowStudio() {
     return Math.max(0, used - (p.standoff ?? 0) * R);
   }, [p, cake]);
   const guide = useMemo(() => rainbowGuide(p, cake), [p, cake]);
+
+  // Where the arch actually IS, and how big — so the thumbnail frames the arch rather than a cake
+  // with an arch beside it. Placement is not saved on the row, so a tile showing one describes
+  // something the customer will never get.
+  const shot = useMemo(() => {
+    const pts = rainbowBands(p, cake).bands.flatMap(b => b.path);
+    if (!pts.length) return { centre: [0, 1, 0], dist: 3 };
+    const ax = a => [Math.min(...pts.map(v => v[a])), Math.max(...pts.map(v => v[a]))];
+    const [x0, x1] = ax('x'), [y0, y1] = ax('y'), [z0, z1] = ax('z');
+    return {
+      centre: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2],
+      dist: Math.max(1.2, Math.max(x1 - x0, y1 - y0) * 1.5),
+    };
+  }, [p, cake]);
 
   // The same hook the grass and letter-block studios use — create once, update thereafter
   // (INVARIANTS #3). Needs an element type with slug `rainbow` (migration 072).
@@ -257,13 +282,18 @@ export default function RainbowStudio() {
         {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png: WebGL clears the drawing
             buffer after compositing, so canvas.toBlob() reads an empty one. The capture succeeds,
             uploads, and stores nothing. */}
-        <Canvas shadows camera={{ position: [0, 2.4, 7.2], fov: 38 }} gl={{ antialias: true, preserveDrawingBuffer: true }}>
-          <color attach="background" args={['#eceaf3']} />
+        {/* Keyed on the view, because a Canvas takes its camera on mount only. */}
+        <Canvas key={thumbView ? 'thumb' : 'scene'} shadows
+          camera={thumbView
+            ? { position: [shot.centre[0], shot.centre[1], shot.centre[2] + shot.dist], fov: 38 }
+            : { position: [0, 2.4, 7.2], fov: 38 }}
+          gl={{ antialias: true, preserveDrawingBuffer: true }}>
+          <color attach="background" args={[thumbView ? '#E8E2F0' : '#eceaf3']} />
           <SceneLights />
           <SceneEnv />
-          <Cake tiers={tiers} boardR={boardR} />
+          {!thumbView && <Cake tiers={tiers} boardR={boardR} />}
           <RainbowArch params={p} cake={cake} fondant={fondant} />
-          <OrbitControls target={[0, cake.topY * 0.6, 0]} enablePan={false} />
+          <OrbitControls target={thumbView ? shot.centre : [0, cake.topY * 0.6, 0]} enablePan={false} />
         </Canvas>
       </div>
 
@@ -428,6 +458,11 @@ export default function RainbowStudio() {
               adding another row.
             </p>
           )}
+          <button onClick={() => setThumbView(v => !v)}
+            style={{ ...s.saveInput, marginBottom: 6, cursor: 'pointer', fontWeight: 700,
+              background: thumbView ? '#2C4433' : '#fff', color: thumbView ? '#fff' : '#2C4433' }}>
+            {thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+          </button>
           <input value={saveName} onChange={e => setSaveName(e.target.value)}
             placeholder="e.g. Pastel six-band" style={s.saveInput} />
           <button onClick={save} disabled={busy || !saveName.trim()}
