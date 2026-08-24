@@ -200,7 +200,7 @@ export default function RainbowStudio() {
   // customer's decisions on their own cake, and freezing them here would author a rainbow that can
   // only ever be in one place. `scale` stays for the same reason `surface` goes — an author tuning
   // "small pastel arch" is describing the thing, not where it lives.
-  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'rainbow',
     canvasRef: canvasWrapRef,
     buildPayload: () => ({
@@ -425,6 +425,14 @@ export default function RainbowStudio() {
             {busy ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update this element' : 'Save to catalogue')}
           </button>
           {msg && <p style={{ ...s.saveNote, color: msg.ok ? '#2e7d32' : '#c0392b' }}>{msg.text}</p>}
+          {editing && (
+            <button onClick={startNew}
+              style={{ marginTop: 6, width: '100%', padding: '6px 0', fontSize: 11.5, borderRadius: 7,
+                border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+                fontFamily: 'inherit', cursor: 'pointer' }}>
+              Start a new element instead
+            </button>
+          )}
           <p style={s.saveNote}>
             The row carries the SHAPE — bands, ropes, colours, which feet. Not where it sits: that is
             the customer's decision on their own cake, and an arrangement frozen here would be a

@@ -90,7 +90,7 @@ export default function GrassStudio() {
 
   // Authoring a catalogue row is the same job in every procedural studio, so it lives in one hook
   // (INVARIANTS #3) — create the first time, update every time after, thumbnail included.
-  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'grass',
     canvasRef: canvasWrapRef,
     // The LOOK, and only the look. Density, height and colour are what the baker's card exposes;
@@ -206,6 +206,14 @@ export default function GrassStudio() {
             <p style={{ fontSize: 11, marginTop: 8, lineHeight: 1.45, color: msg.ok ? '#2e7d32' : '#c0392b' }}>
               {msg.text}
             </p>
+          )}
+          {editing && (
+            <button onClick={startNew}
+              style={{ marginTop: 6, width: '100%', padding: '6px 0', fontSize: 11.5, borderRadius: 7,
+                border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+                fontFamily: 'inherit', cursor: 'pointer' }}>
+              Start a new element instead
+            </button>
           )}
           <p style={{ fontSize: 10.5, color: '#a98', marginTop: 8, lineHeight: 1.5 }}>
             Density, height and colour are <b>not</b> saved - those are the three a baker sets per

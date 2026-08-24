@@ -26,8 +26,26 @@ import { fetchElementTypes, createGlobalElement, updateGlobalElement, fetchGloba
 //   buildPayload()  → { placement_config, default_color?, allowed_zones? } — the per-studio bits
 //   onHydrate(el)   ← called when opened with ?element=<id>, to load the row back into the sliders
 //
-// Returns the save state plus `save()`. The caller renders its own name field and button, because
-// the copy differs per studio and a shared widget would be a worse fit than a shared behaviour.
+// Returns the save state plus `save()` and `startNew()`. The caller renders its own name field and
+// buttons, because the copy differs per studio and a shared widget would be a worse fit than a
+// shared behaviour.
+//
+// ── WHY SAVING WRITES THE URL ───────────────────────────────────────────────────────────────────
+// `editing` used to live only in memory, so a reload came back as a FRESH studio against a row that
+// already existed — and the next press of Save made a second one. Nothing said so: the name was
+// still typed in, the sliders still where you left them, and the only clue was a heading that no
+// longer said EDITING. That is a trap for whoever uses this tool without having built it.
+//
+// So a create rewrites the address to `?element=<id>`. Reload, bookmark, or send the link to someone
+// else, and it opens as a revision of that row.
+//
+// ── AND WHY `startNew` HAD TO COME WITH IT ──────────────────────────────────────────────────────
+// That fix alone trades one silent failure for a worse one. Somebody authoring a SECOND variant —
+// tune, rename, Save — would now quietly overwrite the first instead of adding a row, and an
+// overwrite cannot be undone by deleting a duplicate.
+//
+// `startNew()` is the way out, and it must be rendered wherever Save is. The pair is the point:
+// which row you are about to write is visible, and both directions are reachable.
 export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate }) {
   // `?element=<id>` opens a studio against a saved row — the Relief Sticker Studio's pattern.
   const elementId = useMemo(() => new URLSearchParams(window.location.search).get('element'), []);
@@ -102,7 +120,10 @@ export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate })
         // Become an EDIT of what was just made, so the next press revises this row instead of
         // cloning it. The common path is author-then-immediately-adjust, so this is the line that
         // actually prevents the duplicates.
-        if (created?.id) setEditing({ id: created.id, name: saveName.trim() });
+        if (created?.id) {
+          setEditing({ id: created.id, name: saveName.trim() });
+          rememberInUrl(created.id);
+        }
         setMsg({ ok: true, text: `Saved "${saveName.trim()}" - saving again updates it.` });
       }
     } catch (e) {
@@ -110,5 +131,24 @@ export function useElementSave({ typeSlug, canvasRef, buildPayload, onHydrate })
     } finally { setBusy(false); }
   }
 
-  return { elementId, editing, saveName, setSaveName, busy, msg, save };
+  // Stop revising the saved row and author a fresh one. Clears the name too: keeping it is how you
+  // end up with two rows called the same thing, which is the confusion this was avoiding.
+  function startNew() {
+    setEditing(null);
+    setSaveName('');
+    setMsg(null);
+    rememberInUrl(null);
+  }
+
+  return { elementId, editing, saveName, setSaveName, busy, msg, save, startNew };
+}
+
+// replaceState, not pushState: the studio is one screen being pointed at different rows, so Back
+// should leave it rather than walk through everything that was saved in this session.
+function rememberInUrl(id) {
+  if (typeof window === 'undefined' || !window.history?.replaceState) return;
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set('element', id);
+  else url.searchParams.delete('element');
+  window.history.replaceState(null, '', url);
 }

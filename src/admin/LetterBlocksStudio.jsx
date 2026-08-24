@@ -71,7 +71,7 @@ export default function LetterBlocksStudio() {
   const canvasWrapRef = useRef(null);
 
   // Same hook the grass studio uses — create once, update thereafter (INVARIANTS #3).
-  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'letter_blocks',
     canvasRef: canvasWrapRef,
     // What makes a cube read as FONDANT: the chamfer, how the letter sits on the face, the spacing.
@@ -186,6 +186,14 @@ export default function LetterBlocksStudio() {
             <p style={{ fontSize: 11, marginTop: 8, lineHeight: 1.45, color: msg.ok ? '#2e7d32' : '#c0392b' }}>
               {msg.text}
             </p>
+          )}
+          {editing && (
+            <button onClick={startNew}
+              style={{ marginTop: 6, width: '100%', padding: '6px 0', fontSize: 11.5, borderRadius: 7,
+                border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+                fontFamily: 'inherit', cursor: 'pointer' }}>
+              Start a new element instead
+            </button>
           )}
           <p style={{ fontSize: 10.5, color: '#a98', marginTop: 8, lineHeight: 1.5 }}>
             The name, block size and colours are <b>not</b> saved — a baker sets those per cake. This
