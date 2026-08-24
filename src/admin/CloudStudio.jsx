@@ -1,0 +1,272 @@
+import React, { useMemo, useState } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
+// The SAME generator the designer renders, never a divergent copy — the rule ChocolateDripStudio
+// states and RainbowStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
+// reason: a colour judged under brighter lights is simply the wrong colour.
+import { FondantCloud, cloudPlacement, cloudGuide, CLOUD_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+
+// ── Cloud studio ──────────────────────────────────────────────────────────────
+// Fondant clouds. Its own element and its own screen, NOT a checkbox on the rainbow — clouds turn up
+// without rainbows (sky, unicorn, aeroplane), several at a time, on the top and the sides and the
+// board. A cloud buried inside the rainbow could not be priced, counted, placed twice, or carry its
+// own craft guide, and a baker rolling clouds for a plain sky cake would never see that guide.
+//
+// The two arrive together via a `decor_pattern` instead: "Rainbow with clouds" is a parts list, not
+// a merged element, and Ungroup already exists for the customer who wants one without the other.
+//
+// ── WHY IT IS GENERATED AND NOT A GLB ───────────────────────────────────────────
+// The WALL. A modelled plaque laid against a round tier touches in the middle and floats at its
+// ends — what festoon.js bends imported strips to avoid — and no scale factor fixes a curve. It also
+// passes the test grass.js sets for when procedural work is safe: it fails on subjects with "a
+// precise familiar signature the eye can check", and a cloud is a handful of lumps. There is no
+// proportion to get wrong.
+//
+// ── TWO VARIANTS, FROM TWO REFERENCES ───────────────────────────────────────────
+// They are different objects, not one at two sizes:
+//   PUFF — a bunch of balls, fully three-dimensional, sitting ON the top or the board. It reads from
+//          any angle, and its underside is scalloped because that is what balls set down on a
+//          surface look like.
+//   FLAT — one plaque with a bumpy top and a STRAIGHT bottom, pressed on the wall, standing on the
+//          board. A silhouette cut with a knife.
+//
+// WHAT TO JUDGE, in the order most likely to be wrong:
+//   1. Does the puff read as several balls pressed together, or as one blobby potato? `Variation`
+//      and `Lumps` are the two controls that decide it.
+//   2. Does the flat one read as a cut-out, or as balls seen edge-on? The straight bottom is the
+//      whole difference — watch where it meets the board.
+//   3. On the wall: does it HUG? Every lump goes to its own angle round the tier, so the ends should
+//      curve away rather than lift off.
+//   4. Next to the rainbow. They share the fondant grain on purpose; a cloud that is subtly smoother
+//      reads as a different material and the pair falls apart.
+//
+// Nothing here saves to the catalogue yet — deliberately, the same order the rainbow follows: the
+// look is judged before an element type, an admin form and a designer control get built around it.
+
+// Mirrors the designer's own bottom tier so every ratio is judged against the real thing.
+const R = 1.2, TIER_H = 1.45, BOARD_H = 0.1, BOARD_R = 1.6;
+
+// Each preset is a whole cloud, transcribed from a reference rather than derived — the same call the
+// rainbow's arrangements make. A tile that sets one number and leaves the rest is a tile that shows
+// the previous cloud with a tweak.
+const PRESETS = [
+  { key: 'puff-board', label: 'Puffy, on the board',
+    p: { variant: 'puff', surface: 'board', width: 0.62, height: 0.30, lobes: 5, variation: 0.35,
+         offsetX: -0.35, scale: 1 } },
+  { key: 'puff-top', label: 'Puffy, on the top',
+    p: { variant: 'puff', surface: 'top', width: 0.52, height: 0.26, lobes: 6, variation: 0.4,
+         offsetX: 0.2, standoff: 0.3, scale: 1 } },
+  { key: 'flat-wall', label: 'Cut-out, on the wall',
+    p: { variant: 'flat', surface: 'side', width: 0.55, height: 0.24, lobes: 4, variation: 0.3,
+         depth: 0.08, theta: -0.5, offsetX: 0, scale: 1 } },
+  { key: 'flat-board', label: 'Cut-out, on the board',
+    p: { variant: 'flat', surface: 'board', width: 0.60, height: 0.26, lobes: 5, variation: 0.3,
+         depth: 0.08, offsetX: 0.4, scale: 1 } },
+];
+
+function VariantTile({ item, on, onPick }) {
+  const flat = item.p.variant === 'flat';
+  return (
+    <button type="button" onClick={onPick} title={item.label}
+      style={{ ...s.tile, ...(on ? s.tileOn : {}) }}>
+      <svg viewBox="0 0 44 30" style={{ width: 52, height: 36 }}>
+        <rect x="2" y="24" width="40" height="4" rx="1" fill="#EDE7DA" />
+        {/* The tile shows the DIFFERENCE and nothing else: the same lumps, scalloped underneath for
+            the puff and cut straight for the plaque. */}
+        <g fill={on ? '#2C4433' : '#C7C0B4'}>
+          <circle cx="14" cy="18" r="6" />
+          <circle cx="22" cy="14" r="8" />
+          <circle cx="31" cy="18" r="6" />
+          {flat && <rect x="8" y="18" width="29" height="6" />}
+        </g>
+      </svg>
+      <span style={s.tileLbl}>{item.label}</span>
+    </button>
+  );
+}
+
+function Cake({ tiers }) {
+  const geo = useMemo(() => {
+    const g = [];
+    let y = BOARD_H;
+    for (let i = 0; i < tiers; i++) {
+      const h = TIER_H - i * 0.12;
+      g.push({ r: R - i * 0.28, h, y });
+      y += h;
+    }
+    return g;
+  }, [tiers]);
+  return (
+    <group>
+      <mesh position={[0, BOARD_H / 2, 0]} receiveShadow>
+        <cylinderGeometry args={[BOARD_R, BOARD_R, BOARD_H, 64]} />
+        <meshStandardMaterial color="#EDE7DA" roughness={0.85} />
+      </mesh>
+      {geo.map((t, i) => (
+        <mesh key={i} position={[0, t.y + t.h / 2, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[t.r, t.r, t.h, 64]} />
+          <meshStandardMaterial color="#FBF8F3" roughness={0.75} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+export default function CloudStudio() {
+  const [p, setP] = useState({ ...CLOUD_DEFAULTS, ...PRESETS[0].p });
+  const [tiers, setTiers] = useState(1);
+  const [fondant, setFondant] = useState(true);
+  const [count, setCount] = useState(1);
+
+  const cake = useMemo(() => {
+    let top = BOARD_H;
+    for (let i = 0; i < tiers; i++) top += TIER_H - i * 0.12;
+    return { radius: R, topY: top, boardY: BOARD_H };
+  }, [tiers]);
+
+  const fit = useMemo(() => cloudPlacement(p, cake).fit, [p, cake]);
+  const guide = useMemo(() => cloudGuide(p, cake), [p, cake]);
+
+  // Several clouds at once, which is how they actually turn up — one is not the question. Spread
+  // round the cake rather than stacked, so the copies do not hide each other.
+  const copies = useMemo(() => Array.from({ length: count }, (_, i) => {
+    if (i === 0) return p;
+    const step = i * 1.15;
+    return p.surface === 'side'
+      ? { ...p, theta: (p.theta ?? 0) + step, scale: (p.scale ?? 1) * (i % 2 ? 0.8 : 1.05) }
+      : { ...p, offsetX: (p.offsetX ?? 0) + (i % 2 ? step * 0.5 : -step * 0.5),
+          scale: (p.scale ?? 1) * (i % 2 ? 0.8 : 1.05) };
+  }), [p, count]);
+
+  const num = (label, key, min, max, step) => (
+    <div style={s.row}>
+      <span style={s.lbl}>{label}</span>
+      <input type="range" min={min} max={max} step={step} value={p[key] ?? 0} style={{ flex: 1 }}
+        onChange={e => setP(o => ({ ...o, [key]: parseFloat(e.target.value) }))} />
+      <span style={s.val}>{(p[key] ?? 0).toFixed(step < 0.01 ? 3 : 2)}</span>
+    </div>
+  );
+
+  return (
+    <div style={s.wrap}>
+      <div style={s.stage}>
+        <Canvas shadows camera={{ position: [0, 2.0, 6.4], fov: 38 }} gl={{ antialias: true }}>
+          <color attach="background" args={['#eceaf3']} />
+          <SceneLights />
+          <SceneEnv />
+          <Cake tiers={tiers} />
+          {copies.map((c, i) => <FondantCloud key={i} params={c} cake={cake} fondant={fondant} />)}
+          <OrbitControls target={[0, cake.topY * 0.5, 0]} enablePan={false} />
+        </Canvas>
+      </div>
+
+      <div style={s.panel}>
+        <h2 style={s.h2}>Cloud</h2>
+        <p style={s.note}>
+          Its own element, not a checkbox on the rainbow: clouds turn up without one, several at a
+          time, on the top and the sides and the board. The pair arrives together as a pattern
+          instead.
+        </p>
+
+        <div style={s.group}>
+          <span style={s.groupLbl}>Cake</span>
+          {[1, 2].map(n => (
+            <button key={n} onClick={() => setTiers(n)}
+              style={{ ...s.chip, ...(tiers === n ? s.chipOn : {}) }}>{n} tier</button>
+          ))}
+          <span style={s.groupLbl}>Grain</span>
+          {[['fondant', true], ['plain', false]].map(([l, v]) => (
+            <button key={l} onClick={() => setFondant(v)}
+              style={{ ...s.chip, ...(fondant === v ? s.chipOn : {}) }}>{l}</button>
+          ))}
+        </div>
+
+        <div style={s.group}>
+          <span style={s.groupLbl}>Kind</span>
+          {PRESETS.map(item => (
+            <VariantTile key={item.key} item={item}
+              on={p.variant === item.p.variant && p.surface === item.p.surface}
+              onPick={() => setP(o => ({ ...o, ...item.p }))} />
+          ))}
+        </div>
+
+        <div style={s.group}>
+          <span style={s.groupLbl}>How many</span>
+          {[1, 2, 3, 5].map(n => (
+            <button key={n} onClick={() => setCount(n)}
+              style={{ ...s.chip, ...(count === n ? s.chipOn : {}) }}>{n}</button>
+          ))}
+        </div>
+
+        {fit < 0.999 && (
+          <p style={{ ...s.tileLbl, textAlign: 'left', color: '#b45309', marginTop: 0 }}>
+            Shrunk to {fit.toFixed(2)}× to stay on the cake top. Where it sits is your decision; its
+            size is not — move it in to get the size back.
+          </p>
+        )}
+
+        {num('Size', 'scale', 0.3, 2.2, 0.05)}
+        {num('Width', 'width', 0.2, 1.2, 0.02)}
+        {num('Height', 'height', 0.08, 0.7, 0.02)}
+        {num('Lumps', 'lobes', 2, 9, 1)}
+        {num('Variation', 'variation', 0, 1, 0.05)}
+        {p.variant === 'flat' && num('Thickness', 'depth', 0.02, 0.25, 0.01)}
+        {num('Position', 'offsetX', -1.2, 1.2, 0.02)}
+        {p.surface === 'top' && num('Stands back', 'standoff', -1, 1, 0.05)}
+        {p.surface === 'side' && num('Round the cake', 'theta', -3.14, 3.14, 0.05)}
+
+        <div style={s.group}>
+          <span style={s.groupLbl}>Colour</span>
+          <input type="color" value={p.color} style={s.swatch}
+            onChange={e => setP(o => ({ ...o, color: e.target.value }))} />
+        </div>
+
+        {/* Ratios, never millimetres: the baker bakes the cake they bake, and a millimetre is a
+            promise about a cake nobody has seen. Same rule the rainbow's guide follows. */}
+        <div style={s.guide}>
+          <span style={s.groupLbl}>What the baker rolls</span>
+          <div style={s.guideRow}>
+            <span>{guide.balls} balls, biggest first</span>
+            <span style={s.guideVal}>{guide.widthOfCakeWidth}× the cake's width</span>
+          </div>
+          {guide.ballsOfCakeWidth.map((b, i) => (
+            <div key={i} style={s.guideRow}>
+              <span style={{ ...s.dot, background: p.color, border: '1px solid #D9D5CE' }} />
+              <span>ball {i + 1}</span>
+              <span style={s.guideVal}>{b}× the cake's width</span>
+            </div>
+          ))}
+        </div>
+
+        <pre style={s.json}>{JSON.stringify(p, null, 1)}</pre>
+      </div>
+    </div>
+  );
+}
+
+const FONT = "'Quicksand', sans-serif";
+const s = {
+  wrap:  { display: 'flex', height: '100vh', fontFamily: FONT },
+  stage: { flex: 1, minWidth: 0, background: '#eceaf3' },
+  panel: { width: 340, overflowY: 'auto', padding: 18, borderLeft: '1px solid #E3E0DA', background: '#fff' },
+  h2:    { margin: '0 0 6px', fontSize: 18, color: '#2C4433' },
+  note:  { margin: '0 0 14px', fontSize: 12, lineHeight: 1.5, color: '#7B8A7F' },
+  group: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 12 },
+  groupLbl: { fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: '#9AA79E', width: '100%' },
+  tile:  { border: '1.5px solid #E3E0DA', background: '#fff', borderRadius: 10, padding: '6px 4px 4px',
+           cursor: 'pointer', width: 76, display: 'flex', flexDirection: 'column', alignItems: 'center',
+           gap: 2, fontFamily: FONT },
+  tileOn:{ borderColor: '#2C4433', background: '#F4F7F4' },
+  tileLbl:{ fontSize: 9, lineHeight: 1.2, color: '#5B6B60', textAlign: 'center' },
+  chip:  { border: '1px solid #D9D5CE', background: '#fff', borderRadius: 20, padding: '5px 11px', cursor: 'pointer', fontSize: 12, fontFamily: FONT },
+  chipOn:{ background: '#2C4433', color: '#fff', borderColor: '#2C4433' },
+  row:   { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12 },
+  lbl:   { width: 92, color: '#5B6B60' },
+  val:   { width: 48, textAlign: 'right', color: '#9AA79E', fontVariantNumeric: 'tabular-nums' },
+  swatch:{ width: 30, height: 26, border: '1px solid #D9D5CE', borderRadius: 6, padding: 0, cursor: 'pointer' },
+  guide: { marginTop: 14, borderTop: '1px solid #EFEDE8', paddingTop: 10 },
+  guideRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#5B6B60', padding: '3px 0' },
+  guideVal: { marginLeft: 'auto', color: '#9AA79E' },
+  dot:   { width: 12, height: 12, borderRadius: '50%', display: 'inline-block' },
+  json:  { fontSize: 11, background: '#F7F6F2', padding: 10, borderRadius: 8, overflowX: 'auto', marginTop: 12 },
+};

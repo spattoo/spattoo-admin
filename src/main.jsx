@@ -54,6 +54,7 @@ const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx')
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
 const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
 const RainbowStudio         = lazy(() => import('./admin/RainbowStudio.jsx'));
+const CloudStudio           = lazy(() => import('./admin/CloudStudio.jsx'));
 const LetterBlocksStudio    = lazy(() => import('./admin/LetterBlocksStudio.jsx'));
 const GlazeStudio           = lazy(() => import('./admin/GlazeStudio.jsx'));
 const SecondCreamLayerStudio = lazy(() => import('./admin/SecondCreamLayerStudio.jsx'));
@@ -114,6 +115,7 @@ const ROUTES = {
   '/elements/chocolate-drip':    ChocolateDripStudio,
   '/elements/grass':             GrassStudio,
   '/elements/rainbow':           RainbowStudio,
+  '/elements/cloud':             CloudStudio,
   '/elements/letter-blocks':     LetterBlocksStudio,
   '/elements/glaze':             GlazeStudio,
   '/elements/second-cream-layer': SecondCreamLayerStudio,
@@ -163,6 +165,7 @@ const NAV_GROUPS = [
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
     { href: '/elements/grass',          label: 'Grass' },
     { href: '/elements/rainbow',        label: 'Rainbow' },
+    { href: '/elements/cloud',          label: 'Cloud' },
     { href: '/elements/letter-blocks',  label: 'Letter Blocks' },
     { href: '/elements/glaze',          label: 'Glaze Studio' },
     { href: '/elements/second-cream-layer', label: 'Second Cream Layer' },
