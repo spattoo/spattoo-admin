@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // The SAME generator the designer renders, never a divergent copy — the rule ChocolateDripStudio
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
-import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv,
+import { RainbowArch, rainbowBands, rainbowGuide, RAINBOW_DEFAULTS, SceneLights, SceneEnv,
          RAINBOW_ARRANGEMENTS, ArrangementTile, iconTiers } from '@spattoo/designer';
 import { useElementSave } from '../lib/useElementSave.js';
 
@@ -157,7 +157,11 @@ export default function RainbowStudio() {
       radius: t.r, topY: t.topY, boardY: t.y,
       // What a falling foot lands ON. The board is left out on purpose: it GROWS to catch a foot,
       // so it is never the thing that limits the rainbow. A tier below cannot grow, so it is.
-      supportRadius: i === 0 ? null : stack[i - 1].r,
+      // What a falling foot lands ON — for the bottom tier, THE BOARD. It used to be null here and
+      // the board grew instead, which meant the studio showed a full-size arch that a real cake then
+      // shrank to about half: an author tuning a look nobody would ever get. A board is a thing the
+      // baker buys, sized to the cake, so it does not grow on a real one.
+      supportRadius: i === 0 ? BOARD_R : stack[i - 1].r,
     };
   }, [tiers, tierIndex]);
 
@@ -166,10 +170,8 @@ export default function RainbowStudio() {
   // standing on it. Never shrinks: a small rainbow does not make a cake need a smaller board.
   // Only the BOTTOM tier stands on the board, so only a rainbow there can make it grow. One on an
   // upper tier falls onto the tier below, which cannot be widened.
-  const boardR = useMemo(
-    () => (tierIndex === 0 ? Math.max(BOARD_R, rainbowBoardReach(p, cake)) : BOARD_R),
-    [p, cake, tierIndex],
-  );
+  // Fixed. The arch fits the board now, rather than the board stretching to catch the arch.
+  const boardR = BOARD_R;
 
   // How much the geometry had to shrink it so the falling foot lands on the tier below. Announced,
   // not silent — the same rule the step-back follows: the studio says what it did rather than
@@ -304,9 +306,7 @@ export default function RainbowStudio() {
 
         <div style={s.group}>
           <span style={s.groupLbl}>
-            Cake · board {boardR > BOARD_R + 1e-6
-              ? `grown to ${(boardR / BOARD_R).toFixed(2)}×`
-              : 'standard'}
+            Cake · board standard, and it stays that way
             {/* Said out loud rather than done quietly. Stepping back is the one move the geometry
                 makes on its own, and only to avoid a rope through the icing — so when it happens,
                 the screen says so instead of leaving somebody wondering why it drifted. */}
@@ -326,8 +326,10 @@ export default function RainbowStudio() {
           ))}
           {fitted < 0.999 && (
             <span style={{ ...s.tileLbl, width: '100%', textAlign: 'left', marginTop: 2, color: '#b45309' }}>
-              Shrunk to {fitted.toFixed(2)}× so the falling foot lands on the tier below. A board grows
-              to catch a foot; a tier cannot. Move it in (Position) to get more of the size back.
+              Shrunk to {fitted.toFixed(2)}× so the falling foot lands on what is under it — the board
+              on the bottom tier, the tier below higher up. Neither grows: a board is a thing the baker
+              buys, sized to the cake. On a standard board a full-size leaning arch does not fit at
+              all — the foot has to clear the cake AND land inside the board, and that ring is narrow.
             </span>
           )}
         </div>
