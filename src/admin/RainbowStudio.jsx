@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -6,6 +6,7 @@ import * as THREE from 'three';
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
 import { RainbowArch, rainbowBands, rainbowGuide, rainbowBoardReach, RAINBOW_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Rainbow studio ────────────────────────────────────────────────────────────
 // Concentric fondant ropes, arching over the cake.
@@ -245,6 +246,7 @@ function Cake({ tiers, boardR }) {
 
 export default function RainbowStudio() {
   const [p, setP] = useState({ ...RAINBOW_DEFAULTS });
+  const canvasWrapRef = useRef(null);
   const [tiers, setTiers] = useState(1);
   const [tierIndex, setTierIndex] = useState(0);
   // On by default — it is what the thing is made of. The toggle exists to see the difference, which
@@ -300,6 +302,42 @@ export default function RainbowStudio() {
   }, [p, cake]);
   const guide = useMemo(() => rainbowGuide(p, cake), [p, cake]);
 
+  // The same hook the grass and letter-block studios use — create once, update thereafter
+  // (INVARIANTS #3). Needs an element type with slug `rainbow` (migration 072).
+  //
+  // What goes in the row is the SHAPE, and only the shape. Colours are on the row as a starting
+  // point, but where it sits (`offsetX`, `theta`, `standoff`, `surface`) is not: those are the
+  // customer's decisions on their own cake, and freezing them here would author a rainbow that can
+  // only ever be in one place. `scale` stays for the same reason `surface` goes — an author tuning
+  // "small pastel arch" is describing the thing, not where it lives.
+  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+    typeSlug: 'rainbow',
+    canvasRef: canvasWrapRef,
+    buildPayload: () => ({
+      // All three, because the geometry genuinely does all three — the wall version is a different
+      // object, not the arch turned sideways.
+      allowed_zones: ['top_surface', 'side', 'board'],
+      default_color: p.colors?.[0] ?? '#F6A9C0',
+      placement_config: {
+        procedural: 'rainbow',
+        rainbow: {
+          bands: p.bands,
+          innerRadius: +Number(p.innerRadius).toFixed(3),
+          thickness: +Number(p.thickness).toFixed(4),
+          spring: +Number(p.spring).toFixed(3),
+          flatten: +Number(p.flatten).toFixed(3),
+          scale: +Number(p.scale).toFixed(3),
+          colors: p.colors,
+          // The feet ARE the shape — "over, falling right" and "sitting on top" are different
+          // rainbows, not one rainbow in two places.
+          footLeft: p.footLeft,
+          footRight: p.footRight,
+        },
+      },
+    }),
+    onHydrate: (el) => setP(o => ({ ...o, ...(el.placement_config?.rainbow ?? {}) })),
+  });
+
   // WHICH width the guide's ratios are measured against. Every one of them is a fraction of the tier
   // the rainbow sits on, and on a stack "1.6x the cake's width" names three different numbers — the
   // one thing a ratio was supposed to stop happening.
@@ -318,7 +356,7 @@ export default function RainbowStudio() {
 
   return (
     <div style={s.wrap}>
-      <div style={s.stage}>
+      <div style={s.stage} ref={canvasWrapRef}>
         <Canvas shadows camera={{ position: [0, 2.4, 7.2], fov: 38 }} gl={{ antialias: true }}>
           <color attach="background" args={['#eceaf3']} />
           <SceneLights />
@@ -478,6 +516,32 @@ export default function RainbowStudio() {
           ))}
         </div>
 
+        {/* Save. The look has been judged, so the row is what makes it a real catalogue element:
+            searchable, taggable, tunable without a deploy. Create once, update thereafter — see
+            useElementSave for why that matters. Needs an element type with slug `rainbow`
+            (migration 072). */}
+        <div style={s.save}>
+          <div style={s.saveLbl}>{editing ? 'EDITING A SAVED ELEMENT' : 'SAVE AS ELEMENT'}</div>
+          {editing && (
+            <p style={s.saveNote}>
+              Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather than
+              adding another row.
+            </p>
+          )}
+          <input value={saveName} onChange={e => setSaveName(e.target.value)}
+            placeholder="e.g. Pastel six-band" style={s.saveInput} />
+          <button onClick={save} disabled={busy || !saveName.trim()}
+            style={{ ...s.saveBtn, ...(busy || !saveName.trim() ? s.saveBtnOff : {}) }}>
+            {busy ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update this element' : 'Save to catalogue')}
+          </button>
+          {msg && <p style={{ ...s.saveNote, color: msg.ok ? '#2e7d32' : '#c0392b' }}>{msg.text}</p>}
+          <p style={s.saveNote}>
+            The row carries the SHAPE — bands, ropes, colours, which feet. Not where it sits: that is
+            the customer's decision on their own cake, and an arrangement frozen here would be a
+            rainbow that can only ever stand in one place.
+          </p>
+        </div>
+
         <details style={{ marginTop: 14 }}>
           <summary style={s.groupLbl}>placement_config</summary>
           <pre style={s.json}>{JSON.stringify({ rainbow: p }, null, 2)}</pre>
@@ -514,5 +578,14 @@ const s = {
   guideRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#5B6B60', padding: '3px 0' },
   guideVal: { marginLeft: 'auto', color: '#9AA79E' },
   dot:   { width: 12, height: 12, borderRadius: '50%', display: 'inline-block' },
+  save:  { marginTop: 16, paddingTop: 14, borderTop: '1px solid #EFEDE8' },
+  saveLbl: { fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: '#9AA79E', marginBottom: 5 },
+  saveNote: { fontSize: 10.5, color: '#7B8A7F', margin: '0 0 6px', lineHeight: 1.45 },
+  saveInput: { width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: FONT,
+               border: '1.5px solid #D9D5CE', borderRadius: 7, boxSizing: 'border-box' },
+  saveBtn: { marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
+             border: '1.5px solid #2C4433', background: '#2C4433', color: '#fff', fontWeight: 700,
+             fontFamily: FONT, cursor: 'pointer' },
+  saveBtnOff: { background: '#E8E4DC', borderColor: '#E8E4DC', color: '#aaa', cursor: 'default' },
   json:  { fontSize: 11, background: '#F7F6F2', padding: 10, borderRadius: 8, overflowX: 'auto' },
 };
