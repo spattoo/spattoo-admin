@@ -361,7 +361,10 @@ export default function RainbowStudio() {
           is how far off the cake's middle it stands, and at 0 it is centred and straddles it.
           <br /><br />
           Gone, and worth knowing why: <b>Gap</b> — fondant ropes with daylight between them do not
-          hold each other up, so they touch, always. <b>Lean</b> — nothing wanted it.
+          hold each other up, so they touch, always. <b>Lean</b> — nothing wanted it. <b>Off the
+          wall</b> — a rope pressed onto a cake is pressed onto it; the one value that is not zero is
+          there to keep the two surfaces from flickering against each other, which is a rendering
+          detail and not a decision anybody makes.
         </p>
 
         <div style={s.group}>
@@ -444,7 +447,6 @@ export default function RainbowStudio() {
         {num('Thickness', 'thickness', 0.03, 0.2, 0.005)}
         {num('Position', 'offsetX', -0.5, 1.6, 0.02)}
         {(p.surface ?? 'top') === 'side' && num('Round the cake', 'theta', -3.14, 3.14, 0.05)}
-        {(p.surface ?? 'top') === 'side' && num('Off the wall', 'proud', 0, 0.1, 0.005)}
         {num('Stands back', 'standoff', 0, 2, 0.05)}
         {num('Flatten', 'flatten', 0, 0.9, 0.05)}
 
