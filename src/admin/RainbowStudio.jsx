@@ -144,6 +144,10 @@ function Cake({ tiers, boardR }) {
 //
 // One click, and what is on screen is exactly what gets captured. Automating it at save time was the
 // alternative and it hides the one thing worth seeing: the picture you are about to store.
+//
+// WHITE here, and blue in the cloud studio. Not an inconsistency: the picker's cards are white, so a
+// white ground makes a coloured decoration sit ON the card rather than in a tinted box. A white
+// cloud on white would disappear, which is the whole problem this exists to solve.
 export default function RainbowStudio() {
   const [p, setP] = useState({ ...RAINBOW_DEFAULTS });
   const canvasWrapRef = useRef(null);
@@ -288,7 +292,7 @@ export default function RainbowStudio() {
             ? { position: [shot.centre[0], shot.centre[1], shot.centre[2] + shot.dist], fov: 38 }
             : { position: [0, 2.4, 7.2], fov: 38 }}
           gl={{ antialias: true, preserveDrawingBuffer: true }}>
-          <color attach="background" args={[thumbView ? '#E8E2F0' : '#eceaf3']} />
+          <color attach="background" args={[thumbView ? '#FFFFFF' : '#eceaf3']} />
           <SceneLights />
           <SceneEnv />
           {!thumbView && <Cake tiers={tiers} boardR={boardR} />}
