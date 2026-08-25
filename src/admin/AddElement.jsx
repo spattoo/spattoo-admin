@@ -13,9 +13,24 @@ import CraftGuideFields, { RANKS } from './CraftGuideFields.jsx';
 import { serializeZone, zoneShowsInsert } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
 
+// ── What KIND of thing is being added ───────────────────────────────────────────────────────────
+// 'Procedural' is the third because some elements have no file at all: a rainbow, a cloud, grass, a
+// number topper. They are DRAWN by a generator named in placement_config, and there is nothing to
+// upload — the thing IS the code.
+//
+// It is an explicit choice rather than something inferred from the element type, and that is the
+// point. "No image needed" is a dangerous thing to conclude on a guess: get it wrong and an element
+// enters the library with nothing to show, and the first anybody knows is a blank tile in a
+// customer's picker. Making the author say so means the only way to skip the file is to mean it.
+//
+// Before this, procedural elements could not be added here AT ALL — the form demanded a file, and
+// the only exemption was a hardcoded pair of pattern slugs. Every generated element in the catalogue
+// got there from a studio calling the API directly, which is why one without a studio (a Text, a
+// number topper) could not exist.
 const ASSET_TYPES = [
-  { value: '2D',      label: '2D Image',       folder: 'elements/files/2D' },
-  { value: '3D',      label: '3D Model (GLB)', folder: 'elements/files/3D' },
+  { value: '2D',         label: '2D Image',       folder: 'elements/files/2D' },
+  { value: '3D',         label: '3D Model (GLB)', folder: 'elements/files/3D' },
+  { value: 'PROCEDURAL', label: 'Procedural',     folder: null },
 ];
 
 const CAKE_ZONES = [
@@ -259,6 +274,10 @@ export default function AddElement() {
   const [isParent, setIsParent]           = useState(false);
   const [parentId, setParentId]           = useState('');
   const [assetType, setAssetType]         = useState('2D');
+  // Which generator draws a PROCEDURAL element. It becomes `placement_config.procedural`, the key
+  // the designer's registry looks up to place one — so without it the row is inert: it appears in
+  // the picker, and tapping it does nothing at all.
+  const [generator, setGenerator]         = useState('');
   // 2D only: run remove.bg on the uploaded image. ON by default (most decals are photographed/solid
   // and need their background stripped). Turn OFF for assets whose alpha is already authored — e.g. a
   // photo-frame overlay (border + transparent window) — so the asset is uploaded untouched + un-cropped.
@@ -380,8 +399,13 @@ export default function AddElement() {
 
   // For 2D, build the thumbnail from the asset when selected (and re-build if the remove-bg toggle
   // changes, so the preview reflects the choice).
+  //
+  // PROCEDURAL runs the same pipeline for a different reason: the picture picked there is not the
+  // element's artwork — there IS no artwork — it is only the tile. So it is normalised the same way
+  // and stored as the thumbnail alone, with `image_url` left null.
   useEffect(() => {
-    if (assetType !== '2D' || !assetFile) { if (assetType === '2D') setThumbnailBlob(null); return; }
+    const usesPickedImage = assetType === '2D' || assetType === 'PROCEDURAL';
+    if (!usesPickedImage || !assetFile) { if (usesPickedImage) setThumbnailBlob(null); return; }
     processRemoveBg(assetFile);
   }, [assetFile, assetType, removeBgEnabled]);
 
@@ -496,9 +520,22 @@ export default function AddElement() {
   }
 
   async function handleSave() {
-    const needsFile = !isPatternType;
+    // A procedural element has no file BY DEFINITION, so this is the one kind that may be saved
+    // without one. Patterns keep their existing exemption.
+    const needsFile = !isPatternType && !isProcedural;
     if (!name.trim() || !elementTypeId || (needsFile && !assetFile)) {
       setMsg({ ok: false, text: 'Name, element type and asset file are required.' });
+      return;
+    }
+    // No asset is not the same as no picture. A procedural element is drawn by code, so it has
+    // nothing to upload — but the picker still shows a TILE, and one without an image is a blank
+    // square a customer scrolls past. Three elements reached the catalogue like that already.
+    if (isProcedural && !generator.trim()) {
+      setMsg({ ok: false, text: 'Which generator draws it? Give the procedural key — e.g. rainbow, cloud, grass, writing, number_topper.' });
+      return;
+    }
+    if (isProcedural && !thumbnailBlob) {
+      setMsg({ ok: false, text: 'A procedural element has no file to upload, but it still needs a thumbnail — pick an image for its tile.' });
       return;
     }
     // The front view exists to (a) orient the model and (b) auto-capture a thumbnail from it.
@@ -580,6 +617,9 @@ export default function AddElement() {
 
       let builtPlacementConfig = {};
       {
+        // A procedural element IS its generator. `placement_config.procedural` is what
+        // PROCEDURAL_TOOLS in the designer looks up, and the row does nothing without it.
+        if (isProcedural) builtPlacementConfig.procedural = generator.trim();
         // GLB material finish (placement_config.roughness/metalness): persist so the designer can read
         // it as matte (high roughness / 0 metalness) or metallic (low roughness / high metalness) —
         // config-driven, applied on the one art render path. GLB only.
@@ -780,6 +820,7 @@ export default function AddElement() {
   // Pattern types have no asset of their own — they reference part elements via
   // placement_config.parts (decor_pattern: decor stickers; piping_pattern: cream blocks). So no
   // file upload is required; image_url stays null (same as 3D-geometry elements already do).
+  const isProcedural = assetType === 'PROCEDURAL';
   const isPatternType = ['decor_pattern', 'piping_pattern'].includes(
     elementTypes.find(t => t.id === elementTypeId)?.slug);
 
@@ -801,8 +842,20 @@ export default function AddElement() {
             </div>
           </div>
 
+          {isProcedural && (
+            <div style={s.field}>
+              <label style={s.label}>Generator</label>
+              <input style={s.input} value={generator} onChange={e => setGenerator(e.target.value)}
+                placeholder="rainbow · cloud · grass · letter_blocks · writing · number_topper" />
+              <div style={{ fontSize: 11, color: '#9BB5A2', marginTop: 4 }}>
+                The key the designer looks up to draw this. It must match an entry in
+                PROCEDURAL_TOOLS, or the element will sit in the picker and do nothing when tapped.
+              </div>
+            </div>
+          )}
+
           <FileDropZone
-            label={assetType === '3D' ? 'GLB File' : 'Image File'}
+            label={assetType === '3D' ? 'GLB File' : isProcedural ? 'Thumbnail Image (no asset — this is only the tile)' : 'Image File'}
             accept={assetType === '3D' ? '.glb,.gltf' : 'image/*'}
             file={assetFile}
             onChange={f => { setAssetFile(f); setOptimizedStats(null); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setGlbRotation([0,0,0]); setFrontConfirmed(false); }}
