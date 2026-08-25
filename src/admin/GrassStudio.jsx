@@ -92,7 +92,7 @@ export default function GrassStudio() {
   // (INVARIANTS #3) — create the first time, update every time after, thumbnail included.
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
     typeSlug: 'grass',
-    categorySlug: 'finishes',   // where a customer browses to find it
+    categorySlug: 'flowers-leaves',   // greenery, not a surface finish — Finishes is dust and foil
     canvasRef: canvasWrapRef,
     // The LOOK, and only the look. Density, height and colour are what the baker's card exposes;
     // freezing them here would take away a per-cake choice.
