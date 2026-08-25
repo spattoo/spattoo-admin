@@ -1035,7 +1035,12 @@ export default function ManageElements() {
       category_id:      categoryId || null,
       parent_id:        isParent ? null : (parentId || null),
       allowed_zones:    applicableZones,
-      allowed_actions:  capabilities,
+      /* ⚠️ delete is forced ON at the point of SAVE, not just in the form.
+       * The tick being disabled stops an admin turning it off; it does not stop a `false` that is
+       * ALREADY on the row being loaded into state and written straight back. Three rows in dev
+       * carry delete:false from before the rule, and editing any of them for an unrelated reason
+       * would have re-saved it. The form shows the rule; this is what makes it true. */
+      allowed_actions:  { ...capabilities, delete: true },
       default_color:    defaultColor || null,
       // '' means "not stated" and must reach the API as null, not as an empty string the CHECK
       // constraint would reject.
@@ -1965,14 +1970,18 @@ export default function ManageElements() {
                       { key: 'duplicate', label: 'Duplicatable',     hint: 'Copy button creates another instance' },
                       { key: 'color',     label: 'Color changeable', hint: 'Color picker in the designer — tints a GLB material, or recolours a 2D image (choose the area below)' },
                       { key: 'gradient',  label: 'Gradient colors',  hint: 'Customer can blend up to 3 colors (swirl / vertical / linear) — for swirls & ombré (GLB only)' },
-                      { key: 'delete',    label: 'Deletable',        hint: 'Remove button shown when selected' },
+                      { key: 'delete',    label: 'Deletable',        hint: 'Always on — a customer can remove anything from their cake. Kept as a field so the rule stays visible and could be revisited, but it is not a choice.', fixed: true },
                       { key: 'move',      label: 'Movable',          hint: 'Nudge ◀▶▲▼ position on the cake' },
                       { key: 'tilt',      label: 'Tiltable',         hint: 'Lean / rotate slightly in the designer' },
-                    ].map(({ key, label, hint }) => (
-                      <label key={key} style={{ ...s.checkRow, alignItems: 'flex-start', cursor: 'pointer' }}>
+                    /* `fixed`: ticked and not clickable — every element is deletable, and the
+                       designer stopped honouring `delete: false`. See AddElement for the reasoning. */
+                    ].map(({ key, label, hint, fixed }) => (
+                      <label key={key} style={{ ...s.checkRow, alignItems: 'flex-start', cursor: fixed ? 'default' : 'pointer' }}>
                         <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
-                          checked={capabilities[key] ?? false}
+                          checked={fixed ? true : (capabilities[key] ?? false)}
+                          disabled={fixed}
                           onChange={e => {
+                            if (fixed) return;
                             const checked = e.target.checked;
                             setCapabilities(c => ({ ...c, [key]: checked }));
                             // A colour-changeable 2D image needs a recolour region descriptor (which

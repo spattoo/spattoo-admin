@@ -699,7 +699,12 @@ export default function AddElement() {
         file_size:        assetSize,
         allowed_zones:    applicableZones,
         placement_config: builtPlacementConfig,
-        allowed_actions:  capabilities,
+        /* ⚠️ delete is forced ON at the point of SAVE, not just in the form.
+         * The tick being disabled stops an admin turning it off; it does not stop a `false` that is
+         * ALREADY on the row being loaded into state and written straight back. Three rows in dev
+         * carry delete:false from before the rule, and editing any of them for an unrelated reason
+         * would have re-saved it. The form shows the rule; this is what makes it true. */
+        allowed_actions:  { ...capabilities, delete: true },
         default_color:    (assetType === '3D' && userPickedColor) ? elementColor : null,
         sort_order:       0,
         // GLB cost stats from the Studio review (§3) — flagged, not gated.
@@ -1271,16 +1276,23 @@ export default function AddElement() {
                 { key: 'duplicate', label: 'Duplicatable',     hint: 'Copy button creates another instance with same size and color' },
                 { key: 'color',     label: 'Color changeable', hint: 'Color picker in the designer — tints a GLB material, or recolours a 2D image (choose the area below)' },
                 { key: 'gradient',  label: 'Gradient colors',  hint: 'Customer can blend up to 3 colors (swirl / vertical / linear) — for swirls & ombré (GLB only)' },
-                { key: 'delete',    label: 'Deletable',        hint: 'Remove button shown when selected' },
+                { key: 'delete',    label: 'Deletable',        hint: 'Always on — a customer can remove anything from their cake. Kept as a field so the rule stays visible and could be revisited, but it is not a choice.', fixed: true },
                 { key: 'move',      label: 'Movable',          hint: 'Nudge ◀▶▲▼ position on the cake' },
                 { key: 'tilt',      label: 'Tiltable',         hint: 'Lean / rotate slightly in the designer' },
-              ].map(({ key, label, hint }) => (
-                <label key={key} style={{ ...s.checkRow, alignItems: 'flex-start', cursor: 'pointer' }}>
+              /* ⚠️ `fixed` is on, ticked and not clickable — see the delete row above.
+                 Every element is deletable: a customer cannot be made to keep something on their own
+                 cake, and the designer stopped honouring `delete: false` when that was decided. The
+                 field stays in the shape because we do not know the future, but an admin form that
+                 offers a choice the app ignores is worse than no control at all — it is a promise
+                 the product does not keep. Ticked and locked says the rule instead of hiding it. */
+              ].map(({ key, label, hint, fixed }) => (
+                <label key={key} style={{ ...s.checkRow, alignItems: 'flex-start', cursor: fixed ? 'default' : 'pointer' }}>
                   <input
                     type="checkbox"
                     style={{ ...s.checkbox, marginTop: 1 }}
-                    checked={capabilities[key]}
-                    onChange={e => setCapabilities(c => ({ ...c, [key]: e.target.checked }))}
+                    checked={fixed ? true : capabilities[key]}
+                    disabled={fixed}
+                    onChange={e => { if (!fixed) setCapabilities(c => ({ ...c, [key]: e.target.checked })); }}
                   />
                   <div>
                     <div style={s.checkLabel}>{label}</div>
