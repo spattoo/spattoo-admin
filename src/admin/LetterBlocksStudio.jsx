@@ -72,7 +72,9 @@ export default function LetterBlocksStudio() {
 
   // Same hook the grass studio uses — create once, update thereafter (INVARIANTS #3).
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
-    typeSlug: 'letter_blocks',
+        // The same type the rainbow and the cloud use: generated, standing on a surface, made of
+    // fondant. A type of its own would be a type per decoration, which 073 corrected.
+    typeSlug: 'fondant_decor',
     categorySlug: 'numbers-letters',   // where a customer browses to find it
     canvasRef: canvasWrapRef,
     // What makes a cube read as FONDANT: the chamfer, how the letter sits on the face, the spacing.

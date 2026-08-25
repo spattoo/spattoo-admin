@@ -91,7 +91,9 @@ export default function GrassStudio() {
   // Authoring a catalogue row is the same job in every procedural studio, so it lives in one hook
   // (INVARIANTS #3) — create the first time, update every time after, thumbnail included.
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
-    typeSlug: 'grass',
+        // A treatment that COVERS a surface, not a decoration that stands on one (migration 076).
+    // The old slug named a type that has never existed, so this Save could never have worked.
+    typeSlug: 'surface_treatment',
     categorySlug: 'flowers-leaves',   // greenery, not a surface finish — Finishes is dust and foil
     canvasRef: canvasWrapRef,
     // The LOOK, and only the look. Density, height and colour are what the baker's card exposes;
