@@ -178,6 +178,7 @@ const s = {
   grid:    { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 },
   field:   { marginBottom: 16 },
   label:   { display: 'block', fontSize: 11, fontWeight: 700, color: '#3D5A44', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
+  hint:    { fontSize: 12, color: '#6B8C74' },
   input:   { width: '100%', padding: '9px 12px', border: '1.5px solid #C5D4C8', borderRadius: 8, fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2C4433', outline: 'none', boxSizing: 'border-box' },
   radioRow:{ display: 'flex', gap: 8 },
   radioBtn:(active) => ({ flex: 1, padding: '7px 0', borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${active ? '#3D5A44' : '#C5D4C8'}`, background: active ? '#E8EDE9' : '#fff', color: active ? '#2C4433' : '#6B8C74', fontSize: 13, fontWeight: 700, fontFamily: "'Quicksand', sans-serif" }),
@@ -426,7 +427,7 @@ function TemplateForm({ onSaved, onCancel }) {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
-export default // ── Tagging a template that already exists ──────────────────────────────────────────────────────
+// ── Tagging a template that already exists ──────────────────────────────────────────────────────
 // Tags were settable only while CREATING one, in a form that offers occasions alone. Everything else
 // arrives untagged and stays that way: every template a baker saves, and every one made in the
 // Design Template screen, which sets no tags at all.
@@ -521,7 +522,7 @@ function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
   );
 }
 
-function ManageTemplates() {
+export default function ManageTemplates() {
   const [templates, setTemplates] = useState([]);
   // Which template's tags are open. One at a time: the vocabulary is 56 tags across seven groups,
   // and several open at once is a wall.
