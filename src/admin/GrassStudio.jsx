@@ -88,6 +88,17 @@ export default function GrassStudio() {
   const [stats, setStats] = useState({ tufts: 0, blades: 0 });
   const canvasWrapRef = useRef(null);
 
+  // ── Two helpers the useElementSave extraction took with it (656104a) ───────────────────────────
+  // That commit lifted this studio's local save helpers into the shared hook and removed the block
+  // they sat in — which also removed these two, leaving eight callers of `set` and one of `onStats`
+  // pointing at names that no longer existed.
+  //
+  // So the studio has thrown on RENDER ever since, and the Save button it gained in the very same
+  // commit was never reachable. That is the actual reason there has never been a grass row: not that
+  // nobody pressed Save, and not only that its element type was missing — the page did not load.
+  const set = k => v => setP(o => ({ ...o, [k]: v }));
+  const onStats = useCallback(s => setStats(s), []);
+
   // Authoring a catalogue row is the same job in every procedural studio, so it lives in one hook
   // (INVARIANTS #3) — create the first time, update every time after, thumbnail included.
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
