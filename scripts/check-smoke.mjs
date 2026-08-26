@@ -53,7 +53,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { chromium } from 'playwright';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -65,7 +65,32 @@ function routes() {
   const src = readFileSync(join(ROOT, 'src/main.jsx'), 'utf8');
   const block = src.match(/const ROUTES = \{([\s\S]*?)\n\};/);
   if (!block) die('could not find ROUTES in src/main.jsx — if it moved, update this script');
-  return [...block[1].matchAll(/^\s*'([^']+)':/gm)].map(m => m[1]);
+  return [...block[1].matchAll(/^\s*'([^']+)':\s*(\w+)/gm)].map(m => ({ path: m[1], comp: m[2] }));
+}
+
+// ── Which screens could THIS commit have broken? ────────────────────────────────────────────────
+// Because a gate nobody waits for is a gate nobody runs. Forty-nine screens in a browser is a
+// couple of minutes, and a couple of minutes on every commit gets answered with --no-verify — I
+// used --no-verify six times in one afternoon on this very repo. So a commit that touches one
+// screen smokes that screen.
+//
+// Anything NOT a screen — a shared lib, the router itself, the build config, the vendored designer
+// — smokes everything, because there is no honest way to say which screens a shared change reaches.
+// The bias is deliberate: the cheap case is narrow, the doubtful case is wide.
+function affected(staged) {
+  const src = readFileSync(join(ROOT, 'src/main.jsx'), 'utf8');
+  const fileOf = {};                       // component name → the file it lazily imports
+  for (const m of src.matchAll(/const (\w+)\s*=\s*lazy\(\(\) => import\('\.\/([^']+)'\)\)/g)) {
+    fileOf[m[1]] = `src/${m[2]}`;
+  }
+  const all = routes();
+  const hit = new Set();
+  for (const f of staged) {
+    const owned = all.filter(r => fileOf[r.comp] === f);
+    if (owned.length) { owned.forEach(r => hit.add(r.path)); continue; }
+    if (/^src\//.test(f) || /package(-lock)?\.json$|vite\.config|\.env/.test(f)) return null;  // = all
+  }
+  return [...hit];
 }
 
 function env() {
@@ -189,7 +214,22 @@ if (LOGIN) {
   process.exit(0);
 }
 
-const all = routes();
+// `--changed` smokes only what the staged commit could have broken; without it, everything.
+const CHANGED = process.argv.includes('--changed');
+const staged = CHANGED
+  ? execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').filter(Boolean)
+  : [];
+const only = CHANGED ? affected(staged) : null;
+const all = (only ?? routes().map(r => r.path));
+if (CHANGED && only && !only.length) {
+  console.log('✓ check:smoke — no screen in this commit');
+  await browser.close(); stop();
+  process.exit(0);
+}
+if (CHANGED) {
+  console.log(only ? `  smoking ${all.length} changed screen(s)` : `  shared change — smoking all ${all.length}`);
+}
 const broken = [];
 let ignored = 0;   // third-party console noise, reported at the end rather than hidden
 const page = await ctx.newPage();
