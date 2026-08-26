@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "check:dup": "jscpd src",
     "check:feature-docs": "node ../spattoo-docs/bin/check-feature-docs.mjs --repo spattoo-admin",
-    "verify": "npm run check:bindings && npm run check:dup",
-    "check:bindings": "node scripts/check-bindings.mjs"
+    "verify": "npm run check:bindings && npm run check:smoke && npm run check:dup",
+    "check:bindings": "node scripts/check-bindings.mjs",
+    "check:smoke": "node scripts/check-smoke.mjs"
   },
   "dependencies": {
     "@fontsource-variable/quicksand": "^5.3.0",
@@ -30,6 +31,7 @@
     "@sentry/vite-plugin": "^5.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jscpd": "^5.0.10",
+    "playwright": "^1.62.1",
     "react-colorful": "^5.6.1",
     "three": "^0.183.2",
     "vite": "^6.3.0"
