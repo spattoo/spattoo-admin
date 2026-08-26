@@ -73,6 +73,12 @@ const PRESETS = {
   'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, 
     footLeft: 'top', footRight: 'top', standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#EE6D8E', '#F29B54', '#F6D34F', '#7CC576', '#5BA9DE', '#8E7BC4', '#D98BC4'] },
+  // The scrolled one (reference 5): sits on the cake, left end resting, right end rolled up. The
+  // spread and lift are not decoration — without them the coils pass through each other.
+  'Curled ends (ref 5)': { bands: 6, innerRadius: 0.30, thickness: 0.115, surface: 'top',
+    footLeft: 'top', footRight: 'curl', spring: 1, offsetX: 0, standoff: 0, scale: 0.75, flatten: 0,
+    curlTurns: 1.35, curlSize: 1.6, curlTightness: 0.82, curlFan: 1.1, curlSplay: 1.2, curlLift: 0.9,
+    colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
   'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, 
     footLeft: 'top', footRight: 'top', standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
@@ -258,6 +264,15 @@ export default function RainbowStudio() {
           // rainbows, not one rainbow in two places.
           footLeft: p.footLeft,
           footRight: p.footRight,
+          // Only when an end curls, so a plain rainbow's row stays exactly what it was.
+          ...(p.footLeft === 'curl' || p.footRight === 'curl' ? {
+            curlTurns:     +Number(p.curlTurns).toFixed(3),
+            curlSize:      +Number(p.curlSize).toFixed(3),
+            curlTightness: +Number(p.curlTightness).toFixed(3),
+            curlFan:       +Number(p.curlFan).toFixed(3),
+            curlSplay:     +Number(p.curlSplay).toFixed(3),
+            curlLift:      +Number(p.curlLift).toFixed(3),
+          } : {}),
         },
       },
     }),
@@ -421,6 +436,22 @@ export default function RainbowStudio() {
         {(p.surface ?? 'top') === 'side' && num('Round the cake', 'theta', -3.14, 3.14, 0.05)}
         {num('Stands back', 'standoff', 0, 2, 0.05)}
         {num('Flatten', 'flatten', 0, 0.9, 0.05)}
+
+        {/* Only when an end is actually curled. Five sliders that do nothing are worse than none:
+            they read as controls that are broken rather than as controls that do not apply. */}
+        {(p.footLeft === 'curl' || p.footRight === 'curl') && (
+          <>
+            {num('Curl turns', 'curlTurns', 0.4, 2.5, 0.05)}
+            {num('Curl size', 'curlSize', 0.8, 3.5, 0.1)}
+            {num('Curl tightness', 'curlTightness', 0, 1, 0.02)}
+            {num('Ends stagger', 'curlFan', -1.5, 1.5, 0.05)}
+            {/* These two are not taste. A coil is wider than the gap between two touching ropes, so
+                without them the curls pass through each other — measured at 0.001 of a 0.138 rope,
+                which is straight through. Left adjustable because how MUCH is a look. */}
+            {num('Ends spread', 'curlSplay', 0, 2.5, 0.1)}
+            {num('Ends lift', 'curlLift', 0, 2, 0.1)}
+          </>
+        )}
 
         <div style={s.colors}>
           <span style={s.groupLbl}>Colours</span>
