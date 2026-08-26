@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
+import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, fetchTemplateTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
 } from '../lib/api.js';
 
 const SHAPES = [
@@ -178,6 +178,7 @@ const s = {
   grid:    { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 },
   field:   { marginBottom: 16 },
   label:   { display: 'block', fontSize: 11, fontWeight: 700, color: '#3D5A44', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
+  hint:    { fontSize: 12, color: '#6B8C74' },
   input:   { width: '100%', padding: '9px 12px', border: '1.5px solid #C5D4C8', borderRadius: 8, fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2C4433', outline: 'none', boxSizing: 'border-box' },
   radioRow:{ display: 'flex', gap: 8 },
   radioBtn:(active) => ({ flex: 1, padding: '7px 0', borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${active ? '#3D5A44' : '#C5D4C8'}`, background: active ? '#E8EDE9' : '#fff', color: active ? '#2C4433' : '#6B8C74', fontSize: 13, fontWeight: 700, fontFamily: "'Quicksand', sans-serif" }),
@@ -426,8 +427,112 @@ function TemplateForm({ onSaved, onCancel }) {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
+// ── Tagging a template that already exists ──────────────────────────────────────────────────────
+// Tags were settable only while CREATING one, in a form that offers occasions alone. Everything else
+// arrives untagged and stays that way: every template a baker saves, and every one made in the
+// Design Template screen, which sets no tags at all.
+//
+// That matters because tags are what the storefront FILTERS on — `template_tags(tags(slug))` in the
+// query. An untagged template is not merely unlabelled, it is unfindable by every facet a customer
+// browses with. And it is permanent, because nothing could edit them afterwards.
+//
+// Everything else was already there: the table, the two routes, the API client, and the export
+// closure that carries tags to production. Only the screen was missing.
+//
+// Grouped by category, because the vocabulary is 56 tags over seven groups and a flat list of that
+// is a wall. Occasions are not special here — the create form offers only those, and this is where
+// theme, style, colour and material get on.
+function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
+  const [chosen, setChosen] = useState(null);   // null = still loading
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // The route returns join rows — { tag_id, source, tags: {…} } — so the id wanted is tag_id.
+    // Auto-tagged ones come back here too, and that is deliberate: a save REPLACES the whole set
+    // (the PUT deletes then inserts), so anything not shown would be silently dropped.
+    fetchTemplateTags(template.id)
+      .then(rows => { if (!cancelled) setChosen(new Set((rows ?? []).map(r => r.tag_id ?? r.id))); })
+      // A failed read must not look like "this template has no tags" — that reads as a fact and
+      // would be saved back as one, wiping whatever is really there.
+      .catch(e => { if (!cancelled) setErr(`Could not read its tags: ${e.message}`); });
+    return () => { cancelled = true; };
+  }, [template.id]);
+
+  const groups = useMemo(() => {
+    const by = new Map();
+    for (const t of allTags) {
+      const k = t.category ?? 'other';
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push(t);
+    }
+    return [...by.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [allTags]);
+
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      await saveTemplateTags(template.id, [...chosen]);
+      onSaved?.();
+      onClose();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  }
+
+  if (err && !chosen) return <div style={{ ...s.hint, color: '#C0392B' }}>{err}</div>;
+  if (!chosen) return <div style={s.hint}>Reading its tags…</div>;
+
+  return (
+    <div style={{ marginTop: 10, padding: 12, background: '#F4F8F5', borderRadius: 10 }}>
+      {groups.map(([category, tags]) => (
+        <div key={category} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#6B8C74', marginBottom: 5 }}>
+            {category.replace(/_/g, ' ')}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {tags.map(tag => {
+              const on = chosen.has(tag.id);
+              return (
+                <button key={tag.id} type="button"
+                  style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    fontFamily: "'Quicksand', sans-serif",
+                    border: `1.5px solid ${on ? '#3D5A44' : '#C5D4C8'}`,
+                    background: on ? '#E8EDE9' : '#fff', color: on ? '#2C4433' : '#6B8C74' }}
+                  onClick={() => setChosen(prev => {
+                    const next = new Set(prev);
+                    on ? next.delete(tag.id) : next.add(tag.id);
+                    return next;
+                  })}>
+                  {tag.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+        <button style={s.btn()} onClick={save} disabled={busy}>
+          {busy ? 'Saving…' : `Save ${chosen.size} tag${chosen.size === 1 ? '' : 's'}`}
+        </button>
+        <button style={s.btn('secondary')} onClick={onClose} disabled={busy}>Cancel</button>
+        <span style={s.hint}>Saving replaces every tag on this template.</span>
+        {err && <span style={{ ...s.hint, color: '#C0392B' }}>{err}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function ManageTemplates() {
   const [templates, setTemplates] = useState([]);
+  // Which template's tags are open. One at a time: the vocabulary is 56 tags across seven groups,
+  // and several open at once is a wall.
+  const [tagEditFor, setTagEditFor] = useState(null);
+  // The whole vocabulary, once. The create form fetches it too and keeps only occasions; this needs
+  // all seven groups, because occasions are the ones a template most often already has.
+  const [allTags, setAllTags] = useState([]);
+  // How many tags each template carries, so an untagged one is visible without opening it. Tags are
+  // what the storefront filters on, so "0" is not a cosmetic gap — it is a template no facet finds.
+  const [tagCounts, setTagCounts] = useState({});
   // Picked for export — separate from anything the editor holds, for the same reason as elements:
   // ticking a template is not opening it.
   //
@@ -445,10 +550,25 @@ export default function ManageTemplates() {
 
   async function load() {
     setLoading(true);
-    try   { setTemplates(await fetchAdminTemplates()); }
+    try {
+      const rows = await fetchAdminTemplates();
+      setTemplates(rows);
+      // Counts, one read per template. Fine for a screen an admin opens deliberately, and it is the
+      // only way to SEE which are untagged — the list endpoint does not carry them.
+      const counts = {};
+      await Promise.all(rows.map(async t => {
+        try { counts[t.id] = (await fetchTemplateTags(t.id))?.length ?? 0; } catch { /* leave unknown */ }
+      }));
+      setTagCounts(counts);
+    }
     catch (err) { setMsg({ ok: false, text: err.message }); }
     finally { setLoading(false); }
   }
+
+  // The vocabulary, once for the screen rather than once per editor opened.
+  useEffect(() => {
+    fetchAllTags().then(setAllTags).catch(() => setAllTags([]));
+  }, []);
 
   async function handleExport() {
     if (!picked.size) return;
@@ -610,9 +730,22 @@ export default function ManageTemplates() {
                           Quiet grey: it explains why the button below is here, and is not itself a
                           state of the template. */}
                       {t.can_publish && <span style={s.badge()}>author</span>}
+                      {/* Untagged is called out in RED, because it is not a tidiness problem: the
+                          storefront filters on tags, so a template with none is invisible to every
+                          facet a customer browses with. */}
+                      {tagCounts[t.id] != null && (
+                        <span style={s.badge(tagCounts[t.id] === 0 ? 'red' : 'neutral')}>
+                          {tagCounts[t.id] === 0 ? 'no tags' : `${tagCounts[t.id]} tags`}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
+                    <button style={s.btn('secondary')}
+                      title="Search tags — what a customer filters by in the storefront"
+                      onClick={() => setTagEditFor(tagEditFor === t.id ? null : t.id)}>
+                      {tagEditFor === t.id ? 'Close tags' : 'Tags'}
+                    </button>
                     <button style={s.btn('secondary')} onClick={() => toggleActive(t)}>
                       {t.is_active ? 'Deactivate' : 'Activate'}
                     </button>
@@ -634,6 +767,17 @@ export default function ManageTemplates() {
                     </button>
                   </div>
                 </div>
+                {/* Opens under the row it belongs to rather than in a modal — INVARIANTS #3a is
+                    about the designer's popups, but the reasoning carries: a chooser floating away
+                    from the thing it edits makes you hold "which template was this?" in your head. */}
+                {tagEditFor === t.id && (
+                  <TemplateTagEditor
+                    template={t}
+                    allTags={allTags}
+                    onClose={() => setTagEditFor(null)}
+                    onSaved={load}
+                  />
+                )}
               </div>
             ))
           )}

@@ -7,3 +7,6 @@ dist
 # texture calibrator render snapshots (dev)
 snapshots/
 .snapshots/
+
+# A live session saved by `check:smoke -- --login`. Never commit this.
+.smoke-session.json

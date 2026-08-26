@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, useGLTF } from '@react-three/drei';
 import { HexColorPicker } from 'react-colorful';
 import * as THREE from 'three';
+import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Freehand cream pen ──────────────────────────────────────────────────────
 // The customer (or baker) draws cream directly onto the cake with the mouse / finger:
@@ -349,6 +350,7 @@ function hitPoint(e) {
 }
 
 function Scene({
+  thumbView, thumbTarget,
   cakeColor, minGap, activeRef,
   liveColor, liveThickness, liveSoftness, liveNozzle, liveStyleKind, liveStampUrl, liveStampSize, liveSpacing,
   committed, live, onStart, onMove,
@@ -399,29 +401,40 @@ function Scene({
       <Environment preset="apartment" backgroundBlurriness={1} />
 
       {/* board */}
-      <mesh position={[0, 0.05, 0]} receiveShadow>
-        <cylinderGeometry args={[CAKE_RADIUS + 0.6, CAKE_RADIUS + 0.6, 0.1, 64]} />
-        <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
-      </mesh>
+      {!thumbView && (
+        <mesh position={[0, 0.05, 0]} receiveShadow>
+          <cylinderGeometry args={[CAKE_RADIUS + 0.6, CAKE_RADIUS + 0.6, 0.1, 64]} />
+          <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
+        </mesh>
+      )}
 
-      {/* the writable cake — top cap + side wall, one mesh, so you can pipe anywhere */}
-      <mesh
-        position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]}
-        castShadow receiveShadow
-        onPointerEnter={handleEnter}
-        onPointerLeave={handleLeave}
-        onPointerDown={handleDown}
-        onPointerMove={handleMove}
-      >
-        <cylinderGeometry args={[CAKE_RADIUS, CAKE_RADIUS, CAKE_HEIGHT, 96]} />
-        <meshStandardMaterial color={cakeColor} roughness={0.68} />
-      </mesh>
+      {/* ── The writable cake — top cap + side wall, one mesh, so you can pipe anywhere ──────────
+          GONE in the tile. A picker card is about 60px, and every tile that showed a cake was
+          unreadable at that size while the one that showed only its object — the letter block — read
+          perfectly. The cake is what the cream was drawn ON; it is not what is being chosen.
+          The cream keeps the shape the cake gave it, because the stroke points are already seated on
+          that surface. It simply floats, exactly as the letter block does. */}
+      {!thumbView && (
+        <mesh
+          position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]}
+          castShadow receiveShadow
+          onPointerEnter={handleEnter}
+          onPointerLeave={handleLeave}
+          onPointerDown={handleDown}
+          onPointerMove={handleMove}
+        >
+          <cylinderGeometry args={[CAKE_RADIUS, CAKE_RADIUS, CAKE_HEIGHT, 96]} />
+          <meshStandardMaterial color={cakeColor} roughness={0.68} />
+        </mesh>
+      )}
 
-      {/* floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <planeGeometry args={[20, 20]} />
-        <meshStandardMaterial color="#f0ebe5" roughness={0.9} />
-      </mesh>
+      {/* floor — gone in the tile, where the subject is the cream and nothing else */}
+      {!thumbView && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+          <planeGeometry args={[20, 20]} />
+          <meshStandardMaterial color="#f0ebe5" roughness={0.9} />
+        </mesh>
+      )}
 
       {/* committed + live strokes (Suspense covers the GLB stamp loads) */}
       <Suspense fallback={null}>
@@ -434,7 +447,8 @@ function Scene({
       </Suspense>
 
       {/* rotate auto-disables while the pointer is over the cake (see handlers above) */}
-      <OrbitControls ref={controls} makeDefault target={[0, 1.6, 0]} />
+      {/* The tile looks AT the cream, not at the middle of the cake. */}
+      <OrbitControls ref={controls} makeDefault target={thumbView ? thumbTarget : [0, 1.6, 0]} />
     </>
   );
 }
@@ -479,6 +493,10 @@ function PipingBag({ color }) {
   );
 }
 
+// One number, used by both the camera and the fit that decides where to put it — two copies
+// would be a tile framed for a field of view it is not being rendered at.
+const THUMB_FOV = 34;
+
 export default function FreehandPenStudio() {
   const [color, setColor]       = useState('#ffffff');
   const [thickness, setThick]   = useState(0.03);
@@ -489,6 +507,47 @@ export default function FreehandPenStudio() {
   const [stampSize, setStampSize] = useState(0.32);   // stamp footprint in world units (cake r = 1.2)
   const [spacing, setSpacing]   = useState(0.85);
   const [cakeColor, setCakeColor] = useState(STANDARD_CAKE_COLOR);
+
+  const previewRef = useRef(null);
+  // ── The tile is the CREAM, close up ───────────────────────────────────────────────────────────
+  // A card is about 60px. A whole cake at that size is a pale disc and the bead of cream — the thing
+  // being chosen — is a few pixels of it. Draw a stroke, then frame it.
+  const [thumbView, setThumbView] = useState(false);
+
+  // ── Save, so the pen can be filed under Art ───────────────────────────────────────────────────
+  // This was a calibration screen with no way out — the pen could be tuned and never authored, so it
+  // had no row and sat loose in the tools area with grass and dust. Luster dust had the same gap and
+  // was fixed the same way today.
+  //
+  // A row carries the LOOK: the nozzle, the colour, how thick and how soft. NOT the strokes — those
+  // are where this hand went on this cake, and shipping them would put somebody else's drawing on
+  // every cake that picks the row. Same call the dust makes about its splashes.
+  //
+  // `surface_treatment` is already the right type. Migration 076 wrote its description as "generated
+  // finishes that COVER a surface rather than standing on it — piped grass over a tier, dust flicked
+  // up a wall, freehand cream", so the shelf was built for this before it existed.
+  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+    typeSlug: 'surface_treatment',
+    categorySlug: 'art',
+    canvasRef: previewRef,
+    buildPayload: () => ({
+      allowed_zones: ['top_surface', 'side', 'board'],
+      default_color: color,
+      placement_config: {
+        procedural: 'cream_pen',
+        cream_pen: { nozzle, color, thickness: +thickness.toFixed(4),
+                     softness: +softness.toFixed(3), spacing: +spacing.toFixed(3) },
+      },
+    }),
+    onHydrate: (el) => {
+      const t = el.placement_config?.cream_pen ?? {};
+      if (t.color) setColor(t.color);
+      if (t.thickness != null) setThick(t.thickness);
+      if (t.softness != null) setSoft(t.softness);
+      if (t.nozzle) setNozzle(t.nozzle);
+      if (t.spacing != null) setSpacing(t.spacing);
+    },
+  });
 
   const [committed, setCommitted] = useState([]);   // [{ style, points, color, thickness, softness, nozzle, stampUrl, spacing, seed }]
   const [live, setLive]           = useState([]);   // Vector3[]
@@ -532,6 +591,32 @@ export default function FreehandPenStudio() {
       window.removeEventListener('pointercancel', end);
     };
   }, []);
+
+  // ── The tile frames the CREAM, fitted to it ───────────────────────────────────────────────────
+  // A fixed camera distance was the first attempt and produced a tiny drawing in a big frame: how
+  // far away the right distance is depends entirely on how big a thing was drawn, and a stroke can
+  // be a dot or a wreath round the whole cake.
+  //
+  // So it measures. Centre on the strokes' own middle, stand back by their largest dimension, and
+  // the drawing fills the tile whatever was drawn. The same thing RainbowStudio's `shot` does.
+  const shot = useMemo(() => {
+    const pts = committed.flatMap(s => s.points ?? []);
+    if (!pts.length) return { centre: [0, Y_BASE + CAKE_HEIGHT * 0.55, 0], dist: 2.6 };
+    const span = a => { const v = pts.map(p => p[a]); return [Math.min(...v), Math.max(...v)]; };
+    const [x0, x1] = span('x'), [y0, y1] = span('y'), [z0, z1] = span('z');
+    const centre = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
+    // How far back to stand is TRIGONOMETRY, not a guessed multiplier. To fit something `size`
+    // across at a vertical field of view `f`, the camera sits at (size/2) / tan(f/2) — for 34° that
+    // is size × 2.05. The first attempt used 1.5×, which is nearer than the fit requires, so the
+    // drawing was cropped rather than framed.
+    //
+    // The BIGGER of width and height, measured against the VERTICAL fov: a wide squiggle needs the
+    // same room a tall one does, and the canvas is wider than it is tall, so fitting the height
+    // fits the width for free.
+    const size = Math.max(x1 - x0, y1 - y0, 0.25);
+    const fit = size / (2 * Math.tan((THUMB_FOV * Math.PI / 180) / 2));
+    return { centre, dist: Math.max(0.6, fit * 1.18) };   // 18% air, so nothing touches the edge
+  }, [committed]);
 
   const undo  = () => setCommitted(c => c.slice(0, -1));
   const clear = () => setCommitted([]);
@@ -679,6 +764,41 @@ export default function FreehandPenStudio() {
           </p>
         </div>
 
+        {/* The look has been judged; the row is what puts it on a shelf a customer browses. */}
+        <div style={panel}>
+          <div style={heading}>{editing ? 'editing a saved pen' : 'save as element'}</div>
+          {editing && (
+            <p style={{ fontSize: 10.5, color: '#6B8C74', margin: '0 0 6px', lineHeight: 1.45 }}>
+              Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail.
+            </p>
+          )}
+          {/* One click, and what is on screen is exactly what gets stored. */}
+          <button onClick={() => setThumbView(v => !v)}
+            style={{ width: '100%', marginBottom: 6, padding: '7px 9px', fontSize: 12, borderRadius: 7,
+              cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, border: '1.5px solid #2C4433',
+              background: thumbView ? '#2C4433' : '#fff', color: thumbView ? '#fff' : '#2C4433' }}>
+            {thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+          </button>
+          {thumbView && !committed.length && (
+            <p style={{ fontSize: 10.5, color: '#C0392B', margin: '0 0 6px', lineHeight: 1.45 }}>
+              Nothing drawn yet — draw a stroke on the cake first, or the tile will be empty.
+            </p>
+          )}
+          <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="e.g. Cream pen"
+            style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
+              border: '1.5px solid #C5D4C8', borderRadius: 7, boxSizing: 'border-box' }} />
+          <button onClick={save} disabled={busy || !saveName.trim()}
+            style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
+              fontFamily: 'inherit', fontWeight: 700, border: 'none',
+              cursor: busy || !saveName.trim() ? 'default' : 'pointer',
+              background: busy || !saveName.trim() ? '#E3E0DA' : '#2C4433',
+              color: busy || !saveName.trim() ? '#9a939a' : '#fff' }}>
+            {busy ? 'Saving…' : editing ? 'Save changes' : 'Save to catalogue'}
+          </button>
+          {msg && <p style={{ fontSize: 11, marginTop: 6, lineHeight: 1.45,
+            color: msg.ok ? '#2C4433' : '#C0392B' }}>{msg.text}</p>}
+        </div>
+
         <div style={panel}>
           <div style={heading}>placement_config</div>
           <pre style={{ fontSize: 10, color: '#2C4433', margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace', lineHeight: 1.4, maxHeight: 220, overflowY: 'auto' }}>{cfgJson}</pre>
@@ -686,14 +806,25 @@ export default function FreehandPenStudio() {
       </div>
 
       {/* Preview */}
-      <div style={{ flex: 1, position: 'relative' }}>
-        <Canvas shadows camera={{ position: [0, 4.6, 6.2], fov: 42 }}
+      <div style={{ flex: 1, position: 'relative' }} ref={previewRef}>
+        {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png: WebGL clears the drawing
+            buffer after compositing, so toBlob() reads an empty one and every step after it
+            succeeds — the upload works, the row saves, and the element sits in the picker with no
+            picture. Four of the five studios were missing this and were fixed; this one was the
+            fifth, which is why "Cream Pen" saved with no thumbnail.
+            Keyed on the view, because a Canvas takes its camera on mount only. */}
+        <Canvas key={thumbView ? 'thumb' : 'scene'} shadows
+          camera={thumbView
+            ? { position: [shot.centre[0], shot.centre[1], shot.centre[2] + shot.dist], fov: THUMB_FOV }
+            : { position: [0, 4.6, 6.2], fov: 42 }}
+          gl={{ preserveDrawingBuffer: true }}
           style={{ touchAction: 'none', cursor: 'crosshair' }}>
           <Scene
             cakeColor={cakeColor} minGap={minGap} activeRef={activeRef}
             liveColor={color} liveThickness={thickness} liveSoftness={softness} liveNozzle={nozzle} liveStyleKind={style}
             liveStampUrl={stampUrl} liveStampSize={stampSize} liveSpacing={spacing}
             committed={committed} live={live} onStart={startStroke} onMove={movePoint}
+            thumbView={thumbView} thumbTarget={shot.centre}
           />
         </Canvas>
 

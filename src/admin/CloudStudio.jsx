@@ -151,7 +151,6 @@ export default function CloudStudio() {
     return { radius: R, topY: top, boardY: BOARD_H };
   }, [tiers]);
 
-  const fit = useMemo(() => cloudPlacement(p, cake).fit, [p, cake]);
 
   // Where the cloud actually IS, and how big — so the thumbnail can frame the object rather than the
   // corner of a cake it happens to be standing on. Placement is not saved on the row, so a tile
@@ -288,12 +287,6 @@ export default function CloudStudio() {
           ))}
         </div>
 
-        {fit < 0.999 && (
-          <p style={{ ...s.tileLbl, textAlign: 'left', color: '#b45309', marginTop: 0 }}>
-            Shrunk to {fit.toFixed(2)}× to stay on the cake top. Where it sits is your decision; its
-            size is not — move it in to get the size back.
-          </p>
-        )}
 
         {num('Size', 'scale', 0.3, 2.2, 0.05)}
         {num('Width', 'width', 0.2, 1.2, 0.02)}

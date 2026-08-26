@@ -9,13 +9,16 @@
     "preview": "vite preview",
     "check:dup": "jscpd src",
     "check:feature-docs": "node ../spattoo-docs/bin/check-feature-docs.mjs --repo spattoo-admin",
-    "verify": "npm run check:dup"
+    "verify": "npm run check:bindings && npm run check:smoke && npm run check:dup",
+    "check:bindings": "node scripts/check-bindings.mjs",
+    "check:smoke": "node scripts/check-smoke.mjs",
+    "smoke:session": "node scripts/smoke-session.mjs"
   },
   "dependencies": {
     "@fontsource-variable/quicksand": "^5.3.0",
     "@fontsource/playfair-display": "^5.3.0",
     "@sentry/react": "^10.60.0",
-    "@spattoo/designer": "file:vendor/spattoo-designer-0.1.366.tgz",
+    "@spattoo/designer": "file:vendor/spattoo-designer-0.1.390.tgz",
     "@supabase/supabase-js": "^2.103.0",
     "libphonenumber-js": "^1.13.7",
     "meshoptimizer": "^1.1.1",
@@ -29,6 +32,7 @@
     "@sentry/vite-plugin": "^5.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jscpd": "^5.0.10",
+    "playwright": "^1.62.1",
     "react-colorful": "^5.6.1",
     "three": "^0.183.2",
     "vite": "^6.3.0"

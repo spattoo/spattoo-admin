@@ -56,7 +56,7 @@ function BakerPicker({ bakers, value, onChange }) {
   }, [open]);
 
   const filtered = bakers.filter(b =>
-    b.name.toLowerCase().includes(q.toLowerCase()) ||
+    (b.name ?? '').toLowerCase().includes(q.toLowerCase()) ||
     (b.email ?? '').toLowerCase().includes(q.toLowerCase())
   ).slice(0, 8);
 
@@ -93,9 +93,9 @@ function BakerPicker({ bakers, value, onChange }) {
           {filtered.length === 0 && (
             <div style={{ padding: '12px 14px', fontSize: 13, color: '#bbb' }}>No bakers found</div>
           )}
-          {filtered.map(b => (
+          {filtered.map((b, i) => (
             <div
-              key={b.id}
+              key={b.id ?? i}
               onPointerDown={() => { onChange(b.id); setOpen(false); setQ(''); }}
               style={{
                 padding: '10px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -365,8 +365,10 @@ function ManagePanel({ bakerId, onClose, onSaved }) {
               <div style={{ background: '#fff', borderRadius: 14, padding: 18, border: '1.5px solid #E8EFE9' }}>
                 <div style={{ fontSize: 11, fontWeight: 800, color: '#9BB5A2', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 14 }}>History</div>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {/* `ev.id ?? i`: a row with no id gives key=undefined, which React counts as no key.
+                      The same incomplete data that crashed the search on a missing name. */}
                   {data.events.map((ev, i) => (
-                    <div key={ev.id} style={{ display: 'flex', gap: 12, paddingBottom: 14 }}>
+                    <div key={ev.id ?? i} style={{ display: 'flex', gap: 12, paddingBottom: 14 }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: 16 }}>
                         <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#2C4433', marginTop: 3, flexShrink: 0 }} />
                         {i < data.events.length - 1 && <div style={{ width: 2, flex: 1, background: '#E8EFE9', marginTop: 4 }} />}
@@ -419,7 +421,7 @@ export default function BakerSubscriptions() {
   useEffect(() => { load(); }, []);
 
   const filtered = bakers.filter(b =>
-    b.name.toLowerCase().includes(search.toLowerCase()) ||
+    (b.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
     (b.email ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
@@ -450,7 +452,7 @@ export default function BakerSubscriptions() {
           </div>
 
           {filtered.map((b, i) => (
-            <div key={b.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto', gap: 16, padding: '14px 20px', alignItems: 'center', borderTop: i === 0 ? 'none' : '1px solid #F4F8F5' }}
+            <div key={b.id ?? i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto', gap: 16, padding: '14px 20px', alignItems: 'center', borderTop: i === 0 ? 'none' : '1px solid #F4F8F5' }}
               onMouseEnter={e => e.currentTarget.style.background = '#F4F8F5'}
               onMouseLeave={e => e.currentTarget.style.background = ''}>
               <div>

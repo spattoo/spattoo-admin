@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { makeLusterDustMaps, LUSTER_DUST_DEFAULTS, LUSTER_DUST_NEW_SPLASH } from '@spattoo/designer';
+import { useElementSave } from '../lib/useElementSave.js';
 
 // Luster Dust Studio — develop the "edible gold powder" look: a fine METALLIC speckle (luster dust)
 // FLICKED onto a matte cake wall, like the reference navy-and-gold cake. A real flick isn't an even
@@ -82,6 +83,41 @@ function Slider({ sl, value, onChange }) {
 
 export default function LusterDustStudio() {
   const [app, setApp] = useState(DEFAULT_APP);
+  const previewRef = useRef(null);
+  // ── The tile is the DUST, close up ────────────────────────────────────────────────────────────
+  // The card is about 60px. Framed on the whole cake, the tile is a dark cylinder and the dust is a
+  // handful of specks along one edge — reported as exactly that. The camera drops onto the splash so
+  // the flecks fill the frame, which is what somebody is choosing between when two dusts differ by
+  // sparkle rather than by colour.
+  const [thumbView, setThumbView] = useState(false);
+
+  // ── Save, which this studio never had ─────────────────────────────────────────────────────────
+  // It was a calibration screen: somewhere to judge whether a fleck reads as metal. So luster dust
+  // could be TUNED and never AUTHORED, which is why it has no catalogue row and sits loose at the
+  // bottom of the decorations panel instead of on the Finishes shelf.
+  //
+  // What a row carries is the LOOK, not a position. Dust is a wall treatment — flicked splashes plus
+  // an appearance — so "Gold dust" and "Rose dust" are two rows over one tool, the same way two
+  // rainbows are two rows over one generator. Tapping the row seeds the tier with the look and opens
+  // the tool; the customer does the flicking.
+  //
+  // Splashes are NOT saved. They are where this particular baker aimed on this particular cake, and
+  // shipping them would put somebody else's aim on every cake that picks the row.
+  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+    typeSlug: 'luster_dust',        // the type migration 065 created and nothing ever filled
+    categorySlug: 'finishes',       // dust, foil and gilding — where a customer looks for a finish
+    canvasRef: previewRef,
+    buildPayload: () => ({
+      allowed_zones: ['side'],      // a wall treatment: it is flicked UP a wall, not laid on a top
+      default_color: app.dustColor,
+      placement_config: {
+        procedural: 'luster_dust',
+        luster_dust: Object.fromEntries(
+          Object.keys(LUSTER_DUST_DEFAULTS).map(k => [k, app[k]])),
+      },
+    }),
+    onHydrate: (el) => setApp(a => ({ ...a, ...(el.placement_config?.luster_dust ?? {}) })),
+  });
   const [splashes, setSplashes] = useState([{ ...NEW_SPLASH }]);
   const [sel, setSel] = useState(0);
   const glRef = useRef(null);
@@ -152,10 +188,50 @@ export default function LusterDustStudio() {
         </div>
 
         <button style={s.resetBtn} onClick={() => { setApp(DEFAULT_APP); setSplashes([{ ...NEW_SPLASH }]); setSel(0); }}>Reset</button>
+
+        {/* The look has been judged; the row is what makes it a real catalogue element — filed under
+            Finishes, searchable, and retunable without a deploy. */}
+        <div style={s.saveDock}>
+          <div style={{ ...s.lbl, margin: '0 0 6px' }}>
+            {editing ? 'Editing a saved dust' : 'Save as element'}
+          </div>
+          {editing && (
+            <p style={{ fontSize: 10.5, color: '#6B8C74', margin: '0 0 6px', lineHeight: 1.45 }}>
+              Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather than
+              adding another row.
+            </p>
+          )}
+          <input value={saveName} onChange={e => setSaveName(e.target.value)} // Not a colour: the customer picks that on their own card. A second row is a different
+            // MATERIAL — a soft pearl against a hard glitter.
+            placeholder="e.g. Pearl shimmer"
+            style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
+              borderRadius: 7, border: '1.5px solid #C5D4C8', boxSizing: 'border-box' }} />
+          <button onClick={() => setThumbView(v => !v)}
+            style={{ width: '100%', marginBottom: 6, padding: '7px 9px', fontSize: 12, borderRadius: 7,
+              cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, border: '1.5px solid #2C4433',
+              background: thumbView ? '#2C4433' : '#fff', color: thumbView ? '#fff' : '#2C4433' }}>
+            {thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+          </button>
+          <button onClick={save} disabled={busy || !saveName.trim()}
+            style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
+              fontFamily: 'inherit', fontWeight: 700, cursor: busy || !saveName.trim() ? 'default' : 'pointer',
+              border: 'none', background: busy || !saveName.trim() ? '#E3E0DA' : '#2C4433',
+              color: busy || !saveName.trim() ? '#9a939a' : '#fff' }}>
+            {busy ? 'Saving…' : editing ? 'Save changes' : 'Save to catalogue'}
+          </button>
+          {msg && (
+            <p style={{ fontSize: 11, marginTop: 6, lineHeight: 1.45,
+              color: msg.ok ? '#2C4433' : '#C0392B' }}>{msg.text}</p>
+          )}
+        </div>
       </div>
 
-      <div style={s.preview}>
-        <Canvas shadows camera={{ position: [0, 0.4, 4.2], fov: 38 }}
+      <div style={s.preview} ref={previewRef}>
+        {/* Keyed on the view: a Canvas takes its camera on mount only. */}
+        <Canvas key={thumbView ? 'thumb' : 'scene'} shadows
+          camera={thumbView
+            ? { position: [0, 0.15, 1.55], fov: 30 }
+            : { position: [0, 0.4, 4.2], fov: 38 }}
           gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9, preserveDrawingBuffer: true }}
           onCreated={({ gl }) => { glRef.current = gl; }}>
           <ambientLight intensity={1.2} />
@@ -163,7 +239,7 @@ export default function LusterDustStudio() {
           <directionalLight position={[-5, 3, -3]} intensity={0.15} />
           <Environment preset="studio" />
           <DustCake app={app} splashes={splashes} onPlace={addSplash} />
-          <OrbitControls enablePan={false} minDistance={2.6} maxDistance={7} />
+          <OrbitControls enablePan={false} minDistance={thumbView ? 1.1 : 2.6} maxDistance={7} />
         </Canvas>
       </div>
     </div>
@@ -173,6 +249,14 @@ export default function LusterDustStudio() {
 const s = {
   wrap: { display: 'flex', height: 'calc(100vh - 56px)', fontFamily: "'Quicksand', sans-serif" },
   panel: { width: 340, flexShrink: 0, overflowY: 'auto', padding: 20, background: '#fff', borderRight: '1.5px solid #C5D4C8' },
+  // ── Save STICKS to the foot of the sidebar ────────────────────────────────────────────────────
+  // It was the last thing in a column of twenty sliders, so it sat below the fold on every screen
+  // and the studio read as having no way to save at all. Reported as exactly that.
+  //
+  // Sticky rather than moved to the top: the order is right — you tune, then you save — it just has
+  // to still be there when you have finished tuning.
+  saveDock: { position: 'sticky', bottom: -20, marginTop: 16, marginInline: -20, padding: '14px 20px 20px',
+              background: '#fff', borderTop: '1.5px solid #C5D4C8' },
   preview: { flex: 1, minWidth: 0, background: '#EDEAE2' },
   title: { fontSize: 18, fontWeight: 700, color: '#3D5A44', marginBottom: 16 },
   section: { marginBottom: 18 },

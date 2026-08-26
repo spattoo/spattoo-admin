@@ -96,13 +96,35 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
   // Four of the five studios were missing the flag and nobody knew until three elements reached the
   // catalogue with empty tiles. A comment telling the next studio to remember would not have helped,
   // because the failure is silent — so this LOOKS at the pixels instead.
+  // ── A SQUARE crop, because the tile is square ─────────────────────────────────────────────────
+  // The preview canvas is a wide panel — about 16:10 — and the picker card is square. Handing the
+  // whole canvas over means the tile letterboxes it, and everything inside shrinks by the aspect
+  // ratio: a drawing carefully framed to fill 85% of the canvas HEIGHT lands at about half the
+  // width of its card, which is what "the thumbnail is still small" was.
+  //
+  // No camera can fix that, because it is not a framing problem — the studio was already framing
+  // correctly. The mismatch is between the shape of what was captured and the shape it is shown in.
+  // So the capture takes the middle square, which is the part every studio has already centred its
+  // subject in.
+  function squareCrop(cnv) {
+    const side = Math.min(cnv.width, cnv.height);
+    if (side === cnv.width && side === cnv.height) return cnv;   // already square: nothing to do
+    const out = document.createElement('canvas');
+    out.width = out.height = side;
+    out.getContext('2d').drawImage(
+      cnv, (cnv.width - side) / 2, (cnv.height - side) / 2, side, side, 0, 0, side, side);
+    return out;
+  }
+
   async function captureThumbnail() {
     const cnv = canvasRef?.current?.querySelector('canvas');
     if (!cnv) return null;
-    const blob = await new Promise((res) => cnv.toBlob(res, 'image/png'));
-    if (!blob) return null;
+    // Blankness is checked on the ORIGINAL. A crop of an empty buffer is equally empty, and reading
+    // the source keeps the error pointing at the real cause — a missing preserveDrawingBuffer.
     if (await isBlank(cnv)) throw new Error(
       'The thumbnail came out blank — the studio canvas needs gl={{ preserveDrawingBuffer: true }}.');
+    const blob = await new Promise((res) => squareCrop(cnv).toBlob(res, 'image/png'));
+    if (!blob) return null;
     return uploadThumbnail('elements/thumbnails', blob);
   }
 

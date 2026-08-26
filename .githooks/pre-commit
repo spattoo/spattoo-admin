@@ -13,5 +13,22 @@ if [ -n "$untracked" ]; then
   printf '\033[33m   If these belong in the commit, run: git add <file> (or git add -A) and re-commit.\033[0m\n\n'
 fi
 
-# Non-blocking: the commit still proceeds.
+# ── Does every screen this commit touches still OPEN? ─────────────────────────
+# The gate that catches what reading the source cannot: a build that compiles,
+# tests that pass, and a blank page. Two of those shipped in a week.
+#
+# --changed, not everything. All 49 screens is a couple of minutes, and a couple
+# of minutes per commit gets answered with --no-verify — which is exactly what
+# happened six times in one afternoon on this repo. A commit that touches one
+# screen pays for one screen; a commit that touches anything SHARED pays for all
+# of them, because nothing can honestly say which screens a shared change reaches.
+#
+# Skips silently when no session is saved (`npm run check:smoke -- --login`), so
+# nobody is blocked from committing by a setup step they have not done yet.
+if ! npm run --silent check:smoke -- --changed; then
+  printf '\n\033[31m✗ A screen in this commit does not open.\033[0m\n'
+  printf '   Fix it, or commit with --no-verify if you know why it is broken.\n\n'
+  exit 1
+fi
+
 exit 0

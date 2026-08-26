@@ -79,20 +79,39 @@ function CakeMesh({ shapeKey, cakeColor }) {
 export default function GrassStudio() {
   const [p, setP] = useState({ ...GRASS_DEFAULTS, color: '#4caf3d' });
   const [shapeKey, setShapeKey] = useState('round');
+  // The shape ITSELF, from the key the picker sets. `shape={shape}` was passed to GrassPatch with
+  // nothing declaring `shape`, so the studio threw on render — the second undeclared name in this
+  // file, sitting right behind `tris`.
+  const shape = SHAPES[shapeKey] ?? SHAPES.round;
   const [bandInner, setBandInner] = useState(null);
   // Strands spilling over the rim — the football cake's edge. Its own state rather than a param on
   // `p` because it is a PLACEMENT of the tufts, not a property of one.
   const [overhang, setOverhang] = useState(0);
   const [cakeColor, setCakeColor] = useState('#fdfdfd');
   const [bg, setBg] = useState('#e8b4a8');
-  const [stats, setStats] = useState({ tufts: 0, blades: 0 });
+  // `tris` included: the cost panel warns on it, and reading a name that was never in this
+  // object is what took the whole studio down with 'tris is not defined'.
+  const [stats, setStats] = useState({ tufts: 0, blades: 0, tris: 0 });
   const canvasWrapRef = useRef(null);
+
+  // ── Two helpers the useElementSave extraction took with it (656104a) ───────────────────────────
+  // That commit lifted this studio's local save helpers into the shared hook and removed the block
+  // they sat in — which also removed these two, leaving eight callers of `set` and one of `onStats`
+  // pointing at names that no longer existed.
+  //
+  // So the studio has thrown on RENDER ever since, and the Save button it gained in the very same
+  // commit was never reachable. That is the actual reason there has never been a grass row: not that
+  // nobody pressed Save, and not only that its element type was missing — the page did not load.
+  const set = k => v => setP(o => ({ ...o, [k]: v }));
+  const onStats = useCallback(s => setStats(s), []);
 
   // Authoring a catalogue row is the same job in every procedural studio, so it lives in one hook
   // (INVARIANTS #3) — create the first time, update every time after, thumbnail included.
   const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
-    typeSlug: 'grass',
-    categorySlug: 'finishes',   // where a customer browses to find it
+        // A treatment that COVERS a surface, not a decoration that stands on one (migration 076).
+    // The old slug named a type that has never existed, so this Save could never have worked.
+    typeSlug: 'surface_treatment',
+    categorySlug: 'flowers-leaves',   // greenery, not a surface finish — Finishes is dust and foil
     canvasRef: canvasWrapRef,
     // The LOOK, and only the look. Density, height and colour are what the baker's card exposes;
     // freezing them here would take away a per-cake choice.
@@ -165,9 +184,9 @@ export default function GrassStudio() {
         <div style={{ marginTop: 14, padding: 10, background: '#fff', borderRadius: 7, color: '#666', lineHeight: 1.7, border: '1px solid #f0e2e7' }}>
           <b style={{ color: '#1a1a1a' }}>Cost</b><br />
           tufts <b>{stats.tufts.toLocaleString()}</b> · blades <b>{stats.blades.toLocaleString()}</b><br />
-          triangles <b style={{ color: tris > 400_000 ? '#c0392b' : '#1a1a1a' }}>{tris.toLocaleString()}</b><br />
+          triangles <b style={{ color: stats.tris > 400_000 ? '#c0392b' : '#1a1a1a' }}>{stats.tris.toLocaleString()}</b><br />
           draw calls <b>1</b>
-          {tris > 400_000 && (
+          {stats.tris > 400_000 && (
             <div style={{ color: '#c0392b', fontSize: 11, marginTop: 4 }}>
               Above what a phone should be asked to rasterise — back the density off.
             </div>

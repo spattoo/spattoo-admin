@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
 import { RainbowArch, rainbowBands, rainbowGuide, RAINBOW_DEFAULTS, SceneLights, SceneEnv,
-         RAINBOW_ARRANGEMENTS, ArrangementTile, iconTiers } from '@spattoo/designer';
+         RAINBOW_ARRANGEMENTS, ArrangementTile, arrangementOf, iconTiers } from '@spattoo/designer';
 import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Rainbow studio ────────────────────────────────────────────────────────────
@@ -73,6 +73,19 @@ const PRESETS = {
   'Classic on top (ref 2)': { bands: 7, innerRadius: 0.34, thickness: 0.075, 
     footLeft: 'top', footRight: 'top', standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#EE6D8E', '#F29B54', '#F6D34F', '#7CC576', '#5BA9DE', '#8E7BC4', '#D98BC4'] },
+  // The scrolled one (reference 5): sits on the cake, left end resting, right end rolled up. The
+  // spread and lift are not decoration — without them the coils pass through each other.
+  'Curled ends (ref 5)': { bands: 6, innerRadius: 0.30, thickness: 0.115, surface: 'top',
+    footLeft: 'top', footRight: 'curl', spring: 1.16, offsetX: 0, standoff: 0, scale: 0.75, flatten: 0,
+    curlTurns: 1.35, curlSize: 0.75, curlTightness: 0.82,
+    colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
+  // The wall one with its ends rolled up. Its stack rests on the BOARD, not the cake top — the chain
+  // rests its first coil on whatever the other end stands on.
+  'On the wall, curled': { surface: 'side', bands: 6, innerRadius: 0.30, thickness: 0.12,
+    footLeft: 'board', footRight: 'curl', offsetX: 0, theta: -0.09, proud: 0.02,
+    spring: 0.18, scale: 0.75, flatten: 0,
+    curlTurns: 1.35, curlSize: 0.75, curlTightness: 0.82,
+    colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
   'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, 
     footLeft: 'top', footRight: 'top', standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
@@ -258,6 +271,12 @@ export default function RainbowStudio() {
           // rainbows, not one rainbow in two places.
           footLeft: p.footLeft,
           footRight: p.footRight,
+          // Only when an end curls, so a plain rainbow's row stays exactly what it was.
+          ...(p.footLeft === 'curl' || p.footRight === 'curl' ? {
+            curlTurns:     +Number(p.curlTurns).toFixed(3),
+            curlSize:      +Number(p.curlSize).toFixed(3),
+            curlTightness: +Number(p.curlTightness).toFixed(3),
+          } : {}),
         },
       },
     }),
@@ -392,11 +411,9 @@ export default function RainbowStudio() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {RAINBOW_ARRANGEMENTS.map(a => (
               <ArrangementTile key={a.key} item={a} tiers={tiers} tierIndex={tierIndex}
-                // On the wall the FEET are not part of the choice — the tile is the surface, and
-                // where it sits up the wall is the slider's job.
-                on={(p.surface ?? 'top') === a.surface
-                    && (a.surface === 'side'
-                        || (p.footLeft === a.params.footLeft && p.footRight === a.params.footRight))}
+                // `arrangementOf`, not a second copy of its rule. This WAS a copy, and the moment
+                // a second wall tile existed the two would have disagreed about which one is on.
+                on={arrangementOf(p)?.key === a.key}
                 onPick={() => setP(o => ({ ...o, surface: a.surface, ...a.params }))} />
             ))}
           </div>
@@ -421,6 +438,22 @@ export default function RainbowStudio() {
         {(p.surface ?? 'top') === 'side' && num('Round the cake', 'theta', -3.14, 3.14, 0.05)}
         {num('Stands back', 'standoff', 0, 2, 0.05)}
         {num('Flatten', 'flatten', 0, 0.9, 0.05)}
+
+        {/* Only when an end is actually curled. Five sliders that do nothing are worse than none:
+            they read as controls that are broken rather than as controls that do not apply. */}
+        {(p.footLeft === 'curl' || p.footRight === 'curl') && (
+          <>
+            {num('Curl turns', 'curlTurns', 0.4, 2.5, 0.05)}
+            {/* From 0.6, which is where the geometry clamps it — a coil narrower than that eats
+                its own rope. The slider started at 0.8 while the default is 0.75, so it displayed a
+                value it was not using and the default became unreachable the moment you dragged it. */}
+            {num('Curl size', 'curlSize', 0.6, 3.5, 0.05)}
+            {num('Curl tightness', 'curlTightness', 0, 1, 0.02)}
+            {/* Three controls used to sit here — Ends stagger, Ends spread and Ends lift. All
+                three were invented to stop the coils tangling, and stacking them cannot tangle
+                them: each coil is placed exactly one coil-width from the one below. Gone. */}
+          </>
+        )}
 
         <div style={s.colors}>
           <span style={s.groupLbl}>Colours</span>
