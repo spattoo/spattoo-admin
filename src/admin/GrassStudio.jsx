@@ -85,7 +85,9 @@ export default function GrassStudio() {
   const [overhang, setOverhang] = useState(0);
   const [cakeColor, setCakeColor] = useState('#fdfdfd');
   const [bg, setBg] = useState('#e8b4a8');
-  const [stats, setStats] = useState({ tufts: 0, blades: 0 });
+  // `tris` included: the cost panel warns on it, and reading a name that was never in this
+  // object is what took the whole studio down with 'tris is not defined'.
+  const [stats, setStats] = useState({ tufts: 0, blades: 0, tris: 0 });
   const canvasWrapRef = useRef(null);
 
   // ── Two helpers the useElementSave extraction took with it (656104a) ───────────────────────────
@@ -178,9 +180,9 @@ export default function GrassStudio() {
         <div style={{ marginTop: 14, padding: 10, background: '#fff', borderRadius: 7, color: '#666', lineHeight: 1.7, border: '1px solid #f0e2e7' }}>
           <b style={{ color: '#1a1a1a' }}>Cost</b><br />
           tufts <b>{stats.tufts.toLocaleString()}</b> · blades <b>{stats.blades.toLocaleString()}</b><br />
-          triangles <b style={{ color: tris > 400_000 ? '#c0392b' : '#1a1a1a' }}>{tris.toLocaleString()}</b><br />
+          triangles <b style={{ color: stats.tris > 400_000 ? '#c0392b' : '#1a1a1a' }}>{stats.tris.toLocaleString()}</b><br />
           draw calls <b>1</b>
-          {tris > 400_000 && (
+          {stats.tris > 400_000 && (
             <div style={{ color: '#c0392b', fontSize: 11, marginTop: 4 }}>
               Above what a phone should be asked to rasterise — back the density off.
             </div>

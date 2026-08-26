@@ -70,6 +70,12 @@ const AMBIENT = new Set([
   'alert', 'confirm', 'prompt', 'fetch', 'btoa', 'atob',
   'parseInt', 'parseFloat', 'isNaN', 'isFinite',
   'encodeURIComponent', 'decodeURIComponent', 'structuredClone',
+  // Browser globals. The call-only rule never needed these — nobody writes `document(…)` — but
+  // reading `document.body` is the commonest value reference there is.
+  'window', 'document', 'console', 'navigator', 'location', 'history', 'localStorage',
+  'sessionStorage', 'performance', 'crypto', 'screen', 'URL', 'URLSearchParams', 'FormData',
+  'Blob', 'File', 'FileReader', 'Image', 'Audio', 'Event', 'CustomEvent', 'AbortController',
+  'import', 'globalThis', 'self', 'process',
 ]);
 
 // Every name this file DECLARES, gathered once.
@@ -87,6 +93,12 @@ function declaredNames(src) {
   const add = chunk => { for (const m of chunk.matchAll(/[A-Za-z_$][\w$]*/g)) names.add(m[0]); };
 
   for (const m of src.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)) names.add(m[1]);
+  // EVERY declarator in a comma-separated declaration, not just the first. `const pos = [], idx = []`
+  // declares two names and this only ever collected `pos` — a gap the call-only rule never exposed,
+  // because nobody writes `idx(…)`, and which lit up the moment reads were checked too.
+  for (const m of src.matchAll(/(?:const|let|var)\s+([^;\n]{0,400})/g)) {
+    for (const d of m[1].matchAll(/(?:^|,)\s*([A-Za-z_$][\w$]*)\s*(?==[^=]|,|$)/g)) names.add(d[1]);
+  }
   // Destructuring that is assigned: `const { a, b } = …`, `let [x, y] = …`
   for (const m of src.matchAll(/(?:const|let|var)\s*([{[][\s\S]{0,800}?[}\]])\s*=/g)) add(m[1]);
   // Parameter lists — `(…) =>` and `(…) {` — which is where props and callbacks are bound.
@@ -123,12 +135,29 @@ for (const rel of files) {
     process.exit(1);
   }
   const declared = declaredNames(src);
-  // A bare call: `name(` not preceded by a dot, a quote, or a word character.
-  for (const m of src.matchAll(/[^A-Za-z0-9_.$]([a-z][A-Za-z0-9_$]*)\s*\(/g)) {
-    const name = m[1];
-    if (AMBIENT.has(name)) continue;
-    if (declared.has(name)) continue;
-    problems.push({ rel, name });
+  // ── Called, OR read ───────────────────────────────────────────────────────────────────────────
+  // It only ever looked at CALL sites — `name(` — and that missed the very crash it exists for.
+  // GrassStudio read `tris` as a value: `tris > 400_000`, `tris.toLocaleString()`. Never called, so
+  // never inspected, and the studio threw 'tris is not defined' on render with this gate green.
+  //
+  // A read is matched narrowly, and the narrowness is the point — a name followed by `.`, or by a
+  // comparison. Those two shapes are where a missing value actually bites (`x.foo` throws on
+  // undefined; `x > n` is silently false), and they are rare enough in prose-inside-code to keep the
+  // false alarms down. Anything looser flagged dozens of legitimate object keys and locals from
+  // outer scopes, and a gate that cries wolf is a gate that gets deleted.
+  const sites = [
+    /[^A-Za-z0-9_.$]([a-z][A-Za-z0-9_$]*)\s*\(/g,              // name(
+    // Not after a `/`, or a regex's own flags read as a name: `/phone/i.test(x)` is `i.test`.
+    /[^A-Za-z0-9_.$'"`/]([a-z][A-Za-z0-9_$]*)\s*\.[a-zA-Z]/g,  // name.foo
+    /[^A-Za-z0-9_.$]([a-z][A-Za-z0-9_$]*)\s*[<>]=?\s*[\d'"`]/g, // name > 4, name <= '…'
+  ];
+  for (const re of sites) {
+    for (const m of src.matchAll(re)) {
+      const name = m[1];
+      if (AMBIENT.has(name)) continue;
+      if (declared.has(name)) continue;
+      problems.push({ rel, name });
+    }
   }
 }
 
