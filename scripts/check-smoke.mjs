@@ -119,9 +119,11 @@ const haveSaved = existsSync(SESSION_FILE);
 if (!LOGIN && !haveSaved && !(E.SMOKE_EMAIL && E.SMOKE_PASSWORD)) {
   console.log('• check:smoke — SKIPPED: nothing to sign in with.\n');
   console.log('  Every screen here is behind a login, so without a session this gate can only');
-  console.log('  prove the login page renders. Log in once, by hand:\n');
-  console.log('      npm run check:smoke -- --login\n');
-  console.log('  A browser opens, you sign in, and the SESSION is saved (no password is stored).');
+  console.log('  prove the login page renders. Give it a session once:\n');
+  console.log('      npm run smoke:session\n');
+  console.log('  It prints a line to paste into a browser signed in as the SMOKE user. Use a');
+  console.log('  separate profile: refresh tokens are single use, so a session shared with the');
+  console.log('  tab you work in means each run signs you out of it.');
   console.log('  After that, plain `npm run check:smoke` opens all', routes().length, 'screens and');
   console.log('  fails on any that break.');
   process.exit(0);
@@ -191,17 +193,46 @@ const server = await serve();
 const stop = () => { try { server.kill('SIGTERM'); } catch {} };
 process.on('exit', stop);
 
+// Counted so the run can say it left the session alone, rather than asking to be trusted.
+let refreshesBlocked = 0;
+
 const browser = await chromium.launch({ headless: !LOGIN });
 const ctx = await browser.newContext({
   viewport: { width: 1400, height: 900 },
 });
 
-// A session saved earlier — from `--login`, or copied out of a browser that is already signed in
-// (which is the only way in when Supabase enforces a captcha: a captcha exists to tell a person from
-// a script, and this is a script). It carries the refresh token, so the app renews itself on load
-// and one sign-in lasts until Supabase expires the refresh.
+// A session copied out of a browser that is already signed in — the only way in when Supabase
+// enforces a captcha, because a captcha exists to tell a person from a script and this is a script.
 if (!LOGIN && haveSaved) {
   const saved = JSON.parse(readFileSync(SESSION_FILE, 'utf8'));
+
+  // ── The run must not SPEND the refresh token ──────────────────────────────────────────────────
+  // Supabase refresh tokens are single use: spending one issues a fresh pair and kills the old. So
+  // a browser and this gate sharing a session knock each other out — and that is not theoretical,
+  // the first run after copying signed the admin tab out.
+  //
+  // Blocking the refresh call fixes it at the root rather than by handing the gate its own account.
+  // The access token it was given is good for its whole lifetime, which is an hour against a run of
+  // about a minute, so the gate simply never needs to refresh. Nothing is spent, and the session in
+  // the browser stays exactly as valid as it was.
+  //
+  // Everything ELSE reaches Supabase untouched. This is one endpoint, not a mock.
+  await ctx.route('**/auth/v1/token?grant_type=refresh_token**', route => {
+    refreshesBlocked++;
+    route.abort();
+  });
+
+  // An EXPIRED access token cannot be rescued once refresh is off, and every page would bounce to
+  // the login — reported as forty-nine broken screens, which is a lie. Say the true thing instead.
+  try {
+    const at = JSON.parse(saved.value)?.expires_at;
+    if (at && at * 1000 < Date.now() + 60_000) {
+      die('the saved session has expired (or is about to).\n'
+        + '  Re-copy it: npm run smoke:session\n'
+        + '  This is NOT a broken screen — the gate simply has no way in.');
+    }
+  } catch { /* unparseable is the caller's problem, and the run will say so plainly */ }
+
   await ctx.addInitScript(([k, v]) => window.localStorage.setItem(k, v), [saved.key, saved.value]);
 }
 
@@ -320,27 +351,16 @@ for (const route of all) {
   process.stdout.write(problems.length ? '✗' : '.');
 }
 
-// ── Keep the session alive ──────────────────────────────────────────────────────────────────────
-// Supabase refresh tokens are SINGLE USE: the app trades one for a fresh pair on load, and the old
-// one is dead the moment it is spent. So a saved session works exactly once, and every run after it
-// fails with "Invalid Refresh Token: Already Used" — which looks like a broken screen and is not.
-//
-// Writing the refreshed session back closes the loop. The chain then lives as long as Supabase lets
-// a refresh token be renewed, rather than expiring after one run.
-if (haveSaved || creds) {
-  try {
-    const fresh = await page.evaluate(k => window.localStorage.getItem(k), AUTH_KEY);
-    if (fresh) writeFileSync(SESSION_FILE, JSON.stringify({ key: AUTH_KEY, value: fresh }, null, 2));
-  } catch { /* the run's verdict matters more than the bookkeeping */ }
-}
-
+// Nothing to write back: the refresh call is blocked, so the session is returned exactly as it was
+// lent. That is the whole point — a run leaves no trace on the auth chain.
 await browser.close();
 stop();
 console.log('');
 
 if (!broken.length) {
   console.log(`✓ check:smoke — all ${all.length} screens open clean`
-    + (ignored ? `  (${ignored} console errors ignored from third-party scripts)` : ''));
+    + (ignored ? `  (${ignored} third-party console errors ignored)` : '')
+    + (refreshesBlocked ? `  · ${refreshesBlocked} token refresh(es) blocked — your session is untouched` : ''));
   process.exit(0);
 }
 

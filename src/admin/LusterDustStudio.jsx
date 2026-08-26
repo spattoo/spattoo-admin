@@ -84,6 +84,12 @@ function Slider({ sl, value, onChange }) {
 export default function LusterDustStudio() {
   const [app, setApp] = useState(DEFAULT_APP);
   const previewRef = useRef(null);
+  // ── The tile is the DUST, close up ────────────────────────────────────────────────────────────
+  // The card is about 60px. Framed on the whole cake, the tile is a dark cylinder and the dust is a
+  // handful of specks along one edge — reported as exactly that. The camera drops onto the splash so
+  // the flecks fill the frame, which is what somebody is choosing between when two dusts differ by
+  // sparkle rather than by colour.
+  const [thumbView, setThumbView] = useState(false);
 
   // ── Save, which this studio never had ─────────────────────────────────────────────────────────
   // It was a calibration screen: somewhere to judge whether a fleck reads as metal. So luster dust
@@ -200,6 +206,12 @@ export default function LusterDustStudio() {
             placeholder="e.g. Pearl shimmer"
             style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
               borderRadius: 7, border: '1.5px solid #C5D4C8', boxSizing: 'border-box' }} />
+          <button onClick={() => setThumbView(v => !v)}
+            style={{ width: '100%', marginBottom: 6, padding: '7px 9px', fontSize: 12, borderRadius: 7,
+              cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, border: '1.5px solid #2C4433',
+              background: thumbView ? '#2C4433' : '#fff', color: thumbView ? '#fff' : '#2C4433' }}>
+            {thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+          </button>
           <button onClick={save} disabled={busy || !saveName.trim()}
             style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
               fontFamily: 'inherit', fontWeight: 700, cursor: busy || !saveName.trim() ? 'default' : 'pointer',
@@ -215,7 +227,11 @@ export default function LusterDustStudio() {
       </div>
 
       <div style={s.preview} ref={previewRef}>
-        <Canvas shadows camera={{ position: [0, 0.4, 4.2], fov: 38 }}
+        {/* Keyed on the view: a Canvas takes its camera on mount only. */}
+        <Canvas key={thumbView ? 'thumb' : 'scene'} shadows
+          camera={thumbView
+            ? { position: [0, 0.15, 1.55], fov: 30 }
+            : { position: [0, 0.4, 4.2], fov: 38 }}
           gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9, preserveDrawingBuffer: true }}
           onCreated={({ gl }) => { glRef.current = gl; }}>
           <ambientLight intensity={1.2} />
@@ -223,7 +239,7 @@ export default function LusterDustStudio() {
           <directionalLight position={[-5, 3, -3]} intensity={0.15} />
           <Environment preset="studio" />
           <DustCake app={app} splashes={splashes} onPlace={addSplash} />
-          <OrbitControls enablePan={false} minDistance={2.6} maxDistance={7} />
+          <OrbitControls enablePan={false} minDistance={thumbView ? 1.1 : 2.6} maxDistance={7} />
         </Canvas>
       </div>
     </div>

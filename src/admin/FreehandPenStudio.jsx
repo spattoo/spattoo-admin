@@ -350,6 +350,7 @@ function hitPoint(e) {
 }
 
 function Scene({
+  thumbView,
   cakeColor, minGap, activeRef,
   liveColor, liveThickness, liveSoftness, liveNozzle, liveStyleKind, liveStampUrl, liveStampSize, liveSpacing,
   committed, live, onStart, onMove,
@@ -418,11 +419,13 @@ function Scene({
         <meshStandardMaterial color={cakeColor} roughness={0.68} />
       </mesh>
 
-      {/* floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <planeGeometry args={[20, 20]} />
-        <meshStandardMaterial color="#f0ebe5" roughness={0.9} />
-      </mesh>
+      {/* floor — gone in the tile, where the subject is the cream and nothing else */}
+      {!thumbView && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+          <planeGeometry args={[20, 20]} />
+          <meshStandardMaterial color="#f0ebe5" roughness={0.9} />
+        </mesh>
+      )}
 
       {/* committed + live strokes (Suspense covers the GLB stamp loads) */}
       <Suspense fallback={null}>
@@ -492,6 +495,10 @@ export default function FreehandPenStudio() {
   const [cakeColor, setCakeColor] = useState(STANDARD_CAKE_COLOR);
 
   const previewRef = useRef(null);
+  // ── The tile is the CREAM, close up ───────────────────────────────────────────────────────────
+  // A card is about 60px. A whole cake at that size is a pale disc and the bead of cream — the thing
+  // being chosen — is a few pixels of it. Draw a stroke, then frame it.
+  const [thumbView, setThumbView] = useState(false);
 
   // ── Save, so the pen can be filed under Art ───────────────────────────────────────────────────
   // This was a calibration screen with no way out — the pen could be tuned and never authored, so it
@@ -725,6 +732,18 @@ export default function FreehandPenStudio() {
               Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail.
             </p>
           )}
+          {/* One click, and what is on screen is exactly what gets stored. */}
+          <button onClick={() => setThumbView(v => !v)}
+            style={{ width: '100%', marginBottom: 6, padding: '7px 9px', fontSize: 12, borderRadius: 7,
+              cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, border: '1.5px solid #2C4433',
+              background: thumbView ? '#2C4433' : '#fff', color: thumbView ? '#fff' : '#2C4433' }}>
+            {thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+          </button>
+          {thumbView && !committed.length && (
+            <p style={{ fontSize: 10.5, color: '#C0392B', margin: '0 0 6px', lineHeight: 1.45 }}>
+              Nothing drawn yet — draw a stroke on the cake first, or the tile will be empty.
+            </p>
+          )}
           <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="e.g. Cream pen"
             style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
               border: '1.5px solid #C5D4C8', borderRadius: 7, boxSizing: 'border-box' }} />
@@ -748,13 +767,24 @@ export default function FreehandPenStudio() {
 
       {/* Preview */}
       <div style={{ flex: 1, position: 'relative' }} ref={previewRef}>
-        <Canvas shadows camera={{ position: [0, 4.6, 6.2], fov: 42 }}
+        {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png: WebGL clears the drawing
+            buffer after compositing, so toBlob() reads an empty one and every step after it
+            succeeds — the upload works, the row saves, and the element sits in the picker with no
+            picture. Four of the five studios were missing this and were fixed; this one was the
+            fifth, which is why "Cream Pen" saved with no thumbnail.
+            Keyed on the view, because a Canvas takes its camera on mount only. */}
+        <Canvas key={thumbView ? 'thumb' : 'scene'} shadows
+          camera={thumbView
+            ? { position: [0, Y_BASE + CAKE_HEIGHT + 0.55, 1.5], fov: 34 }
+            : { position: [0, 4.6, 6.2], fov: 42 }}
+          gl={{ preserveDrawingBuffer: true }}
           style={{ touchAction: 'none', cursor: 'crosshair' }}>
           <Scene
             cakeColor={cakeColor} minGap={minGap} activeRef={activeRef}
             liveColor={color} liveThickness={thickness} liveSoftness={softness} liveNozzle={nozzle} liveStyleKind={style}
             liveStampUrl={stampUrl} liveStampSize={stampSize} liveSpacing={spacing}
             committed={committed} live={live} onStart={startStroke} onMove={movePoint}
+            thumbView={thumbView}
           />
         </Canvas>
 

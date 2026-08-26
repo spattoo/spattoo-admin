@@ -11,7 +11,8 @@
     "check:feature-docs": "node ../spattoo-docs/bin/check-feature-docs.mjs --repo spattoo-admin",
     "verify": "npm run check:bindings && npm run check:smoke && npm run check:dup",
     "check:bindings": "node scripts/check-bindings.mjs",
-    "check:smoke": "node scripts/check-smoke.mjs"
+    "check:smoke": "node scripts/check-smoke.mjs",
+    "smoke:session": "node scripts/smoke-session.mjs"
   },
   "dependencies": {
     "@fontsource-variable/quicksand": "^5.3.0",
