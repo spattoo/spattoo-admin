@@ -76,7 +76,7 @@ const PRESETS = {
   // The scrolled one (reference 5): sits on the cake, left end resting, right end rolled up. The
   // spread and lift are not decoration — without them the coils pass through each other.
   'Curled ends (ref 5)': { bands: 6, innerRadius: 0.30, thickness: 0.115, surface: 'top',
-    footLeft: 'top', footRight: 'curl', spring: 1, offsetX: 0, standoff: 0, scale: 0.75, flatten: 0,
+    footLeft: 'top', footRight: 'curl', spring: 1.16, offsetX: 0, standoff: 0, scale: 0.75, flatten: 0,
     curlTurns: 1.35, curlSize: 0.75, curlTightness: 0.82,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
   'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, 
