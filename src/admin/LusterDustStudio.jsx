@@ -185,30 +185,31 @@ export default function LusterDustStudio() {
 
         {/* The look has been judged; the row is what makes it a real catalogue element — filed under
             Finishes, searchable, and retunable without a deploy. */}
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.12)' }}>
-          <div style={{ ...s.lbl, marginBottom: 6 }}>
+        <div style={s.saveDock}>
+          <div style={{ ...s.lbl, margin: '0 0 6px' }}>
             {editing ? 'Editing a saved dust' : 'Save as element'}
           </div>
           {editing && (
-            <p style={{ fontSize: 10.5, opacity: 0.75, margin: '0 0 6px', lineHeight: 1.45 }}>
+            <p style={{ fontSize: 10.5, color: '#6B8C74', margin: '0 0 6px', lineHeight: 1.45 }}>
               Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather than
               adding another row.
             </p>
           )}
-          <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="e.g. Gold dust"
+          <input value={saveName} onChange={e => setSaveName(e.target.value)} // Not a colour: the customer picks that on their own card. A second row is a different
+            // MATERIAL — a soft pearl against a hard glitter.
+            placeholder="e.g. Pearl shimmer"
             style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
-              borderRadius: 7, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(0,0,0,0.25)',
-              color: '#fff', boxSizing: 'border-box' }} />
+              borderRadius: 7, border: '1.5px solid #C5D4C8', boxSizing: 'border-box' }} />
           <button onClick={save} disabled={busy || !saveName.trim()}
             style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
               fontFamily: 'inherit', fontWeight: 700, cursor: busy || !saveName.trim() ? 'default' : 'pointer',
-              border: 'none', background: busy || !saveName.trim() ? 'rgba(255,255,255,0.15)' : '#f0cf63',
-              color: busy || !saveName.trim() ? 'rgba(255,255,255,0.5)' : '#1c2336' }}>
+              border: 'none', background: busy || !saveName.trim() ? '#E3E0DA' : '#2C4433',
+              color: busy || !saveName.trim() ? '#9a939a' : '#fff' }}>
             {busy ? 'Saving…' : editing ? 'Save changes' : 'Save to catalogue'}
           </button>
           {msg && (
             <p style={{ fontSize: 11, marginTop: 6, lineHeight: 1.45,
-              color: msg.ok ? '#8fd694' : '#ff9d9d' }}>{msg.text}</p>
+              color: msg.ok ? '#2C4433' : '#C0392B' }}>{msg.text}</p>
           )}
         </div>
       </div>
@@ -232,6 +233,14 @@ export default function LusterDustStudio() {
 const s = {
   wrap: { display: 'flex', height: 'calc(100vh - 56px)', fontFamily: "'Quicksand', sans-serif" },
   panel: { width: 340, flexShrink: 0, overflowY: 'auto', padding: 20, background: '#fff', borderRight: '1.5px solid #C5D4C8' },
+  // ── Save STICKS to the foot of the sidebar ────────────────────────────────────────────────────
+  // It was the last thing in a column of twenty sliders, so it sat below the fold on every screen
+  // and the studio read as having no way to save at all. Reported as exactly that.
+  //
+  // Sticky rather than moved to the top: the order is right — you tune, then you save — it just has
+  // to still be there when you have finished tuning.
+  saveDock: { position: 'sticky', bottom: -20, marginTop: 16, marginInline: -20, padding: '14px 20px 20px',
+              background: '#fff', borderTop: '1.5px solid #C5D4C8' },
   preview: { flex: 1, minWidth: 0, background: '#EDEAE2' },
   title: { fontSize: 18, fontWeight: 700, color: '#3D5A44', marginBottom: 16 },
   section: { marginBottom: 18 },
