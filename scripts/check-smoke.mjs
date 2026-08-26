@@ -320,6 +320,20 @@ for (const route of all) {
   process.stdout.write(problems.length ? '✗' : '.');
 }
 
+// ── Keep the session alive ──────────────────────────────────────────────────────────────────────
+// Supabase refresh tokens are SINGLE USE: the app trades one for a fresh pair on load, and the old
+// one is dead the moment it is spent. So a saved session works exactly once, and every run after it
+// fails with "Invalid Refresh Token: Already Used" — which looks like a broken screen and is not.
+//
+// Writing the refreshed session back closes the loop. The chain then lives as long as Supabase lets
+// a refresh token be renewed, rather than expiring after one run.
+if (haveSaved || creds) {
+  try {
+    const fresh = await page.evaluate(k => window.localStorage.getItem(k), AUTH_KEY);
+    if (fresh) writeFileSync(SESSION_FILE, JSON.stringify({ key: AUTH_KEY, value: fresh }, null, 2));
+  } catch { /* the run's verdict matters more than the bookkeeping */ }
+}
+
 await browser.close();
 stop();
 console.log('');

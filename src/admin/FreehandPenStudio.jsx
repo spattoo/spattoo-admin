@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, useGLTF } from '@react-three/drei';
 import { HexColorPicker } from 'react-colorful';
 import * as THREE from 'three';
+import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Freehand cream pen ──────────────────────────────────────────────────────
 // The customer (or baker) draws cream directly onto the cake with the mouse / finger:
@@ -490,6 +491,43 @@ export default function FreehandPenStudio() {
   const [spacing, setSpacing]   = useState(0.85);
   const [cakeColor, setCakeColor] = useState(STANDARD_CAKE_COLOR);
 
+  const previewRef = useRef(null);
+
+  // ── Save, so the pen can be filed under Art ───────────────────────────────────────────────────
+  // This was a calibration screen with no way out — the pen could be tuned and never authored, so it
+  // had no row and sat loose in the tools area with grass and dust. Luster dust had the same gap and
+  // was fixed the same way today.
+  //
+  // A row carries the LOOK: the nozzle, the colour, how thick and how soft. NOT the strokes — those
+  // are where this hand went on this cake, and shipping them would put somebody else's drawing on
+  // every cake that picks the row. Same call the dust makes about its splashes.
+  //
+  // `surface_treatment` is already the right type. Migration 076 wrote its description as "generated
+  // finishes that COVER a surface rather than standing on it — piped grass over a tier, dust flicked
+  // up a wall, freehand cream", so the shelf was built for this before it existed.
+  const { editing, saveName, setSaveName, busy, msg, save } = useElementSave({
+    typeSlug: 'surface_treatment',
+    categorySlug: 'art',
+    canvasRef: previewRef,
+    buildPayload: () => ({
+      allowed_zones: ['top_surface', 'side', 'board'],
+      default_color: color,
+      placement_config: {
+        procedural: 'cream_pen',
+        cream_pen: { nozzle, color, thickness: +thickness.toFixed(4),
+                     softness: +softness.toFixed(3), spacing: +spacing.toFixed(3) },
+      },
+    }),
+    onHydrate: (el) => {
+      const t = el.placement_config?.cream_pen ?? {};
+      if (t.color) setColor(t.color);
+      if (t.thickness != null) setThick(t.thickness);
+      if (t.softness != null) setSoft(t.softness);
+      if (t.nozzle) setNozzle(t.nozzle);
+      if (t.spacing != null) setSpacing(t.spacing);
+    },
+  });
+
   const [committed, setCommitted] = useState([]);   // [{ style, points, color, thickness, softness, nozzle, stampUrl, spacing, seed }]
   const [live, setLive]           = useState([]);   // Vector3[]
   const activeRef = useRef(false);
@@ -679,6 +717,29 @@ export default function FreehandPenStudio() {
           </p>
         </div>
 
+        {/* The look has been judged; the row is what puts it on a shelf a customer browses. */}
+        <div style={panel}>
+          <div style={heading}>{editing ? 'editing a saved pen' : 'save as element'}</div>
+          {editing && (
+            <p style={{ fontSize: 10.5, color: '#6B8C74', margin: '0 0 6px', lineHeight: 1.45 }}>
+              Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail.
+            </p>
+          )}
+          <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="e.g. Cream pen"
+            style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
+              border: '1.5px solid #C5D4C8', borderRadius: 7, boxSizing: 'border-box' }} />
+          <button onClick={save} disabled={busy || !saveName.trim()}
+            style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
+              fontFamily: 'inherit', fontWeight: 700, border: 'none',
+              cursor: busy || !saveName.trim() ? 'default' : 'pointer',
+              background: busy || !saveName.trim() ? '#E3E0DA' : '#2C4433',
+              color: busy || !saveName.trim() ? '#9a939a' : '#fff' }}>
+            {busy ? 'Saving…' : editing ? 'Save changes' : 'Save to catalogue'}
+          </button>
+          {msg && <p style={{ fontSize: 11, marginTop: 6, lineHeight: 1.45,
+            color: msg.ok ? '#2C4433' : '#C0392B' }}>{msg.text}</p>}
+        </div>
+
         <div style={panel}>
           <div style={heading}>placement_config</div>
           <pre style={{ fontSize: 10, color: '#2C4433', margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace', lineHeight: 1.4, maxHeight: 220, overflowY: 'auto' }}>{cfgJson}</pre>
@@ -686,7 +747,7 @@ export default function FreehandPenStudio() {
       </div>
 
       {/* Preview */}
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div style={{ flex: 1, position: 'relative' }} ref={previewRef}>
         <Canvas shadows camera={{ position: [0, 4.6, 6.2], fov: 42 }}
           style={{ touchAction: 'none', cursor: 'crosshair' }}>
           <Scene
