@@ -444,7 +444,10 @@ export default function RainbowStudio() {
         {(p.footLeft === 'curl' || p.footRight === 'curl') && (
           <>
             {num('Curl turns', 'curlTurns', 0.4, 2.5, 0.05)}
-            {num('Curl size', 'curlSize', 0.8, 3.5, 0.1)}
+            {/* From 0.6, which is where the geometry clamps it — a coil narrower than that eats
+                its own rope. The slider started at 0.8 while the default is 0.75, so it displayed a
+                value it was not using and the default became unreachable the moment you dragged it. */}
+            {num('Curl size', 'curlSize', 0.6, 3.5, 0.05)}
             {num('Curl tightness', 'curlTightness', 0, 1, 0.02)}
             {/* Three controls used to sit here — Ends stagger, Ends spread and Ends lift. All
                 three were invented to stop the coils tangling, and stacking them cannot tangle
