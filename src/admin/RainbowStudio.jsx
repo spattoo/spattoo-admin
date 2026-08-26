@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
 import { RainbowArch, rainbowBands, rainbowGuide, RAINBOW_DEFAULTS, SceneLights, SceneEnv,
-         RAINBOW_ARRANGEMENTS, ArrangementTile, iconTiers } from '@spattoo/designer';
+         RAINBOW_ARRANGEMENTS, ArrangementTile, arrangementOf, iconTiers } from '@spattoo/designer';
 import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Rainbow studio ────────────────────────────────────────────────────────────
@@ -79,6 +79,13 @@ const PRESETS = {
     footLeft: 'top', footRight: 'curl', spring: 1.16, offsetX: 0, standoff: 0, scale: 0.75, flatten: 0,
     curlTurns: 1.35, curlSize: 0.75, curlTightness: 0.82,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
+  // The wall one with its ends rolled up. Its stack rests on the BOARD, not the cake top — the chain
+  // rests its first coil on whatever the other end stands on.
+  'On the wall, curled': { surface: 'side', bands: 6, innerRadius: 0.30, thickness: 0.12,
+    footLeft: 'board', footRight: 'curl', offsetX: 0, theta: -0.09, proud: 0.02,
+    spring: 0.18, scale: 0.75, flatten: 0,
+    curlTurns: 1.35, curlSize: 0.75, curlTightness: 0.82,
+    colors: ['#F6A9C0', '#F9C9A0', '#FBE9A6', '#B7DFAE', '#A8CDEB', '#C9AEDD'] },
   'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, 
     footLeft: 'top', footRight: 'top', standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
@@ -404,11 +411,9 @@ export default function RainbowStudio() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {RAINBOW_ARRANGEMENTS.map(a => (
               <ArrangementTile key={a.key} item={a} tiers={tiers} tierIndex={tierIndex}
-                // On the wall the FEET are not part of the choice — the tile is the surface, and
-                // where it sits up the wall is the slider's job.
-                on={(p.surface ?? 'top') === a.surface
-                    && (a.surface === 'side'
-                        || (p.footLeft === a.params.footLeft && p.footRight === a.params.footRight))}
+                // `arrangementOf`, not a second copy of its rule. This WAS a copy, and the moment
+                // a second wall tile existed the two would have disagreed about which one is on.
+                on={arrangementOf(p)?.key === a.key}
                 onPick={() => setP(o => ({ ...o, surface: a.surface, ...a.params }))} />
             ))}
           </div>
