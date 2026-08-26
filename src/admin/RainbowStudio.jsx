@@ -77,7 +77,7 @@ const PRESETS = {
   // spread and lift are not decoration — without them the coils pass through each other.
   'Curled ends (ref 5)': { bands: 6, innerRadius: 0.30, thickness: 0.115, surface: 'top',
     footLeft: 'top', footRight: 'curl', spring: 1, offsetX: 0, standoff: 0, scale: 0.75, flatten: 0,
-    curlTurns: 1.35, curlSize: 1.6, curlTightness: 0.82, curlFan: 1.1, curlSplay: 1.2, curlLift: 0.9,
+    curlTurns: 1.35, curlSize: 0.75, curlTightness: 0.82,
     colors: ['#F49AB6', '#F6B98E', '#F7E39A', '#9BD8B0', '#8FC7E8', '#B9A3DC'] },
   'Tall pastel (ref 4)': { bands: 6, innerRadius: 0.30, thickness: 0.07, 
     footLeft: 'top', footRight: 'top', standoff: 0.15, offsetX: 0, scale: 1, flatten: 0,
@@ -269,9 +269,6 @@ export default function RainbowStudio() {
             curlTurns:     +Number(p.curlTurns).toFixed(3),
             curlSize:      +Number(p.curlSize).toFixed(3),
             curlTightness: +Number(p.curlTightness).toFixed(3),
-            curlFan:       +Number(p.curlFan).toFixed(3),
-            curlSplay:     +Number(p.curlSplay).toFixed(3),
-            curlLift:      +Number(p.curlLift).toFixed(3),
           } : {}),
         },
       },
@@ -444,12 +441,9 @@ export default function RainbowStudio() {
             {num('Curl turns', 'curlTurns', 0.4, 2.5, 0.05)}
             {num('Curl size', 'curlSize', 0.8, 3.5, 0.1)}
             {num('Curl tightness', 'curlTightness', 0, 1, 0.02)}
-            {num('Ends stagger', 'curlFan', -1.5, 1.5, 0.05)}
-            {/* These two are not taste. A coil is wider than the gap between two touching ropes, so
-                without them the curls pass through each other — measured at 0.001 of a 0.138 rope,
-                which is straight through. Left adjustable because how MUCH is a look. */}
-            {num('Ends spread', 'curlSplay', 0, 2.5, 0.1)}
-            {num('Ends lift', 'curlLift', 0, 2, 0.1)}
+            {/* Three controls used to sit here — Ends stagger, Ends spread and Ends lift. All
+                three were invented to stop the coils tangling, and stacking them cannot tangle
+                them: each coil is placed exactly one coil-width from the one below. Gone. */}
           </>
         )}
 
