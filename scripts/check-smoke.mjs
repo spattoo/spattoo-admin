@@ -146,11 +146,34 @@ async function session() {
 // Its OWN dev server on its OWN port, never a server that happens to be running. Reusing one means
 // the gate reports on whatever state that process is in — which is exactly how a stale Vite cache
 // went unnoticed for eleven days.
-const PORT = 5199;
+// Its own port, so it never reports on a server that happens to be running — reusing one means the
+// gate describes whatever state that process is in, which is how a stale Vite cache went unnoticed
+// for eleven days.
+//
+// Overridable, because "its own" is not the only constraint: an auth provider allowlists redirect
+// URLs by ORIGIN, so a sign-in can only complete on a port somebody has registered.
+//   SMOKE_PORT=5173 npm run check:smoke -- --login
+const PORT = Number(E.SMOKE_PORT ?? process.env.SMOKE_PORT ?? 5173);
 const AUTH_KEY = 'spattoo-admin-auth';   // the key src/lib/supabase.js stores its session under
 function serve() {
-  const p = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'],
-    { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
+    cwd: ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // ── No captcha on the test server ────────────────────────────────────────────────────────────
+    // Not defeating one: NOT LOADING one. The widget is config-driven — Captcha.jsx renders nothing
+    // without a site key, and says so: "with no key the whole thing is a no-op (login behaves
+    // exactly as before)". This is a throwaway server on a throwaway port, so it starts without the
+    // key and the login page is the plain form.
+    //
+    // It has to be this way round. A captcha exists to tell a person from a script, and this IS a
+    // script — so a gate that depends on passing one is a gate that cannot run. That is why the
+    // credentials path goes to Supabase's token endpoint rather than the form, too.
+    //
+    // Enforcement is Supabase-side and this cannot touch it: if the dashboard toggle is ON, a
+    // sign-in is refused with or without a widget, and the fix is a dashboard setting rather than
+    // anything here.
+    env: { ...process.env, VITE_TURNSTILE_SITE_KEY: '' },
+  });
   return new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('vite did not start within 60s')), 60_000);
     p.stdout.on('data', d => {
@@ -171,10 +194,16 @@ process.on('exit', stop);
 const browser = await chromium.launch({ headless: !LOGIN });
 const ctx = await browser.newContext({
   viewport: { width: 1400, height: 900 },
-  // A session saved from a previous `--login`. It carries the refresh token, so the app renews
-  // itself on load and one manual sign-in lasts until Supabase expires the refresh.
-  ...(!LOGIN && haveSaved ? { storageState: SESSION_FILE } : {}),
 });
+
+// A session saved earlier — from `--login`, or copied out of a browser that is already signed in
+// (which is the only way in when Supabase enforces a captcha: a captcha exists to tell a person from
+// a script, and this is a script). It carries the refresh token, so the app renews itself on load
+// and one sign-in lasts until Supabase expires the refresh.
+if (!LOGIN && haveSaved) {
+  const saved = JSON.parse(readFileSync(SESSION_FILE, 'utf8'));
+  await ctx.addInitScript(([k, v]) => window.localStorage.setItem(k, v), [saved.key, saved.value]);
+}
 
 if (creds) {
   // Written before any script on the page runs, so the app boots already signed in.
@@ -205,8 +234,14 @@ if (LOGIN) {
     die('no sign-in within five minutes — nothing was saved');
   }
   // A moment for the app to finish writing the session, then keep it.
+  //
+  // The VALUE alone, not Playwright's storageState. storageState records localStorage per ORIGIN,
+  // and this server's port is configurable — save on 5173, run on 5199, and the entry silently does
+  // not apply. A bearer token is not origin-bound, so storing it plainly and injecting it below
+  // works whatever port the run uses.
   await page.waitForTimeout(1500);
-  await ctx.storageState({ path: SESSION_FILE });
+  const value = await page.evaluate(k => window.localStorage.getItem(k), AUTH_KEY);
+  writeFileSync(SESSION_FILE, JSON.stringify({ key: AUTH_KEY, value }, null, 2));
   await browser.close();
   stop();
   console.log(`✓ check:smoke — signed in, session saved to ${SESSION_FILE.replace(ROOT, '')}`);
@@ -262,9 +297,13 @@ for (const route of all) {
   page.on('response', onResponse);
 
   try {
-    await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: 'networkidle', timeout: 30_000 });
+    // `domcontentloaded`, not `networkidle`. Idle means 500ms with no requests in flight, and a
+    // screen that polls, holds a socket open or streams a 3D scene never gets there — /templates/create
+    // simply timed out at 30s while working perfectly. Playwright discourages networkidle for exactly
+    // this, and nothing here depends on it: errors arrive through listeners, not through a load state.
+    await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     // Long enough for a lazy route's chunk to arrive and for React to have thrown if it is going to.
-    await page.waitForTimeout(1200);
+    await page.waitForTimeout(2500);
     if (await page.getByText('Something went wrong').count()) {
       problems.push('the error boundary caught a render failure');
     }

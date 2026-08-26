@@ -79,6 +79,10 @@ function CakeMesh({ shapeKey, cakeColor }) {
 export default function GrassStudio() {
   const [p, setP] = useState({ ...GRASS_DEFAULTS, color: '#4caf3d' });
   const [shapeKey, setShapeKey] = useState('round');
+  // The shape ITSELF, from the key the picker sets. `shape={shape}` was passed to GrassPatch with
+  // nothing declaring `shape`, so the studio threw on render — the second undeclared name in this
+  // file, sitting right behind `tris`.
+  const shape = SHAPES[shapeKey] ?? SHAPES.round;
   const [bandInner, setBandInner] = useState(null);
   // Strands spilling over the rim — the football cake's edge. Its own state rather than a param on
   // `p` because it is a PLACEMENT of the tufts, not a property of one.
