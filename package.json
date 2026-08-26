@@ -16,7 +16,7 @@
     "@fontsource-variable/quicksand": "^5.3.0",
     "@fontsource/playfair-display": "^5.3.0",
     "@sentry/react": "^10.60.0",
-    "@spattoo/designer": "file:vendor/spattoo-designer-0.1.382.tgz",
+    "@spattoo/designer": "file:vendor/spattoo-designer-0.1.383.tgz",
     "@supabase/supabase-js": "^2.103.0",
     "libphonenumber-js": "^1.13.7",
     "meshoptimizer": "^1.1.1",
