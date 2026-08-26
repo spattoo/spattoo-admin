@@ -68,6 +68,14 @@ export default function LetterBlocksStudio() {
   const [cakeColor, setCakeColor] = useState('#fdfdfd');
   const [bg, setBg] = useState('#efe7e0');
   const [stats, setStats] = useState({ blocks: 0 });
+  // ── The TILE is one block, not a cake with blocks on it ───────────────────────────────────────
+  // The picker card is about 60px. A whole cake at that size is a pale disc, and the thing the
+  // customer is choosing — a fondant cube with a letter cut into it — is a few pixels of it. The
+  // cloud and rainbow studios both learned this; this one never got the same treatment.
+  //
+  // ONE letter, because a name spelled across a board is a row of small cubes and no single one
+  // reads. 'A' says "letter block" at any size.
+  const [thumbView, setThumbView] = useState(false);
   const canvasWrapRef = useRef(null);
 
   // Same hook the grass studio uses — create once, update thereafter (INVARIANTS #3).
@@ -175,6 +183,15 @@ export default function LetterBlocksStudio() {
               adding another row.
             </p>
           )}
+          {/* One click, and what is on screen is exactly what gets stored — the same contract the
+              cloud and rainbow studios keep. Automating it at save time hides the one thing worth
+              seeing: the picture you are about to put in the picker. */}
+          <button onClick={() => setThumbView(v => !v)}
+            style={{ width: '100%', marginBottom: 6, padding: '7px 9px', fontSize: 12, borderRadius: 7,
+              cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, border: '1.5px solid #1a1a1a',
+              background: thumbView ? '#1a1a1a' : '#fff', color: thumbView ? '#fff' : '#1a1a1a' }}>
+            {thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+          </button>
           <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="e.g. Christening pink"
             style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
               border: '1.5px solid #999', borderRadius: 7, boxSizing: 'border-box' }} />
@@ -208,19 +225,29 @@ export default function LetterBlocksStudio() {
       <div ref={canvasWrapRef} style={{ flex: 1, position: 'relative' }}>
         {/* preserveDrawingBuffer, or the saved thumbnail is a BLANK png — WebGL clears the
             drawing buffer after compositing and toBlob() reads an empty one. */}
-        <Canvas gl={{ preserveDrawingBuffer: true }} shadows camera={{ position: [0, 2.2, 4.4], fov: 42 }} style={{ position: 'absolute', inset: 0 }}>
-          <color attach="background" args={[bg]} />
+        {/* Keyed on the view: a Canvas takes its camera on mount only. */}
+        <Canvas key={thumbView ? 'thumb' : 'scene'} gl={{ preserveDrawingBuffer: true }} shadows
+          camera={thumbView
+            ? { position: [0.15, p.size * 0.9, p.size * 3.2], fov: 34 }
+            : { position: [0, 2.2, 4.4], fov: 42 }}
+          style={{ position: 'absolute', inset: 0 }}>
+          {/* White, so a pale fondant cube sits ON the picker's white card rather than in a tinted
+              box. The same call the rainbow studio makes, and for the same reason. */}
+          <color attach="background" args={[thumbView ? '#FFFFFF' : bg]} />
           <SceneLights shadows />
           <SceneEnv />
-          <Cake cakeColor={cakeColor} />
+          {!thumbView && <Cake cakeColor={cakeColor} />}
           <NameBlocks
-            text={text} zone={zone} radius={radius} angle={angle} y={y}
+            text={thumbView ? 'A' : text}
+            zone={thumbView ? 'board' : zone}
+            radius={thumbView ? 0 : radius} angle={thumbView ? 0 : angle} y={thumbView ? 0 : y}
             size={p.size} gap={p.gap} chamfer={p.chamfer}
             letterScale={p.letterScale} letterDepth={p.letterDepth}
             blockColor={p.blockColor} letterColor={p.letterColor}
             onStats={onStats}
           />
-          <OrbitControls target={[0, zone === 'board' ? 0.45 : BOARD_H + BOTTOM_H, 0]} />
+          <OrbitControls enablePan={!thumbView}
+            target={thumbView ? [0, p.size * 0.5, 0] : [0, zone === 'board' ? 0.45 : BOARD_H + BOTTOM_H, 0]} />
         </Canvas>
       </div>
     </div>
