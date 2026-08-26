@@ -350,7 +350,7 @@ function hitPoint(e) {
 }
 
 function Scene({
-  thumbView,
+  thumbView, thumbTarget,
   cakeColor, minGap, activeRef,
   liveColor, liveThickness, liveSoftness, liveNozzle, liveStyleKind, liveStampUrl, liveStampSize, liveSpacing,
   committed, live, onStart, onMove,
@@ -438,7 +438,8 @@ function Scene({
       </Suspense>
 
       {/* rotate auto-disables while the pointer is over the cake (see handlers above) */}
-      <OrbitControls ref={controls} makeDefault target={[0, 1.6, 0]} />
+      {/* The tile looks AT the cream, not at the middle of the cake. */}
+      <OrbitControls ref={controls} makeDefault target={thumbView ? thumbTarget : [0, 1.6, 0]} />
     </>
   );
 }
@@ -482,6 +483,10 @@ function PipingBag({ color }) {
     </svg>
   );
 }
+
+// One number, used by both the camera and the fit that decides where to put it — two copies
+// would be a tile framed for a field of view it is not being rendered at.
+const THUMB_FOV = 34;
 
 export default function FreehandPenStudio() {
   const [color, setColor]       = useState('#ffffff');
@@ -577,6 +582,32 @@ export default function FreehandPenStudio() {
       window.removeEventListener('pointercancel', end);
     };
   }, []);
+
+  // ── The tile frames the CREAM, fitted to it ───────────────────────────────────────────────────
+  // A fixed camera distance was the first attempt and produced a tiny drawing in a big frame: how
+  // far away the right distance is depends entirely on how big a thing was drawn, and a stroke can
+  // be a dot or a wreath round the whole cake.
+  //
+  // So it measures. Centre on the strokes' own middle, stand back by their largest dimension, and
+  // the drawing fills the tile whatever was drawn. The same thing RainbowStudio's `shot` does.
+  const shot = useMemo(() => {
+    const pts = committed.flatMap(s => s.points ?? []);
+    if (!pts.length) return { centre: [0, Y_BASE + CAKE_HEIGHT * 0.55, 0], dist: 2.6 };
+    const span = a => { const v = pts.map(p => p[a]); return [Math.min(...v), Math.max(...v)]; };
+    const [x0, x1] = span('x'), [y0, y1] = span('y'), [z0, z1] = span('z');
+    const centre = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
+    // How far back to stand is TRIGONOMETRY, not a guessed multiplier. To fit something `size`
+    // across at a vertical field of view `f`, the camera sits at (size/2) / tan(f/2) — for 34° that
+    // is size × 2.05. The first attempt used 1.5×, which is nearer than the fit requires, so the
+    // drawing was cropped rather than framed.
+    //
+    // The BIGGER of width and height, measured against the VERTICAL fov: a wide squiggle needs the
+    // same room a tall one does, and the canvas is wider than it is tall, so fitting the height
+    // fits the width for free.
+    const size = Math.max(x1 - x0, y1 - y0, 0.25);
+    const fit = size / (2 * Math.tan((THUMB_FOV * Math.PI / 180) / 2));
+    return { centre, dist: Math.max(0.6, fit * 1.18) };   // 18% air, so nothing touches the edge
+  }, [committed]);
 
   const undo  = () => setCommitted(c => c.slice(0, -1));
   const clear = () => setCommitted([]);
@@ -775,7 +806,7 @@ export default function FreehandPenStudio() {
             Keyed on the view, because a Canvas takes its camera on mount only. */}
         <Canvas key={thumbView ? 'thumb' : 'scene'} shadows
           camera={thumbView
-            ? { position: [0, Y_BASE + CAKE_HEIGHT + 0.55, 1.5], fov: 34 }
+            ? { position: [shot.centre[0], shot.centre[1], shot.centre[2] + shot.dist], fov: THUMB_FOV }
             : { position: [0, 4.6, 6.2], fov: 42 }}
           gl={{ preserveDrawingBuffer: true }}
           style={{ touchAction: 'none', cursor: 'crosshair' }}>
@@ -784,7 +815,7 @@ export default function FreehandPenStudio() {
             liveColor={color} liveThickness={thickness} liveSoftness={softness} liveNozzle={nozzle} liveStyleKind={style}
             liveStampUrl={stampUrl} liveStampSize={stampSize} liveSpacing={spacing}
             committed={committed} live={live} onStart={startStroke} onMove={movePoint}
-            thumbView={thumbView}
+            thumbView={thumbView} thumbTarget={shot.centre}
           />
         </Canvas>
 
