@@ -401,23 +401,32 @@ function Scene({
       <Environment preset="apartment" backgroundBlurriness={1} />
 
       {/* board */}
-      <mesh position={[0, 0.05, 0]} receiveShadow>
-        <cylinderGeometry args={[CAKE_RADIUS + 0.6, CAKE_RADIUS + 0.6, 0.1, 64]} />
-        <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
-      </mesh>
+      {!thumbView && (
+        <mesh position={[0, 0.05, 0]} receiveShadow>
+          <cylinderGeometry args={[CAKE_RADIUS + 0.6, CAKE_RADIUS + 0.6, 0.1, 64]} />
+          <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
+        </mesh>
+      )}
 
-      {/* the writable cake — top cap + side wall, one mesh, so you can pipe anywhere */}
-      <mesh
-        position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]}
-        castShadow receiveShadow
-        onPointerEnter={handleEnter}
-        onPointerLeave={handleLeave}
-        onPointerDown={handleDown}
-        onPointerMove={handleMove}
-      >
-        <cylinderGeometry args={[CAKE_RADIUS, CAKE_RADIUS, CAKE_HEIGHT, 96]} />
-        <meshStandardMaterial color={cakeColor} roughness={0.68} />
-      </mesh>
+      {/* ── The writable cake — top cap + side wall, one mesh, so you can pipe anywhere ──────────
+          GONE in the tile. A picker card is about 60px, and every tile that showed a cake was
+          unreadable at that size while the one that showed only its object — the letter block — read
+          perfectly. The cake is what the cream was drawn ON; it is not what is being chosen.
+          The cream keeps the shape the cake gave it, because the stroke points are already seated on
+          that surface. It simply floats, exactly as the letter block does. */}
+      {!thumbView && (
+        <mesh
+          position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]}
+          castShadow receiveShadow
+          onPointerEnter={handleEnter}
+          onPointerLeave={handleLeave}
+          onPointerDown={handleDown}
+          onPointerMove={handleMove}
+        >
+          <cylinderGeometry args={[CAKE_RADIUS, CAKE_RADIUS, CAKE_HEIGHT, 96]} />
+          <meshStandardMaterial color={cakeColor} roughness={0.68} />
+        </mesh>
+      )}
 
       {/* floor — gone in the tile, where the subject is the cream and nothing else */}
       {!thumbView && (
