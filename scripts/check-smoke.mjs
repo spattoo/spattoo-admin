@@ -28,22 +28,30 @@
 // Requests to OTHER origins are not our business — a flaky third party is not a broken screen, and
 // a gate that fails on someone else's outage gets switched off within a week.
 //
-// ── AUTHENTICATION ──────────────────────────────────────────────────────────────────────────────
-// A session is fetched from Supabase's token endpoint and written into localStorage under the key
-// the app reads. NOT by driving the login form: the form can carry a captcha, and a gate that a
-// captcha can block is a gate that stops running.
+// ── AUTHENTICATION: log in yourself, once ───────────────────────────────────────────────────────
+// Every screen is behind a login, so the gate needs a session. It can get one two ways, and the
+// FIRST is the one to use:
 //
-// The credentials come from the environment and are never read, logged or echoed by this script.
-// Put them in `.env.local`, which is already gitignored:
+//   npm run check:smoke -- --login
+//       Opens a real browser window. You sign in by hand — captcha, one-time code, whatever the
+//       login asks for — and the session is saved to .smoke-session.json. No password is typed
+//       into this script, stored by it, or seen by it.
 //
-//     SMOKE_EMAIL=someone@example.com
-//     SMOKE_PASSWORD=...
+//   npm run check:smoke
+//       Uses that saved session. It carries a refresh token, so the app renews it on load and one
+//       manual login lasts until Supabase expires the refresh — weeks, typically, not hours.
 //
-// With no credentials it SKIPS, loudly, and says what to add. Failing the build over a missing local
-// file would just get the gate deleted. With credentials that do not work it FAILS — a login that
-// stopped working is worth knowing about.
+// The saved file holds a LIVE session for whatever account you signed in as. It is gitignored, and
+// it should be an account that exists only in dev.
+//
+// SMOKE_EMAIL / SMOKE_PASSWORD in .env.local still work and are what an unattended CI run would
+// use, signing in through Supabase's token endpoint rather than the form — a form can carry a
+// captcha, and a gate a captcha can block is a gate that stops running. Nothing logs or echoes them.
+//
+// With neither, it SKIPS loudly and says so. Failing the build over a missing local file is how a
+// gate gets deleted.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
@@ -79,14 +87,18 @@ const E = env();
 const need = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
 for (const k of need) if (!E[k]) die(`${k} is not set — it lives in .env.local`);
 
-if (!E.SMOKE_EMAIL || !E.SMOKE_PASSWORD) {
-  console.log('• check:smoke — SKIPPED: no SMOKE_EMAIL / SMOKE_PASSWORD.\n');
-  console.log('  Every screen in this app is behind a login, so without an account this gate can');
-  console.log('  only prove the login page renders. Create a user that exists ONLY in the dev');
-  console.log('  database and add it to .env.local (already gitignored):\n');
-  console.log('      SMOKE_EMAIL=smoke@yourdomain.test');
-  console.log('      SMOKE_PASSWORD=...\n');
-  console.log('  Then this opens all', routes().length, 'admin screens and fails on any that break.');
+const SESSION_FILE = join(ROOT, '.smoke-session.json');
+const LOGIN = process.argv.includes('--login');
+const haveSaved = existsSync(SESSION_FILE);
+
+if (!LOGIN && !haveSaved && !(E.SMOKE_EMAIL && E.SMOKE_PASSWORD)) {
+  console.log('• check:smoke — SKIPPED: nothing to sign in with.\n');
+  console.log('  Every screen here is behind a login, so without a session this gate can only');
+  console.log('  prove the login page renders. Log in once, by hand:\n');
+  console.log('      npm run check:smoke -- --login\n');
+  console.log('  A browser opens, you sign in, and the SESSION is saved (no password is stored).');
+  console.log('  After that, plain `npm run check:smoke` opens all', routes().length, 'screens and');
+  console.log('  fails on any that break.');
   process.exit(0);
 }
 
@@ -110,6 +122,7 @@ async function session() {
 // the gate reports on whatever state that process is in — which is exactly how a stale Vite cache
 // went unnoticed for eleven days.
 const PORT = 5199;
+const AUTH_KEY = 'spattoo-admin-auth';   // the key src/lib/supabase.js stores its session under
 function serve() {
   const p = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'],
     { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -123,24 +136,58 @@ function serve() {
   });
 }
 
-// Sign in FIRST. A dev server takes seconds to boot and there is no reason to pay for one just to
-// discover the credentials are wrong.
-const s = await session();
+// Credentials, if there are any, before paying for a dev server to discover they are wrong.
+const creds = (!LOGIN && !haveSaved) ? await session() : null;
 
 const server = await serve();
 const stop = () => { try { server.kill('SIGTERM'); } catch {} };
 process.on('exit', stop);
-const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
 
-// Written before any script on the page runs, so the app boots already signed in.
-await ctx.addInitScript(([key, value]) => {
-  window.localStorage.setItem(key, value);
-}, ['spattoo-admin-auth', JSON.stringify({
-  access_token: s.access_token, refresh_token: s.refresh_token,
-  expires_at: Math.floor(Date.now() / 1000) + (s.expires_in ?? 3600),
-  expires_in: s.expires_in, token_type: 'bearer', user: s.user,
-})]);
+const browser = await chromium.launch({ headless: !LOGIN });
+const ctx = await browser.newContext({
+  viewport: { width: 1400, height: 900 },
+  // A session saved from a previous `--login`. It carries the refresh token, so the app renews
+  // itself on load and one manual sign-in lasts until Supabase expires the refresh.
+  ...(!LOGIN && haveSaved ? { storageState: SESSION_FILE } : {}),
+});
+
+if (creds) {
+  // Written before any script on the page runs, so the app boots already signed in.
+  await ctx.addInitScript(([key, value]) => {
+    window.localStorage.setItem(key, value);
+  }, [AUTH_KEY, JSON.stringify({
+    access_token: creds.access_token, refresh_token: creds.refresh_token,
+    expires_at: Math.floor(Date.now() / 1000) + (creds.expires_in ?? 3600),
+    expires_in: creds.expires_in, token_type: 'bearer', user: creds.user,
+  })]);
+}
+
+// ── Signing in by hand ──────────────────────────────────────────────────────────────────────────
+// A real window, and it waits. Whatever the login asks for — a captcha, a one-time code, a provider
+// redirect — a person can answer it and this script does not have to know any of it ever happened.
+// It watches for the app's own auth key to appear, which is the app saying "signed in" in its own
+// words rather than this script guessing from the URL or from what is on screen.
+if (LOGIN) {
+  const page = await ctx.newPage();
+  await page.goto(`http://localhost:${PORT}/`);
+  console.log('\n  A browser window is open. Sign in there.');
+  console.log('  Use an account that exists ONLY in dev — the session is saved to disk.\n');
+  try {
+    await page.waitForFunction(
+      key => !!window.localStorage.getItem(key), AUTH_KEY, { timeout: 5 * 60_000 });
+  } catch {
+    await browser.close(); stop();
+    die('no sign-in within five minutes — nothing was saved');
+  }
+  // A moment for the app to finish writing the session, then keep it.
+  await page.waitForTimeout(1500);
+  await ctx.storageState({ path: SESSION_FILE });
+  await browser.close();
+  stop();
+  console.log(`✓ check:smoke — signed in, session saved to ${SESSION_FILE.replace(ROOT, '')}`);
+  console.log('  Run `npm run check:smoke` from now on. No password was stored.');
+  process.exit(0);
+}
 
 const all = routes();
 const broken = [];
