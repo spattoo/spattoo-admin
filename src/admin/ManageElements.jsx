@@ -1315,6 +1315,23 @@ export default function ManageElements() {
     const toggles = [
       { key: 'bottom_y_adjustable',    label: 'User can adjust height' },
       { key: 'bottom_flip_adjustable', label: 'User can flip orientation' },
+      // ── Hand piping ────────────────────────────────────────────────────────────────────────
+      // Whether "I'll pipe it myself" is offered on this element's card — repeating it along a
+      // line the customer draws, instead of round a rim or a board.
+      //
+      // Not every piping element survives that. A wrap band is ONE pre-formed ring and a drip is a
+      // procedural curtain: both are rings by nature, and stamping either along a freehand squiggle
+      // produces something nobody would pipe. A shell or a rosette repeats happily. That judgement
+      // is per-element and belongs to whoever calibrated it, which is why it is a checkbox here
+      // rather than a rule in the designer.
+      //
+      // NOT one of the *_arrangements_allowed lists, deliberately: those are per-zone (rim vs
+      // board) and hand piping has no zone, so putting it there would pose the question "can you
+      // hand-pipe this on the board?", which is not a real question.
+      //
+      // Absent means OFF. An element that has never been considered does not get the feature by
+      // default — see the designer's gate.
+      { key: 'hand_piping', label: 'Allow hand piping (draw it on freehand)' },
       ...(isPattern ? [] : [{ key: 'pattern_only', label: 'Pattern-only (hide as individual)' }]),
     ];
     const updatePc = (patch) => {
