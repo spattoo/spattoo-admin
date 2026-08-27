@@ -179,6 +179,25 @@ function compactGeometry(geo, newIndex) {
   return out;
 }
 
+/* What a surface mode actually DOES, in one place.
+ *
+ * ⚠️ These three decisions were three separate conditionals inside optimize(), and they are not
+ * independent: keeping a normal map without its UVs is meaningless, and skipping the bake while the
+ * strip pass still runs changes nothing visible — which is exactly the trap that made the first
+ * attempt at this look like it had failed. One object, so they cannot drift apart.
+ */
+export function surfacePlan(mode) {
+  switch (mode) {
+    // Nothing baked: the maps survive, decimation takes the UV-aware branch, textures come down to
+    // the budget's ceiling. Best looking, heaviest, and the one a fragmented atlas can tear.
+    case 'texture': return { bake: false, keepSurface: false, resize: true,  strip: false };
+    // Colour baked (so the mane cannot shatter) but UVs and the normal map stay.
+    case 'hybrid':  return { bake: true,  keepSurface: true,  resize: true,  strip: false };
+    // What shipped: everything into vertex colours, every map dropped.
+    default:        return { bake: true,  keepSurface: false, resize: false, strip: true  };
+  }
+}
+
 function resizeTextures(root, maxSize, pieceId) {
   const seen = new Set();
   root.traverse(o => {
@@ -385,10 +404,18 @@ function Stage({ root, selectedObj, onPickPiece, showCake, placement, ambientInt
 
 function srgbToLinear(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
 
-// Bake the base-color texture into per-vertex colors (sampling at each vertex's
-// UV), then drop the texture. Vertex colors blend smoothly under decimation —
-// unlike Meshy's fragmented UV atlas, which shatters. Returns # meshes baked.
-function bakeVertexColors(root, pieceId) {
+/* Bake the base-color texture into per-vertex colors (sampling at each vertex's UV), then drop the
+ * texture. Vertex colors blend smoothly under decimation — unlike Meshy's fragmented UV atlas,
+ * which shatters. Returns # meshes baked.
+ *
+ * `keepSurface` keeps the UVs and the NORMAL map while still baking the colour. That is the hybrid
+ * mode, and it exists because colour was never the expensive loss: what makes a Meshy figure read as
+ * fondant is the normal map (surface softness) and the AO baked into its shading. Dropping the
+ * albedo — usually the largest file — while keeping the normal map buys most of the weight back and
+ * keeps the grace. The UVs have to survive for a normal map to mean anything, which is why the
+ * delete below is conditional rather than unconditional.
+ */
+function bakeVertexColors(root, pieceId, { keepSurface = false } = {}) {
   let baked = 0;
   root.traverse(o => {
     if (!o.isMesh || !o.userData._origGeo) return;
@@ -447,11 +474,15 @@ function bakeVertexColors(root, pieceId) {
         avgRough = sr / count; avgMetal = sm / count;
       }
     }
-    geo.deleteAttribute('uv'); // UVs are dead weight once color is baked in
+    // UVs are dead weight once colour is baked in — UNLESS a normal map is staying, which is
+    // sampled through them.
+    if (!keepSurface) geo.deleteAttribute('uv');
     const mats = Array.isArray(o.userData._origMat) ? o.userData._origMat : [o.userData._origMat];
     mats.forEach(m => {
       if (!m) return;
+      const keptNormal = keepSurface ? m.normalMap : null;
       m.map = m.normalMap = m.roughnessMap = m.metalnessMap = m.emissiveMap = m.aoMap = null;
+      if (keptNormal) m.normalMap = keptNormal;
       m.vertexColors = true;
       if (m.color) m.color.setRGB(1, 1, 1);
       m.metalness = avgMetal;
@@ -527,6 +558,12 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
   const [flat, setFlat]     = useState({ enabled: false, amount: 0.35, normal: [0, 0, 1], frontSet: false });
   const [smooth, setSmooth] = useState(0.8);
   const [keepOriginal, setKeepOriginal] = useState(false);
+  /* How optimize treats the SURFACE. Three modes, because which one looks right cannot be reasoned
+   * about — it depends on how fragmented the model's UV atlas is, and Meshy's are very.
+   *   'bake'   colour → vertex colours, every map dropped. Smallest, and what shipped.
+   *   'hybrid' colour → vertex colours, but UVs and the NORMAL map survive.
+   *   'texture' nothing baked: keep the maps, decimate UV-aware, downscale to the budget. */
+  const [optMode, setOptMode] = useState('bake');
   const [opt, setOpt]       = useState({ targetTris: 20000 });
   const [optScope, setOptScope] = useState('all'); // 'all' | 'selected'
   const [optMsg, setOptMsg] = useState(null);
@@ -830,9 +867,17 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
     setBusy(true); setOptMsg(null);
     try {
       await MeshoptSimplifier.ready;
-      // bake texture → vertex colors FIRST so decimation blends colors instead
-      // of shattering the fragmented UV atlas.
-      const baked = bakeVertexColors(root, pieceId);
+      /* Bake texture → vertex colours FIRST so decimation blends colours instead of shattering the
+       * fragmented UV atlas — the reason this was unconditional.
+       *
+       * ⚠️ It is a MODE now because that trade is not always right. Baking drops the normal and AO
+       * maps, and on a mostly-white figure those carry nearly all of the shading: the result is
+       * geometrically fine and visibly dull. Colour was never the expensive loss. */
+      const plan = surfacePlan(optMode);
+      const baked = plan.bake ? bakeVertexColors(root, pieceId, { keepSurface: plan.keepSurface }) : 0;
+      // Keeping maps means keeping them within budget: resizeTextures has existed here since the
+      // studio was written and was never called by anything.
+      if (plan.resize) resizeTextures(root, 1024, pieceId);
       // distribute the absolute triangle budget across in-scope meshes by size
       let scopeTotal = 0;
       root.traverse(o => {
@@ -869,9 +914,14 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
         o.userData._origGeo = compactGeometry(geo, simpIndex);
         after += simpIndex.length / 3;
       });
-      // any meshes that weren't baked (no texture) → matte, drop extra maps
+      /* Any meshes that weren't baked (no texture) → matte, drop extra maps.
+       *
+       * ⚠️ SKIPPED ENTIRELY OUTSIDE 'bake'. This pass is the OTHER half of the dullness, and the
+       * less obvious one: it nulls normalMap and aoMap and forces roughness 0.7 on every textured
+       * material it meets. Skipping the bake alone changed nothing visible, because this ran next
+       * and stripped the same maps a moment later. */
       const seenMat = new Set();
-      root.traverse(o => {
+      if (plan.strip) root.traverse(o => {
         if (!o.isMesh) return;
         if (pieceId && o.userData._piece !== pieceId) return;
         const mats = Array.isArray(o.userData._origMat) ? o.userData._origMat : [o.userData._origMat];
@@ -893,7 +943,10 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
       });
       setMeshes(ms => ms.map(m => ({ ...m, tris: Math.round(counts[m.key] ?? m.tris) })));
       applyGeometry(root, flat, smooth, new Set(pieces.filter(p => p.flatten !== false).map(p => p.id)));
-      setOptMsg({ ok: true, text: `${Math.round(before).toLocaleString()} → ${Math.round(after).toLocaleString()} tris${baked ? ' · color baked to vertices' : ''}${pieceId ? ' · this piece' : ''}` });
+      const how = optMode === 'texture' ? ' · texture kept, resized to 1024'
+                : optMode === 'hybrid'  ? ' · color baked, normals kept'
+                : (baked ? ' · color baked to vertices' : '');
+      setOptMsg({ ok: true, text: `${Math.round(before).toLocaleString()} → ${Math.round(after).toLocaleString()} tris${how}${pieceId ? ' · this piece' : ''}` });
       measure();
     } catch (e) {
       setOptMsg({ ok: false, text: `Optimize failed: ${e.message}` });
@@ -1260,8 +1313,25 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
                     <option value="selected">Selected piece only</option>
                   </select>
                 </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#6B8C74', width: 56 }}>Surface</span>
+                  <select value={optMode} onChange={e => setOptMode(e.target.value)} style={s.miniSelect}>
+                    <option value="bake">Bake colour, drop maps (smallest)</option>
+                    <option value="hybrid">Bake colour, keep normals</option>
+                    <option value="texture">Keep the texture (largest)</option>
+                  </select>
+                </div>
                 <button style={s.exportBtn(busy || (optScope === 'selected' && !selectedPiece))} onClick={optimize} disabled={busy || (optScope === 'selected' && !selectedPiece)}>{busy ? 'Optimizing…' : (optScope === 'selected' ? 'Optimize selected' : 'Optimize all')}</button>
-                <div style={s.hint}>Bakes the texture into vertex colors (no shatter on the mane), then decimates. No texture file = lighter. Run once; clear & re-add to redo.</div>
+                {/* One line per mode, saying what it COSTS rather than what it does — the trade is
+                    the whole decision, and the sizes are what the budget above will react to. */}
+                <div style={s.hint}>
+                  {optMode === 'bake'
+                    ? 'Colour into vertex colours, every map dropped (no shatter on the mane), then decimates. Lightest — but the normal and AO maps go, which is most of the soft shading on a pale model.'
+                    : optMode === 'hybrid'
+                      ? 'Colour into vertex colours, but UVs and the NORMAL map survive. Drops the albedo (usually the biggest file) and keeps the surface softness. The middle trade.'
+                      : 'Nothing baked: keeps the maps, decimates UV-aware, downscales textures to 1024. Best looking, heaviest — and a fragmented atlas can tear at low triangle counts, so check the mane.'}
+                  {' '}Run once; clear &amp; re-add to redo.
+                </div>
                 {optMsg && <div style={optMsg.ok ? { ...s.err, background: '#E8F5E9', color: '#2E7D32' } : s.err}>{optMsg.text}</div>}
               </div>
             )}
