@@ -695,8 +695,30 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
     }
   }
 
-  // Embedded handoff: load the file we were opened with as the first (and usually only) piece.
-  useEffect(() => { if (initialFile) addPiece(initialFile); /* eslint-disable-next-line */ }, []);
+  /* Embedded handoff: load the file we were opened with as the first (and usually only) piece.
+   *
+   * ⚠️ GUARDED BY A REF, and it has to be. `main.jsx` wraps the app in <React.StrictMode>, which in
+   * development mounts every component TWICE — so an unguarded effect here called addPiece twice and
+   * the studio opened from Add Element with the SAME GLB imported as two pieces, sitting exactly on
+   * top of each other. It looked like one model, so nothing gave it away except the counts.
+   *
+   * That was not cosmetic. Every number the admin authors against was doubled — triangles, GLB size,
+   * decoded GPU — so the budget warning fired on models that were comfortably inside it, and the
+   * obvious response (bake the texture to vertex colours to save weight) traded away the surface
+   * detail to solve a problem that did not exist. Worse, "Export merged GLB" merges every piece, so
+   * a topper exported from a dev session shipped containing its mesh twice, for good.
+   *
+   * A ref rather than a cleanup: refs survive StrictMode's simulated unmount/remount (same component
+   * instance), so this holds in development and is a no-op in production, where the effect only ever
+   * runs once anyway.
+   */
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !initialFile) return;
+    seeded.current = true;
+    addPiece(initialFile);
+    /* eslint-disable-next-line */
+  }, []);
 
   function removePiece(id) {
     const container = sceneRef.current;
