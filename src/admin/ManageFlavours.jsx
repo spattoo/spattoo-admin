@@ -51,7 +51,12 @@ export default function ManageFlavours({ supabase }) {
   const [busyKey,  setBusyKey]  = useState(null); // `${flavourId}|${key}` while in flight
 
   useEffect(() => {
-    fetchDietaryRequirements().then(setDiet).catch(() => {});
+    // The `egg` row is dropped: it is a CHOICE ("bake the ordinary one"), not a
+    // restriction, so there is nothing a flavour can fail to satisfy — "chocolate can't
+    // be made with egg" is not a claim anyone could act on. Offering the chip would
+    // invite authoring a baseline row that then acts as a hard filter on every
+    // storefront and quietly hides the flavour from anyone who chose egg.
+    fetchDietaryRequirements().then(rows => setDiet((rows ?? []).filter(r => r.key !== 'egg'))).catch(() => {});
     fetchFlavourDietaryConflicts().then(setBaseline).catch(() => {});
   }, []);
 
