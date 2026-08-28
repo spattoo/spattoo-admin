@@ -11,6 +11,12 @@ import { importElements } from '../lib/api.js';
  * primary key, so it is safe in the sense that it cannot duplicate anything — but "safe" and
  * "expected" are different, and "this will overwrite 12 rows you already have" is worth reading
  * before it happens rather than after.
+ *
+ * ONE RULE, not three: Import is live only while a fresh, UNCONSUMED plan for the file now loaded
+ * exists. Everything else falls out of it — choosing a file clears the plan, so does choosing a
+ * different one, and a successful import consumes it. The last of those is what stops a second press
+ * re-running a plan that has already happened, where every "4 new" has quietly become an update and
+ * the screen is still describing the first run.
  */
 export default function ImportElements() {
   const [bundle, setBundle] = useState(null);
@@ -18,6 +24,10 @@ export default function ImportElements() {
   const [plan, setPlan] = useState(null);
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
+  // WHICH of the two is running. It used to be inferred from `plan` — "busy and no plan" meant the
+  // dry run — and that was wrong the second time you pressed Dry run: a plan already existed, so the
+  // label stayed "Dry run" and the screen gave no sign anything was happening.
+  const [mode, setMode] = useState(null);   // 'dry' | 'import' | null
   const [err, setErr] = useState(null);
 
   function reset() {
@@ -41,17 +51,24 @@ export default function ImportElements() {
 
   async function run(dryRun) {
     if (!bundle) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setMode(dryRun ? 'dry' : 'import'); setErr(null);
     try {
       const res = await importElements(bundle, { dryRun });
       if (dryRun) { setPlan(res.plan); setResult(null); }
-      else { setResult(res); }
+      // A successful import CONSUMES the plan. Leaving it set left the button live over a plan that
+      // had already happened — press it again and every "4 new" is now an update, so the second run
+      // did something the screen was still describing as the first. Clearing it puts the button back
+      // behind a dry run, which is the same rule as before the first press rather than a new one.
+      //
+      // A FAILED import deliberately keeps the plan, so a retry after a network blip is one click and
+      // not a re-check of a bundle nothing was written from.
+      else { setResult(res); setPlan(null); }
     } catch (e) {
       // A 409 is the vocabulary collision — same slug, different id. It is the one failure a human
       // has to resolve, so it is shown as-is rather than flattened into "import failed".
       setErr(e?.message ?? 'Import failed');
     } finally {
-      setBusy(false);
+      setBusy(false); setMode(null);
     }
   }
 
@@ -101,15 +118,26 @@ export default function ImportElements() {
       )}
 
       {bundle && (
-        <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-          <button onClick={() => run(true)} disabled={busy} style={s.secondary}>
-            {busy && !plan ? 'Checking…' : 'Dry run'}
+        <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
+          <button onClick={() => run(true)} disabled={busy} style={dim(s.secondary, busy)}>
+            {busy && mode === 'dry' ? 'Checking…' : (plan || result ? 'Dry run again' : 'Dry run')}
           </button>
-          {/* Deliberately gated on a dry run having reported. */}
-          <button onClick={() => run(false)} disabled={busy || !plan} style={s.primary}
-                  title={plan ? '' : 'Run a dry run first'}>
-            {busy && plan ? 'Importing…' : 'Import'}
+          {/* Gated on a dry run having reported, and the gate has to be VISIBLE. `disabled` alone
+              does nothing here: s.primary sets its own background and cursor inline, and an inline
+              style wins over the browser's disabled appearance — so the button looked and felt
+              exactly as clickable as a live one and simply ignored the click. A control that is off
+              must look off, or the only thing it teaches is that the screen is broken. */}
+          <button onClick={() => run(false)} disabled={busy || !plan} style={dim(s.primary, busy || !plan)}
+                  title={plan ? 'Apply the plan shown below'
+                             : result ? 'Already imported — run a dry run to import again'
+                                      : 'Run a dry run first'}>
+            {busy && mode === 'import' ? 'Importing…' : 'Import'}
           </button>
+          <span style={s.hint}>
+            {busy ? '' : plan ? 'Read the plan below, then import.'
+                  : result ? 'Imported. Run a dry run again to import once more.'
+                           : 'Run a dry run to see what this will do.'}
+          </span>
         </div>
       )}
 
@@ -169,6 +197,13 @@ const Row = ({ k, v }) => (
   <div style={s.row}><span>{k}</span><b>{String(v)}</b></div>
 );
 
+// An inline `background` and `cursor` beat the browser's own disabled rendering, so a button styled
+// from this file has to say for itself that it is off. Applied to both, because "the dry run is
+// still running" and "there is no plan to apply" both need to look unavailable rather than ignored.
+const dim = (base, off) => (off
+  ? { ...base, opacity: 0.42, cursor: 'not-allowed', filter: 'saturate(0.6)' }
+  : base);
+
 const s = {
   page: { padding: 24, maxWidth: 620, fontFamily: "'Quicksand',sans-serif", color: '#2C4433' },
   h2: { fontSize: 20, fontWeight: 800, marginBottom: 6 },
@@ -188,6 +223,9 @@ const s = {
     borderWidth: 1.5, borderStyle: 'solid', borderColor: '#C5D4C8', background: '#fff',
   },
   cardTitle: { fontSize: 12, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase', color: '#6B8C74', marginBottom: 8 },
+  // Says WHY the button is off, beside the button. A disabled control with no explanation is a
+  // puzzle, and the title attribute only helps somebody who already suspected there was a rule.
+  hint: { fontSize: 12, color: '#6B8C74', fontWeight: 600, lineHeight: 1.4 },
   row: { display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12.5, padding: '3px 0', color: '#4a6b55' },
   primary: {
     padding: '9px 18px', borderRadius: 10, border: 'none', cursor: 'pointer',

@@ -778,6 +778,11 @@ export default function ManageElements() {
       return JSON.stringify(cur, null, 2);
     });
   }
+  // The read side of patchPc, for a control that renders straight from the JSON rather than from a
+  // mirrored piece of state. Tolerates mid-type invalid JSON by answering undefined.
+  function pcVal(key) {
+    try { return JSON.parse(placementConfig)?.[key]; } catch { return undefined; }
+  }
   // Split a placement_config's per-zone values (string OR { mode, seat, insert }) into the mode +
   // seat + insert control maps. Used by both element-load and JSON-edit sync so they can't drift.
   // `splitZoneValue` promotes the legacy `insert` POSITION (mode:"insert" + shared global insert)
@@ -1315,6 +1320,23 @@ export default function ManageElements() {
     const toggles = [
       { key: 'bottom_y_adjustable',    label: 'User can adjust height' },
       { key: 'bottom_flip_adjustable', label: 'User can flip orientation' },
+      // ── Hand piping ────────────────────────────────────────────────────────────────────────
+      // Whether "I'll pipe it myself" is offered on this element's card — repeating it along a
+      // line the customer draws, instead of round a rim or a board.
+      //
+      // Not every piping element survives that. A wrap band is ONE pre-formed ring and a drip is a
+      // procedural curtain: both are rings by nature, and stamping either along a freehand squiggle
+      // produces something nobody would pipe. A shell or a rosette repeats happily. That judgement
+      // is per-element and belongs to whoever calibrated it, which is why it is a checkbox here
+      // rather than a rule in the designer.
+      //
+      // NOT one of the *_arrangements_allowed lists, deliberately: those are per-zone (rim vs
+      // board) and hand piping has no zone, so putting it there would pose the question "can you
+      // hand-pipe this on the board?", which is not a real question.
+      //
+      // Absent means OFF. An element that has never been considered does not get the feature by
+      // default — see the designer's gate.
+      { key: 'hand_piping', label: 'Allow hand piping (draw it on freehand)' },
       ...(isPattern ? [] : [{ key: 'pattern_only', label: 'Pattern-only (hide as individual)' }]),
     ];
     const updatePc = (patch) => {
@@ -1669,6 +1691,33 @@ export default function ManageElements() {
                         <span style={s.checkLabel}>{z.label}</span>
                       </label>
                     ))}
+
+                    {/* ── Ready-made ────────────────────────────────────────────────────────────
+                        Not a customer capability like the rest of this list — it is about the
+                        BAKER. A faux ball, a bought topper, a candle: these come from a supply
+                        shop, and an X-Ray sheet that explains how to roll a faux ball is telling
+                        somebody to do work that does not exist.
+                        Default OFF, i.e. everything has a guide, which is the OPPOSITE default to
+                        "Allow hand piping" and for the same reason: the absent value has to be the
+                        harmless one. Off-by-default there means a feature nobody gets until it is
+                        enabled; off-by-default here means nothing loses a guide it already had.
+                        Lives in placement_config, and the guide endpoint filters on it — so ticking
+                        this hides the how-to on orders ALREADY PLACED too. That is honest: the ball
+                        was always bought. */}
+                    <label style={{ ...s.checkRow, alignItems: 'flex-start', cursor: 'pointer' }}>
+                      <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
+                        checked={!!pcVal('ready_made')}
+                        /* '' rather than false — patchPc removes a key on '', so unticking leaves
+                           the config clean instead of carrying `ready_made: false` forever. */
+                        onChange={e => patchPc({ ready_made: e.target.checked || '' })} />
+                      <div>
+                        <div style={s.checkLabel}>Ready-made — no how-to guide</div>
+                        <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                          Bought from a supply shop rather than made: faux balls, ready toppers,
+                          candles. Keeps it off the X-Ray sheet&rsquo;s &ldquo;how to make them&rdquo;.
+                        </div>
+                      </div>
+                    </label>
                   </div>
                 </div>
 
