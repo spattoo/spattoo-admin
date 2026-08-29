@@ -80,6 +80,7 @@ export default function ImportElements() {
     element_tags: bundle.element_tags?.length ?? 0,
     element_craft_guide: bundle.element_craft_guide?.length ?? 0,
     element_categories: bundle.element_categories?.length ?? 0,
+    cake_shapes: bundle.cake_shapes?.length ?? 0,
     assets: bundle.assets?.length ?? 0,
   };
 
@@ -108,6 +109,14 @@ export default function ImportElements() {
               findable by typing its name — so it is exactly the line you want to read before
               importing, not the one to leave out. */}
           <Row k="Categories" v={counts.element_categories} />
+          {/* ⚠️ SAME OMISSION AS CATEGORIES, and a quieter failure. A template names its shape by
+              KEY, and `cakeShapeDef` deliberately falls back to ROUND for a key it does not know
+              ("a design whose shape row was deactivated must still show a cake") — so a template
+              promoted WITHOUT its shape renders as a plain round cake. Nothing thrown, nothing
+              logged, and it looks like a cake. The backend has carried and planned these all
+              along; only the two panels were silent, which made the dry run unable to answer the
+              one question worth asking before promoting a new shape. */}
+          {counts.cake_shapes > 0 && <Row k="Cake shapes" v={counts.cake_shapes} />}
           <Row k="Tags" v={counts.tags} />
           <Row k="Tag links" v={counts.element_tags} />
           <Row k="Craft guides" v={counts.element_craft_guide} />
@@ -156,6 +165,16 @@ export default function ImportElements() {
               has no such key. */}
           {plan.element_categories && (
             <Row k="Categories"  v={`${plan.element_categories.create} new, ${plan.element_categories.reused} reused`} />
+          )}
+          {/* ⚠️ THE LINE TO READ BEFORE PROMOTING A NEW SHAPE. `reused`, not `updated`: a shape is
+              matched by KEY and an existing one is joined rather than rewritten, so an environment
+              that already has `round` shows it as reused and only a genuinely new shape counts as
+              new. Rendered whenever the plan carries the key — including at 0 new, 0 reused, which
+              is itself the answer to "did my template bring its shape?" and the case a
+              `> 0` guard would hide. Guarded only for an older backend whose plan has no such
+              key. */}
+          {plan.cake_shapes && (
+            <Row k="Cake shapes" v={`${plan.cake_shapes.create} new, ${plan.cake_shapes.reused} reused`} />
           )}
           <Row k="Tags"          v={`${plan.tags.create} new, ${plan.tags.update} updated`} />
           <Row k="Elements"      v={`${plan.elements.create} new, ${plan.elements.update} updated`} />
