@@ -152,10 +152,21 @@ async function session() {
 // gate describes whatever state that process is in, which is how a stale Vite cache went unnoticed
 // for eleven days.
 //
+// ⚠️ AND ITS OWN PORT HAS TO BE A PORT NOTHING ELSE WANTS. This defaulted to 5173 — which is Vite's
+// default, and therefore the one port every other dev server on the machine has already taken. It
+// runs with --strictPort (deliberately: falling through to 5174 would silently smoke whatever is on
+// it), so a colleague's dev server does not make this gate wait, it makes it FAIL: vite exits 1 and
+// the commit is refused with "A screen in this commit does not open" — over a codebase where every
+// screen opens fine. It blocked a release, and the message sent whoever hit it looking for a broken
+// screen rather than at the port.
+//
+// 5199 is far enough up the range that nothing defaults there. The comment above says "its own
+// port"; this is the number that makes that true.
+//
 // Overridable, because "its own" is not the only constraint: an auth provider allowlists redirect
 // URLs by ORIGIN, so a sign-in can only complete on a port somebody has registered.
 //   SMOKE_PORT=5173 npm run check:smoke -- --login
-const PORT = Number(E.SMOKE_PORT ?? process.env.SMOKE_PORT ?? 5173);
+const PORT = Number(E.SMOKE_PORT ?? process.env.SMOKE_PORT ?? 5199);
 const AUTH_KEY = 'spattoo-admin-auth';   // the key src/lib/supabase.js stores its session under
 function serve() {
   const p = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
