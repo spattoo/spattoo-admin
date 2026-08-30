@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { toCreasedNormals, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { toCreasedNormals, mergeVertices, deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 import { measureGlbRoot, evaluateCaps, deriveAssetClass, measureForSave, toStatColumns, ASSET_CLASSES, CAPS } from '../lib/glb.js';
@@ -690,6 +690,31 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
       const newList = [];
       scene.traverse(o => {
         if (!o.isMesh) return;
+        /* ── DE-INTERLEAVE ON THE WAY IN ──────────────────────────────────────────────────────
+         *
+         * A glTF may pack POSITION, NORMAL and TEXCOORD_0 into ONE bufferView with a byteStride —
+         * glTF-Transform does it by default, and every meshopt-compressed model arrives that way.
+         * three.js then hands back an InterleavedBufferAttribute whose `.array` is the WHOLE shared
+         * buffer, not a tight list of positions.
+         *
+         * Every pass below reaches for `.array` directly:
+         *
+         *     const positions = geo.attributes.position.array;
+         *     MeshoptSimplifier.simplifyWithAttributes(index, positions, 3, …)
+         *
+         * On an interleaved model at stride 32 that buffer holds 8 floats per vertex, so at stride
+         * 3 the simplifier reads 19,936 "vertices" out of a mesh that has 7,476 while the index
+         * references up to 7,475 — and it dies as `Assertion failed`, with nothing naming the
+         * cause. Shell Fan is exactly that file.
+         *
+         * De-interleaving once, HERE, fixes every pass at the same time rather than teaching each
+         * one to handle both layouts. spattoo-core's festoon.js reached the same conclusion by a
+         * different route: "reading every vertex through a Vector3 de-normalises it … fully
+         * isolating us from how the GLB encodes its attributes".
+         *
+         * A model that is already tightly packed is untouched — deinterleaveGeometry only rewrites
+         * attributes that are interleaved. */
+        deinterleaveGeometry(o.geometry);
         o.userData._origGeo = o.geometry.clone();
         o.userData._origMat = o.material;
         o.userData._key = `m${meshSeq.current++}`;
