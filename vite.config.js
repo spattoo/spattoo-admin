@@ -44,7 +44,15 @@ export default defineConfig({
     react(),
     snapshotSaver(),
     ...(sentryAuthToken
-      ? [sentryVitePlugin({ org: 'feelingsflavours', project: 'spattoo-admin', authToken: sentryAuthToken })]
+      ? [sentryVitePlugin({
+          org: 'feelingsflavours', project: 'spattoo-admin', authToken: sentryAuthToken,
+          /* ⚠️ UPLOAD THE MAPS, THEN DELETE THEM FROM THE DEPLOY. Without this the build emitted 63
+             .map files — 15.1 MB — straight into dist/, and nothing removed them. The largest,
+             index-*.js.map at 11 MB, carried 223 spattoo-core source files with their ORIGINAL text,
+             comments included. Anyone who guessed the URL could download the designer.
+             Sentry still gets readable stack traces: it has the maps, the browser does not. */
+          sourcemaps: { filesToDeleteAfterUpload: ['dist/**/*.map'] },
+        })]
       : []),
   ],
   build: { sourcemap: !!sentryAuthToken },   // emit maps only when we'll upload them

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { toCreasedNormals, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { toCreasedNormals, mergeVertices, deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
 import { measureGlbRoot, evaluateCaps, deriveAssetClass, measureForSave, toStatColumns, ASSET_CLASSES, CAPS } from '../lib/glb.js';
@@ -690,6 +690,31 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
       const newList = [];
       scene.traverse(o => {
         if (!o.isMesh) return;
+        /* ── DE-INTERLEAVE ON THE WAY IN ──────────────────────────────────────────────────────
+         *
+         * A glTF may pack POSITION, NORMAL and TEXCOORD_0 into ONE bufferView with a byteStride —
+         * glTF-Transform does it by default, and every meshopt-compressed model arrives that way.
+         * three.js then hands back an InterleavedBufferAttribute whose `.array` is the WHOLE shared
+         * buffer, not a tight list of positions.
+         *
+         * Every pass below reaches for `.array` directly:
+         *
+         *     const positions = geo.attributes.position.array;
+         *     MeshoptSimplifier.simplifyWithAttributes(index, positions, 3, …)
+         *
+         * On an interleaved model at stride 32 that buffer holds 8 floats per vertex, so at stride
+         * 3 the simplifier reads 19,936 "vertices" out of a mesh that has 7,476 while the index
+         * references up to 7,475 — and it dies as `Assertion failed`, with nothing naming the
+         * cause. Shell Fan is exactly that file.
+         *
+         * De-interleaving once, HERE, fixes every pass at the same time rather than teaching each
+         * one to handle both layouts. spattoo-core's festoon.js reached the same conclusion by a
+         * different route: "reading every vertex through a Vector3 de-normalises it … fully
+         * isolating us from how the GLB encodes its attributes".
+         *
+         * A model that is already tightly packed is untouched — deinterleaveGeometry only rewrites
+         * attributes that are interleaved. */
+        deinterleaveGeometry(o.geometry);
         o.userData._origGeo = o.geometry.clone();
         o.userData._origMat = o.material;
         o.userData._key = `m${meshSeq.current++}`;
@@ -1302,7 +1327,11 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
                 <div style={s.sectionTitle}>Optimize (reduce size)</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#6B8C74', width: 56 }}>Target</span>
-                  <input type="range" min={3000} max={60000} step={1000} value={opt.targetTris} onChange={e => setOpt(o => ({ ...o, targetTris: +e.target.value }))} style={{ flex: 1, accentColor: '#3D5A44' }} />
+                  {/* Ceiling from the CAP, not a second number. It was hardcoded at 60,000 while
+                      the Topper class is judged against 75,000 — so the slider could not reach the
+                      budget the rows beside it were measuring, and a 641k-triangle doll could not be
+                      brought to its own class limit in one pass. Derived, so a cap change carries. */}
+                  <input type="range" min={3000} max={CAPS.topper.tris} step={1000} value={opt.targetTris} onChange={e => setOpt(o => ({ ...o, targetTris: +e.target.value }))} style={{ flex: 1, accentColor: '#3D5A44' }} />
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44', minWidth: 80, textAlign: 'right' }}>≈ {opt.targetTris.toLocaleString()} tris</span>
                 </div>
                 <div style={{ fontSize: 11, color: '#9BB5A2', fontWeight: 600, marginBottom: 10 }}>Absolute triangle budget (works for any input size). <b>~15–25k</b> keeps faces crisp at ~1–2 MB.</div>
