@@ -1327,7 +1327,11 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
                 <div style={s.sectionTitle}>Optimize (reduce size)</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#6B8C74', width: 56 }}>Target</span>
-                  <input type="range" min={3000} max={60000} step={1000} value={opt.targetTris} onChange={e => setOpt(o => ({ ...o, targetTris: +e.target.value }))} style={{ flex: 1, accentColor: '#3D5A44' }} />
+                  {/* Ceiling from the CAP, not a second number. It was hardcoded at 60,000 while
+                      the Topper class is judged against 75,000 — so the slider could not reach the
+                      budget the rows beside it were measuring, and a 641k-triangle doll could not be
+                      brought to its own class limit in one pass. Derived, so a cap change carries. */}
+                  <input type="range" min={3000} max={CAPS.topper.tris} step={1000} value={opt.targetTris} onChange={e => setOpt(o => ({ ...o, targetTris: +e.target.value }))} style={{ flex: 1, accentColor: '#3D5A44' }} />
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44', minWidth: 80, textAlign: 'right' }}>≈ {opt.targetTris.toLocaleString()} tris</span>
                 </div>
                 <div style={{ fontSize: 11, color: '#9BB5A2', fontWeight: 600, marginBottom: 10 }}>Absolute triangle budget (works for any input size). <b>~15–25k</b> keeps faces crisp at ~1–2 MB.</div>
