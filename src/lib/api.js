@@ -97,6 +97,21 @@ export async function fetchElementTypes() {
   return get('/api/element-types');
 }
 
+// ── Chocolate garnishes bakers have kept ───────────────────────────────────────
+// ⚠️ CROSSES THE TENANT FENCE, which every other garnish endpoint holds. An author curating the
+// catalogue has to see what bakers have drawn, so this one is gated on `catalog:admin` server-side
+// and must never be reachable from the baker app.
+export async function fetchAllGarnishes() {
+  return get('/api/admin/garnishes');
+}
+
+// ⚠️ PUBLICATION. This puts a baker's own drawing in front of every bakery on the platform, and the
+// copy it creates is DETACHED — withdrawing it later means deactivating the catalogue element, not
+// deleting the baker's piece. See the route in spattoo-api for why they are not linked.
+export async function publishGarnish(id, body) {
+  return post(`/api/garnishes/${id}/publish`, body);
+}
+
 // ── Browsing categories (migration 065) ────────────────────────────────────────
 // What a decoration IS, as opposed to element-types, which is how it behaves. The ADMIN list, not
 // the customer one: it includes empty and retired categories, because an element has to be

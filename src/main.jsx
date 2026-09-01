@@ -35,6 +35,7 @@ const BuildFromInspiration = lazy(() => import('./admin/BuildFromInspiration.jsx
 const ExtractElements   = lazy(() => import('./admin/ExtractElements.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
+const PublishGarnishes = lazy(() => import('./admin/PublishGarnishes.jsx'));
 const ElementCategories = lazy(() => import('./admin/ElementCategories.jsx'));
 const PolygonCutter     = lazy(() => import('./admin/PolygonCutter.jsx'));
 const ImportElements   = lazy(() => import('./admin/ImportElements.jsx'));
@@ -86,6 +87,7 @@ const ROUTES = {
   '/templates':           ManageTemplates,
   '/elements/add':        AddElement,
   '/elements/manage':     ManageElements,
+  '/elements/garnishes':  PublishGarnishes,
   '/elements/categories': ElementCategories,
   '/elements/polygon':    PolygonCutter,
   '/elements/import':     ImportElements,
@@ -141,6 +143,7 @@ const NAV_GROUPS = [
   { title: 'Elements', items: [
     { href: '/elements/add',    label: 'Add Element' },
     { href: '/elements/manage', label: 'Manage Elements' },
+    { href: '/elements/garnishes', label: 'Publish Garnishes' },
     // "Bundle", not "Elements": the same route takes a TEMPLATE bundle too, because a template
     // export is an element bundle plus the templates — the cake needs its elements to exist or it
     // renders as gaps. Named for elements, it read as the wrong door and templates looked unimportable.
