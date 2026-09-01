@@ -45,9 +45,15 @@ import {
  * Reuses createGlobalElement + uploadThumbnail, not a parallel element-creation path.
  */
 
-const TOPPER_ZONES   = ['top_surface'];
+/* ⚠️ BOTH zones, and the second one was missing.
+ *
+ * This was written when acrylic only stood on the top, and it kept saying so after the side pose
+ * existed — so a row authored here declared top-only and the side was simply not offered, for a
+ * piece that renders there perfectly well. The two are one object with two poses: upright on the
+ * top, flat against the wall. Legs and the bar follow the pose, not the zone name. */
+const TOPPER_ZONES   = ['top_surface', 'side'];
 const TOPPER_ACTIONS = { resize: true, duplicate: false, color: true, gradient: false, delete: true, move: true, tilt: false };
-const PLACEMENT      = { top_surface: 'stand' };
+const PLACEMENT      = { top_surface: 'stand', side: 'hug' };
 
 // A 6-inch cake, so every number on the panel is a real millimetre rather than a scene unit. Both
 // questions above are questions about millimetres and scene units answer neither.
