@@ -58,6 +58,8 @@ const PLACEMENT      = { top_surface: 'stand', side: 'hug' };
 // A 6-inch cake, so every number on the panel is a real millimetre rather than a scene unit. Both
 // questions above are questions about millimetres and scene units answer neither.
 const CAKE_R = 1.6, CAKE_H = 0.55;
+// The tile is square, so the thumbnail camera fits to a 1:1 frame whatever shape the stage is.
+const ASPECT = 1;
 const MM = (6 * 25.4) / (CAKE_R * 2);
 const mm = (u) => `${(u * MM).toFixed(1)}mm`;
 
@@ -208,6 +210,7 @@ export default function AcrylicTopperStudio() {
   const [typeId, setTypeId] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [thumbView, setThumbView] = useState(false);
   const glRef = useRef(null);
 
   const set = (k) => (v) => setCfg(c => ({ ...c, [k]: v }));
@@ -218,6 +221,39 @@ export default function AcrylicTopperStudio() {
 
   const span = cfg.span * size;
   const shown = useMemo(() => buildTopper(font, sample, cfg, span), [font, sample, cfg, span]);
+
+  /* ── Framing for the tile ───────────────────────────────────────────────────────────────────────
+   *
+   * ⚠️ The first thumbnail was the whole studio canvas: pale gold lettering, small, on a near-white
+   * background with a white cake under it. Beside two artwork tiles it read as a blank card — the
+   * word was there and could not be made out at 100px.
+   *
+   * So the tile is FRAMED ON THE WORD, from the word's own bounds rather than a guessed distance —
+   * a name and a stacked phrase are wildly different shapes and one fixed camera cannot suit both.
+   * The 1.25 is breathing room, and the vertical extent is compared against the horizontal divided
+   * by the aspect so a tall stacked phrase is fitted by its HEIGHT rather than cropped.
+   */
+  const shot = useMemo(() => {
+    const fallback = { centre: [0, 0.9, 0], dist: 4.4 };
+    if (!shown?.parts?.length) return fallback;
+    const xs = shown.parts.flatMap(p => p.outer.map(q => q.x));
+    const ys = shown.parts.flatMap(p => p.outer.map(q => q.y));
+    if (!xs.length) return fallback;
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    // Topper is drawn in its own XY plane and lifted by the same `foot` the mesh uses, so the
+    // centre has to be lifted with it or the camera aims at the cake instead of the word.
+    const lowest = Math.min(...shown.parts.flatMap(p => p.outer.map(q => q.y)));
+    const foot = shown.t.legs.length ? lowest + Math.min(cfg.bury, cfg.legLen) : shown.t.baselineY;
+    const w = Math.max(0.01, maxX - minX), h = Math.max(0.01, maxY - minY);
+    const fov = 32 * Math.PI / 180;
+    // Whichever of width and height needs the camera further back wins.
+    const need = Math.max(h, w / ASPECT) * 1.25;
+    return {
+      centre: [(minX + maxX) / 2, CAKE_H - foot + (minY + maxY) / 2, 0],
+      dist: (need / 2) / Math.tan(fov / 2),
+    };
+  }, [shown, cfg.bury, cfg.legLen]);
 
   /* ⚠️ Checked on BOTH samples, at the authored size — not on whatever happens to be on screen.
    *
@@ -251,6 +287,13 @@ export default function AcrylicTopperStudio() {
     if (!name.trim()) return setMsg({ ok: false, text: 'Give it a name.' });
     if (!typeId)      return setMsg({ ok: false, text: 'Pick an element type.' });
     if (!cfg.finishes.length) return setMsg({ ok: false, text: 'Offer at least one finish.' });
+    /* ⚠️ Refuses from the scene view, deliberately — the first row authored here shipped a tile
+     * nobody could read: pale gold, small, on near-white, with a white cake taking most of the
+     * frame. Capturing whatever happens to be on screen is what produced it. Switching is one
+     * click and it puts the actual tile in front of the author before it is written. */
+    if (!thumbView) {
+      return setMsg({ ok: false, text: 'Switch to the thumbnail view first — that picture becomes the tile.' });
+    }
     setSaving(true); setMsg(null);
     try {
       // The thumbnail is the preview itself, so the picker shows exactly what was authored. Canvas is
@@ -272,6 +315,19 @@ export default function AcrylicTopperStudio() {
         sort_order: 0,
         placement_config: {
           ...PLACEMENT,
+          /* ⚠️ WITHOUT THIS THE ELEMENT ADDS NOTHING, and does it silently.
+           *
+           * The designer routes a catalogue click through PROCEDURAL_TOOLS, keyed on exactly this
+           * field. With no key it falls past that branch and is added as an ordinary sticker — and
+           * an acrylic row carries `image_url: null` on purpose, because the word is cut at render
+           * time rather than stored as a picture. So the cake got a selection box with nothing
+           * inside it: a decoration that exists, can be moved, resized and removed, and cannot be
+           * seen. The first row ever authored landed exactly there.
+           *
+           * `writing`, not `acrylic` — the routing key names WHAT IS ADDED, not what it is made of.
+           * A message is what goes on the cake; acrylic is the Look, and `acrylic` below carries it.
+           * Cream writing and this reach the same handler for that reason. */
+          procedural: 'writing',
           r: cfg.span,
           scale: cfg.scale,
           acrylic: {
@@ -430,6 +486,12 @@ export default function AcrylicTopperStudio() {
           </div>
         ))}
 
+        {/* Beside the save, because it is a step in saving — see the guard in save(). */}
+        <button style={{ ...s.save, marginTop: 12, background: thumbView ? '#2C4433' : '#fff',
+                         color: thumbView ? '#fff' : '#2C4433', border: '1.5px solid #2C4433' }}
+                onClick={() => setThumbView(v => !v)}>
+          {thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+        </button>
         <button style={{ ...s.save, marginTop: 8, background: blocked ? '#c9c4bc' : '#3D5A44',
                          cursor: blocked || saving ? 'not-allowed' : 'pointer' }}
                 disabled={blocked || saving} onClick={save}>
@@ -440,16 +502,23 @@ export default function AcrylicTopperStudio() {
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <Canvas shadows camera={{ position: [0, 1.95, 6.2], fov: 32 }}
+        {/* Keyed on the view, because a Canvas takes its camera on MOUNT ONLY — remounting is the
+            honest way to move it, and a studio can afford it. Same as Rainbow and Letter Blocks. */}
+        <Canvas key={thumbView ? 'thumb' : 'scene'} shadows
+                camera={thumbView
+                  ? { position: [shot.centre[0], shot.centre[1], shot.centre[2] + shot.dist], fov: 32 }
+                  : { position: [0, 1.95, 6.2], fov: 32 }}
                 gl={{ preserveDrawingBuffer: true }}
                 onCreated={({ gl }) => { glRef.current = gl; }}>
-          <color attach="background" args={['#EDEAE3']} />
+          <color attach="background" args={[thumbView ? '#FFFFFF' : '#EDEAE3']} />
           <ambientLight intensity={0.5} />
           <directionalLight position={[3, 6, 4]} intensity={1.1} castShadow />
           <LocalEnv />
-          <Cake />
+          {/* No cake in the tile. The scene view answers "does this sit right on a cake"; the tile
+              answers "which topper is this", and at 100px the cake is most of the picture. */}
+          {!thumbView && <Cake />}
           <Topper build={shown} cfg={cfg} finish={finish} />
-          <OrbitControls target={[0, 0.9, 0]} />
+          <OrbitControls target={thumbView ? shot.centre : [0, 0.9, 0]} enablePan={!thumbView} />
         </Canvas>
       </div>
     </div>
