@@ -414,6 +414,14 @@ export async function fetchAdminBakers() {
   return get('/api/admin/bakers');
 }
 
+// Storefront visits per baker over a window, from our OWN counter (storefront_views) rather than
+// Google Analytics — so the counts are exact and a zero is a real zero. Returns every active baker
+// including those with no visits at all, which is the point: a dormant storefront has no rows, so
+// anything reading the views table alone would omit exactly the bakers this is opened to find.
+export async function getStorefrontUsage(days = 30) {
+  return get(`/api/admin/storefront-usage?days=${encodeURIComponent(days)}`);
+}
+
 export async function createPattern(payload) {
   return post('/api/admin/patterns', payload);
 }
