@@ -45,6 +45,7 @@ const ManageTags            = lazy(() => import('./admin/ManageTags.jsx'));
 const ManageNozzles         = lazy(() => import('./admin/ManageNozzles.jsx'));
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
 const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
+const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
 const PatternBuilder        = lazy(() => import('./admin/PatternBuilder.jsx'));
 const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'));
 const PerchCalibrator       = lazy(() => import('./admin/PerchCalibrator.jsx'));
@@ -105,6 +106,7 @@ const ROUTES = {
   '/bakers/onboard':      OnboardBaker,
   '/bakers/subscriptions': BakerSubscriptions,
   '/bakers/storefront-usage': StorefrontUsage,
+  '/admin/legal':         LegalVersions,
   '/flavours':            ManageFlavours,
   '/plans':               ManagePlans,
   '/pattern-builder':     PatternBuilder,
@@ -202,6 +204,7 @@ const NAV_GROUPS = [
   ] },
   { title: 'Access', items: [
     { href: '/admin/roles', label: 'Roles & Capabilities' },
+    { href: '/admin/legal', label: 'Legal Versions' },
   ] },
 ];
 

@@ -422,6 +422,29 @@ export async function getStorefrontUsage(days = 30) {
   return get(`/api/admin/storefront-usage?days=${encodeURIComponent(days)}`);
 }
 
+// ── Legal document publishing ─────────────────────────────────────────────────
+// What the marketing site serves vs what is frozen in legal_document_versions. The API fetches the
+// site's canonical text server-side, so nothing is retyped here and the text that gets frozen is
+// byte-identical to the text a reader saw.
+export async function getLegalPreview(doc) {
+  return get(`/api/admin/legal/preview?doc=${encodeURIComponent(doc)}`);
+}
+
+// Freezes EXACTLY the bytes the preview returned — never anything composed in the browser. Immutable
+// per (doc_key, version): re-posting the same version with different text is rejected with a 409,
+// and re-posting identical text is idempotent.
+export async function publishLegalVersion({ docKey, version, effectiveAt, content, contentHash }) {
+  return post('/api/admin/legal/versions', {
+    doc_key: docKey,
+    version,
+    effective_at: effectiveAt,
+    content,
+    // Sent so the server recomputes and REJECTS on mismatch — a guard against anything mangling the
+    // text between preview and publish (an encoding slip, a truncated body).
+    content_hash: contentHash,
+  });
+}
+
 export async function createPattern(payload) {
   return post('/api/admin/patterns', payload);
 }
