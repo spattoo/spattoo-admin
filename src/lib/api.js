@@ -97,6 +97,21 @@ export async function fetchElementTypes() {
   return get('/api/element-types');
 }
 
+// ── Chocolate garnishes bakers have kept ───────────────────────────────────────
+// ⚠️ CROSSES THE TENANT FENCE, which every other garnish endpoint holds. An author curating the
+// catalogue has to see what bakers have drawn, so this one is gated on `catalog:admin` server-side
+// and must never be reachable from the baker app.
+export async function fetchAllGarnishes() {
+  return get('/api/admin/garnishes');
+}
+
+// ⚠️ PUBLICATION. This puts a baker's own drawing in front of every bakery on the platform, and the
+// copy it creates is DETACHED — withdrawing it later means deactivating the catalogue element, not
+// deleting the baker's piece. See the route in spattoo-api for why they are not linked.
+export async function publishGarnish(id, body) {
+  return post(`/api/garnishes/${id}/publish`, body);
+}
+
 // ── Browsing categories (migration 065) ────────────────────────────────────────
 // What a decoration IS, as opposed to element-types, which is how it behaves. The ADMIN list, not
 // the customer one: it includes empty and retired categories, because an element has to be
@@ -397,6 +412,37 @@ export async function createBaker(payload) {
 
 export async function fetchAdminBakers() {
   return get('/api/admin/bakers');
+}
+
+// Storefront visits per baker over a window, from our OWN counter (storefront_views) rather than
+// Google Analytics — so the counts are exact and a zero is a real zero. Returns every active baker
+// including those with no visits at all, which is the point: a dormant storefront has no rows, so
+// anything reading the views table alone would omit exactly the bakers this is opened to find.
+export async function getStorefrontUsage(days = 30) {
+  return get(`/api/admin/storefront-usage?days=${encodeURIComponent(days)}`);
+}
+
+// ── Legal document publishing ─────────────────────────────────────────────────
+// What the marketing site serves vs what is frozen in legal_document_versions. The API fetches the
+// site's canonical text server-side, so nothing is retyped here and the text that gets frozen is
+// byte-identical to the text a reader saw.
+export async function getLegalPreview(doc) {
+  return get(`/api/admin/legal/preview?doc=${encodeURIComponent(doc)}`);
+}
+
+// Freezes EXACTLY the bytes the preview returned — never anything composed in the browser. Immutable
+// per (doc_key, version): re-posting the same version with different text is rejected with a 409,
+// and re-posting identical text is idempotent.
+export async function publishLegalVersion({ docKey, version, effectiveAt, content, contentHash }) {
+  return post('/api/admin/legal/versions', {
+    doc_key: docKey,
+    version,
+    effective_at: effectiveAt,
+    content,
+    // Sent so the server recomputes and REJECTS on mismatch — a guard against anything mangling the
+    // text between preview and publish (an encoding slip, a truncated body).
+    content_hash: contentHash,
+  });
 }
 
 export async function createPattern(payload) {

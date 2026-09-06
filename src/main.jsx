@@ -35,6 +35,7 @@ const BuildFromInspiration = lazy(() => import('./admin/BuildFromInspiration.jsx
 const ExtractElements   = lazy(() => import('./admin/ExtractElements.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
 const ManageElements   = lazy(() => import('./admin/ManageElements.jsx'));
+const PublishGarnishes = lazy(() => import('./admin/PublishGarnishes.jsx'));
 const ElementCategories = lazy(() => import('./admin/ElementCategories.jsx'));
 const PolygonCutter     = lazy(() => import('./admin/PolygonCutter.jsx'));
 const ImportElements   = lazy(() => import('./admin/ImportElements.jsx'));
@@ -43,6 +44,8 @@ const ManagePlans           = lazy(() => import('./admin/ManagePlans.jsx'));
 const ManageTags            = lazy(() => import('./admin/ManageTags.jsx'));
 const ManageNozzles         = lazy(() => import('./admin/ManageNozzles.jsx'));
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
+const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
+const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
 const PatternBuilder        = lazy(() => import('./admin/PatternBuilder.jsx'));
 const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'));
 const PerchCalibrator       = lazy(() => import('./admin/PerchCalibrator.jsx'));
@@ -67,6 +70,7 @@ const LusterDustStudio      = lazy(() => import('./admin/LusterDustStudio.jsx'))
 const MaterialStyles        = lazy(() => import('./admin/MaterialStyles.jsx'));
 const ReliefStickerStudio   = lazy(() => import('./admin/ReliefStickerStudio.jsx'));
 const TextTopperStudio      = lazy(() => import('./admin/TextTopperStudio.jsx'));
+const AcrylicTopperStudio   = lazy(() => import('./admin/AcrylicTopperStudio.jsx'));
 const CakeShapeStudio       = lazy(() => import('./admin/CakeShapeStudio.jsx'));
 const IsomaltStudio         = lazy(() => import('./admin/IsomaltStudio.jsx'));
 const TopperSwapStudio      = lazy(() => import('./admin/TopperSwapStudio.jsx'));
@@ -85,6 +89,7 @@ const ROUTES = {
   '/templates':           ManageTemplates,
   '/elements/add':        AddElement,
   '/elements/manage':     ManageElements,
+  '/elements/garnishes':  PublishGarnishes,
   '/elements/categories': ElementCategories,
   '/elements/polygon':    PolygonCutter,
   '/elements/import':     ImportElements,
@@ -100,6 +105,8 @@ const ROUTES = {
   '/elements/nozzles':    ManageNozzles,
   '/bakers/onboard':      OnboardBaker,
   '/bakers/subscriptions': BakerSubscriptions,
+  '/bakers/storefront-usage': StorefrontUsage,
+  '/admin/legal':         LegalVersions,
   '/flavours':            ManageFlavours,
   '/plans':               ManagePlans,
   '/pattern-builder':     PatternBuilder,
@@ -109,6 +116,7 @@ const ROUTES = {
   '/elements/folded-sticker':    ButterflyStudio,
   '/elements/photo-frame':       PhotoFrameStudio,
   '/elements/text-topper':       TextTopperStudio,
+  '/elements/acrylic-topper':    AcrylicTopperStudio,
   '/elements/topper-swap':       TopperSwapStudio,
   '/elements/cake-shapes':       CakeShapeStudio,
   '/elements/recolor-tester':    RecolorTester,
@@ -139,6 +147,7 @@ const NAV_GROUPS = [
   { title: 'Elements', items: [
     { href: '/elements/add',    label: 'Add Element' },
     { href: '/elements/manage', label: 'Manage Elements' },
+    { href: '/elements/garnishes', label: 'Publish Garnishes' },
     // "Bundle", not "Elements": the same route takes a TEMPLATE bundle too, because a template
     // export is an element bundle plus the templates — the cake needs its elements to exist or it
     // renders as gaps. Named for elements, it read as the wrong door and templates looked unimportable.
@@ -175,6 +184,7 @@ const NAV_GROUPS = [
     { href: '/elements/folded-sticker', label: 'Folded Butterfly' },
     { href: '/elements/photo-frame',    label: 'Photo Frame Studio' },
     { href: '/elements/text-topper',    label: 'Text Topper Studio' },
+    { href: '/elements/acrylic-topper', label: 'Acrylic Topper Studio' },
     { href: '/elements/topper-swap',    label: 'Topper Swap Studio' },
     { href: '/elements/cake-shapes',    label: 'Cake Shape Studio' },
     { href: '/elements/relief-sticker', label: 'Relief Sticker Studio' },
@@ -185,6 +195,7 @@ const NAV_GROUPS = [
   { title: 'Baker', items: [
     { href: '/bakers/onboard',       label: 'Onboard Baker' },
     { href: '/bakers/subscriptions', label: 'Baker Subscriptions' },
+    { href: '/bakers/storefront-usage', label: 'Storefront Usage' },
     { href: '/plans',                label: 'Subscription Plans' },
   ] },
   { title: 'Others', items: [
@@ -193,6 +204,7 @@ const NAV_GROUPS = [
   ] },
   { title: 'Access', items: [
     { href: '/admin/roles', label: 'Roles & Capabilities' },
+    { href: '/admin/legal', label: 'Legal Versions' },
   ] },
 ];
 
