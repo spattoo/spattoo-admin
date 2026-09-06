@@ -25,6 +25,7 @@ const CreateTemplate = lazy(() =>
 const AddElement       = lazy(() => import('./admin/AddElement.jsx'));
 const OnboardBaker     = lazy(() => import('./admin/OnboardBaker.jsx'));
 const ManageTemplates  = lazy(() => import('./admin/ManageTemplates.jsx'));
+const RegenerateThumbs = lazy(() => import('./admin/RegenerateThumbnails.jsx'));
 const DesignTemplate   = lazy(() => import('./admin/DesignTemplate.jsx'));
 const GenerateShape    = lazy(() => import('./admin/GenerateShape.jsx'));
 const GenerateModel    = lazy(() => import('./admin/GenerateModel.jsx'));
@@ -87,6 +88,8 @@ const ROUTES = {
   '/templates/create':    CreateTemplate,
   '/templates/design':    DesignTemplate,
   '/templates':           ManageTemplates,
+  '/templates/thumbnails': RegenerateThumbs,
+
   '/elements/add':        AddElement,
   '/elements/manage':     ManageElements,
   '/elements/garnishes':  PublishGarnishes,
@@ -143,6 +146,7 @@ const NAV_GROUPS = [
   { title: 'Templates', items: [
     { href: '/templates',        label: 'Manage Templates' },
     { href: '/templates/design', label: 'Design Template' },
+    { href: '/templates/thumbnails', label: 'Regenerate Thumbnails' },
   ] },
   { title: 'Elements', items: [
     { href: '/elements/add',    label: 'Add Element' },
