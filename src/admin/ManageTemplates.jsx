@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
+import { captureThumbnailBlob, thumbnailFromImage } from '@spattoo/designer';
 import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, fetchTemplateTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
 } from '../lib/api.js';
 
@@ -183,6 +184,14 @@ const s = {
   radioRow:{ display: 'flex', gap: 8 },
   radioBtn:(active) => ({ flex: 1, padding: '7px 0', borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${active ? '#3D5A44' : '#C5D4C8'}`, background: active ? '#E8EDE9' : '#fff', color: active ? '#2C4433' : '#6B8C74', fontSize: 13, fontWeight: 700, fontFamily: "'Quicksand', sans-serif" }),
   msg:     (ok) => ({ fontSize: 13, fontWeight: 600, color: ok ? '#3D5A44' : '#c00', marginTop: 12 }),
+  btnOff:         { opacity: 0.45, cursor: 'not-allowed' },
+  thumbEdit:      { marginTop: 14, padding: 16, borderRadius: 12, background: '#F3F7F4', border: '1.5px solid #C5D4C8' },
+  thumbEditLabel: { fontSize: 11, fontWeight: 700, color: '#6B8C74', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 },
+  // Flexible rather than a fixed 180: at 375px two fixed boxes cannot sit abreast, so they stacked
+  // and you had to scroll from one to the other — which loses the comparison the pair exists for.
+  thumbEditCell:  { flex: '1 1 130px', minWidth: 0, maxWidth: 220 },
+  thumbEditImg:   { width: '100%', height: 120, objectFit: 'contain', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff' },
+  thumbEditHelp:  { fontSize: 12, color: '#6B8C74', lineHeight: 1.6, margin: '12px 0' },
   thumb:   { width: 56, height: 56, borderRadius: 8, objectFit: 'cover', border: '1.5px solid #C5D4C8', background: '#f7f9f7', flexShrink: 0 },
   badge:   (color) => ({ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: color === 'green' ? '#E8EDE9' : color === 'red' ? '#fdecea' : color === 'neutral' ? '#EEE8F0' : '#f0f0f0', color: color === 'green' ? '#3D5A44' : color === 'red' ? '#c00' : color === 'neutral' ? '#7A5A8A' : '#888', letterSpacing: 0.5, textTransform: 'uppercase' }),
 };
@@ -226,23 +235,22 @@ function TemplateForm({ onSaved, onCancel }) {
   useEffect(() => {
     setCapturing(true);
     const t = setTimeout(() => {
-      const canvas = canvasRef.current?.querySelector('canvas');
-      if (canvas) {
-        canvas.toBlob(blob => {
-          if (blob) setThumbBlob(blob);
-          setCapturing(false);
-        }, 'image/webp', 0.85);
-      } else {
+      // The SHARED capture, not a bare toBlob. This screen used to encode the raw canvas, so a
+      // template created here was framed unlike every thumbnail written anywhere else — the cake
+      // small in a field of white, because the camera frames a scene and a card wants a picture.
+      // It also refuses a frame that drew nothing, so a preview that has not rendered leaves the
+      // thumbnail unset instead of storing a white rectangle.
+      captureThumbnailBlob(canvasRef.current?.querySelector('canvas')).then(blob => {
+        if (blob) setThumbBlob(blob);
         setCapturing(false);
-      }
+      });
     }, 300);
     return () => { clearTimeout(t); setCapturing(false); };
   }, [tierColors]);
 
   function captureThumb() {
-    const canvas = canvasRef.current?.querySelector('canvas');
-    if (!canvas) return;
-    canvas.toBlob(blob => { if (blob) setThumbBlob(blob); }, 'image/webp', 0.85);
+    captureThumbnailBlob(canvasRef.current?.querySelector('canvas'))
+      .then(blob => { if (blob) setThumbBlob(blob); });
   }
 
   async function handleSave() {
@@ -442,6 +450,110 @@ function TemplateForm({ onSaved, onCancel }) {
 // Grouped by category, because the vocabulary is 56 tags over seven groups and a flat list of that
 // is a wall. Occasions are not special here — the create form offers only those, and this is where
 // theme, style, colour and material get on.
+// ── Replace one template's thumbnail with a photograph ────────────────────────────────────────
+// A thumbnail is captured when a template is SAVED, not when it is shown, so a renderer change
+// leaves every existing card picturing the old one. The fix used to be a batch screen that
+// re-captured all of them off-screen; it had to decide, without anyone looking, whether a frame it
+// could not see was good enough — and it could not. It skipped cold renders, it could not tell a
+// cake missing a decoration from a complete one, and its undo was a JSON file you had to remember
+// to download. This is the same job with a person in it: photograph the cake in the designer, look
+// at the picture, put it here.
+//
+// ⚠️ TAKE THE PHOTO ON THE TRANSPARENT CUTOUT GROUND. The crop finds the cake through the alpha
+// channel — see thumbnailFromImage — so a photo on a solid ground is opaque edge to edge and gets
+// letterboxed whole instead of framed. It still works; it just won't match its neighbours, so the
+// panel says so before you save rather than leaving you to spot it in the grid afterwards.
+//
+// Nothing is overwritten: every upload mints a fresh key, so the previous image stays in storage.
+function TemplateThumbnailEditor({ template, onClose, onSaved }) {
+  const [picked, setPicked] = useState(null);   // { blob, tight, url }
+  const [busy, setBusy]     = useState(false);
+  const [err, setErr]       = useState(null);
+
+  // Revoke on replace AND on unmount — a preview per attempt otherwise leaks a blob URL each time.
+  useEffect(() => () => { if (picked?.url) URL.revokeObjectURL(picked.url); }, [picked]);
+
+  async function choose(file) {
+    setErr(null);
+    if (!file) return;
+    try {
+      // The SAME crop a captured thumbnail gets. An upload stored raw would sit in the grid framed
+      // differently from every other card, which is the whole reason this goes through core.
+      const out = await thumbnailFromImage(file);
+      if (!out) { setErr('That picture is empty — nothing to make a thumbnail from.'); return; }
+      setPicked({ ...out, url: URL.createObjectURL(out.blob) });
+    } catch (e) {
+      setErr(`Could not read that picture: ${e.message}`);
+    }
+  }
+
+  async function save() {
+    if (!picked) return;
+    setBusy(true); setErr(null);
+    try {
+      const ext = picked.blob.type === 'image/webp' ? 'webp' : 'png';
+      const { key } = await uploadBlob('templates/thumbnails', `${crypto.randomUUID()}.${ext}`, picked.blob);
+      await updateTemplate(template.id, { thumbnail_url: key });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr(`Could not save it: ${e.message}`);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={s.thumbEdit}>
+      {/* Both pictures at once, side by side — you are choosing BETWEEN them, and a replacement you
+          cannot see against what it replaces is not a choice (INVARIANTS #11). Wraps on a phone. */}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <div style={s.thumbEditCell}>
+          <div style={s.thumbEditLabel}>Now</div>
+          {template.thumbnail_url
+            ? <img src={template.thumbnail_url} alt="" style={s.thumbEditImg} />
+            : <div style={{ ...s.thumbEditImg, display: 'grid', placeItems: 'center', fontSize: 11, color: '#6B8C74' }}>No thumb</div>}
+        </div>
+        <div style={s.thumbEditCell}>
+          <div style={s.thumbEditLabel}>New</div>
+          {picked
+            ? <img src={picked.url} alt="" style={s.thumbEditImg} />
+            : <div style={{ ...s.thumbEditImg, display: 'grid', placeItems: 'center', fontSize: 11, color: '#6B8C74' }}>Choose a picture</div>}
+        </div>
+      </div>
+
+      <p style={s.thumbEditHelp}>
+        Open the template in the designer, take a photo with the <b>transparent cutout</b> ground,
+        and choose that file here. It is cropped to the cake the same way a saved thumbnail is.
+      </p>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label style={{ ...s.btn('secondary'), display: 'inline-block' }}>
+          {picked ? 'Choose another' : 'Choose picture'}
+          <input type="file" accept="image/png,image/webp,image/jpeg" style={{ display: 'none' }}
+            onChange={e => { choose(e.target.files?.[0]); e.target.value = ''; }} />
+        </label>
+        {/* A disabled button that looks enabled is a button you press and learn nothing from —
+            s.btn has no disabled state, so the dimming is applied here rather than by rewriting
+            every other caller's buttons in this file. */}
+        <button style={{ ...s.btn('primary'), ...(!picked || busy ? s.btnOff : null) }}
+          disabled={!picked || busy} onClick={save}>
+          {busy ? 'Saving…' : 'Save thumbnail'}
+        </button>
+        <button style={s.btn('secondary')} disabled={busy} onClick={onClose}>Cancel</button>
+      </div>
+
+      {/* Said BEFORE the save, not discovered afterwards in the grid. */}
+      {picked && !picked.tight && (
+        <p style={{ ...s.thumbEditHelp, color: '#8a6d1f' }}>
+          This picture has no transparent background, so it could not be cropped to the cake — it
+          will be used whole. Re-take it on the cutout ground to match the other cards.
+        </p>
+      )}
+      {err && <p style={{ ...s.thumbEditHelp, color: '#c00' }}>{err}</p>}
+    </div>
+  );
+}
+
 function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
   const [chosen, setChosen] = useState(null);   // null = still loading
   const [busy, setBusy] = useState(false);
@@ -527,6 +639,7 @@ export default function ManageTemplates() {
   // Which template's tags are open. One at a time: the vocabulary is 56 tags across seven groups,
   // and several open at once is a wall.
   const [tagEditFor, setTagEditFor] = useState(null);
+  const [thumbEditFor, setThumbEditFor] = useState(null);
   // The whole vocabulary, once. The create form fetches it too and keeps only occasions; this needs
   // all seven groups, because occasions are the ones a template most often already has.
   const [allTags, setAllTags] = useState([]);
@@ -742,6 +855,11 @@ export default function ManageTemplates() {
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button style={s.btn('secondary')}
+                      title="Replace the card picture with a photo taken in the designer"
+                      onClick={() => setThumbEditFor(thumbEditFor === t.id ? null : t.id)}>
+                      {thumbEditFor === t.id ? 'Close thumbnail' : 'Thumbnail'}
+                    </button>
+                    <button style={s.btn('secondary')}
                       title="Search tags — what a customer filters by in the storefront"
                       onClick={() => setTagEditFor(tagEditFor === t.id ? null : t.id)}>
                       {tagEditFor === t.id ? 'Close tags' : 'Tags'}
@@ -770,6 +888,13 @@ export default function ManageTemplates() {
                 {/* Opens under the row it belongs to rather than in a modal — INVARIANTS #3a is
                     about the designer's popups, but the reasoning carries: a chooser floating away
                     from the thing it edits makes you hold "which template was this?" in your head. */}
+                {thumbEditFor === t.id && (
+                  <TemplateThumbnailEditor
+                    template={t}
+                    onClose={() => setThumbEditFor(null)}
+                    onSaved={load}
+                  />
+                )}
                 {tagEditFor === t.id && (
                   <TemplateTagEditor
                     template={t}
