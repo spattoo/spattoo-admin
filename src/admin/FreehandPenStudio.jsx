@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, useGLTF } from '@react-three/drei';
 import { HexColorPicker } from 'react-colorful';
 import * as THREE from 'three';
-import { buildPipingStroke, PEN_FEEL } from '@spattoo/designer';
+import { buildPipingStroke, NOZZLES, NOZZLE_BY_KEY, DEFAULT_NOZZLE, PEN_FEEL } from '@spattoo/designer';
 import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Freehand cream pen ──────────────────────────────────────────────────────
@@ -28,36 +28,14 @@ function creamMaterialProps(softness, color) {
 
 const STANDARD_CAKE_COLOR = '#f5c6d0';
 
-// ── Nozzles ──────────────────────────────────────────────────────────────────
-// A piping tip is really just a CROSS-SECTION. Cream extruded through it = that
-// profile swept along the stroke. So a round tip → smooth rope, an open star →
-// ribbed rope with grooves down its length, French → many fine ribs. Each profile
-// is a closed polygon at unit radius (max reach = 1); thickness scales it to size.
-function starProfile(spikes, inner) {
-  const out = [];
-  for (let i = 0; i < spikes; i++) {
-    const a0 = (i / spikes) * Math.PI * 2;          // outer point
-    const a1 = ((i + 0.5) / spikes) * Math.PI * 2;  // valley between points
-    out.push([Math.cos(a0), Math.sin(a0)]);
-    out.push([Math.cos(a1) * inner, Math.sin(a1) * inner]);
-  }
-  return out;
-}
-function roundProfile(n) {
-  const out = [];
-  for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; out.push([Math.cos(a), Math.sin(a)]); }
-  return out;
-}
 // Tunable: spikes = rib count, inner = valley depth (smaller = deeper grooves).
-const NOZZLES = [
-  { key: 'round',    label: 'Round',       hint: 'Writing / smooth rope',  profile: roundProfile(16) },
-  { key: 'star5',    label: 'Open Star',   hint: '1M — the classic',        profile: starProfile(5, 0.55) },
-  { key: 'star6',    label: '6-Star',      hint: 'Tighter ribs',            profile: starProfile(6, 0.55) },
-  { key: 'closed',   label: 'Closed Star', hint: 'Deep grooves',            profile: starProfile(6, 0.40) },
-  { key: 'french',   label: 'French',      hint: 'Fine fluted ribs',        profile: starProfile(14, 0.82) },
-];
-const NOZZLE_BY_KEY = Object.fromEntries(NOZZLES.map(n => [n.key, n]));
-const DEFAULT_NOZZLE = 'star5';
+/* ⚠️ CORE'S NOZZLES, not a second list. This one had five tips built from its own `starProfile`
+ * while core had nine built from `lobedProfile` — so the studio offered fewer tips than the product,
+ * drew their icons from different maths, and could not offer the petal at all. Same drift as the
+ * sweep: this file was the prototype core was ported from, and it kept its copy.
+ *
+ * The icons below read `profile` off each entry, and core's carry one, so nothing else changes —
+ * except that a tip previewed here is now the tip a baker actually gets. */
 
 // ── Sweep core ───────────────────────────────────────────────────────────────
 // Everything (rope, shell, rosette) is the SAME nozzle profile swept along some
