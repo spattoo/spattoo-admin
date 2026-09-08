@@ -761,6 +761,12 @@ export default function FreehandPenStudio() {
               resetTo={PEN_FEEL.tailDias} onChange={v => setFeel(f => ({ ...f, tailDias: v }))} />
             <Slider label="Tail thinness" value={feel.tailEnd} min={0.05} max={1} step={0.02}
               resetTo={PEN_FEEL.tailEnd} onChange={v => setFeel(f => ({ ...f, tailEnd: v }))} />
+            {/* ⚠️ SLIT TIPS ONLY (Petal 104) — it does nothing to a rope, whose roll is invisible.
+                Held upright a petal ribbon stands on its edge and reads as a loop of tape; leaning
+                it away from the flower's centre lays the sheet over so it cups. Every reference
+                photo of a piped rose is a bag held at an angle. */}
+            <Slider label="Lean (petal)" value={feel.leanDeg} min={-80} max={80} step={2}
+              resetTo={PEN_FEEL.leanDeg} onChange={v => setFeel(f => ({ ...f, leanDeg: v }))} color="#c47ad6" />
           </div>
           <p style={{ fontSize: 10, color: '#9BB5A2', margin: '8px 0 0', lineHeight: 1.5 }}>
             Softness: 0 = glossy gel · 0.7 = buttercream · 1 = matte.
