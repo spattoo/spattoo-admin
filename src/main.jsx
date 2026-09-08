@@ -54,6 +54,7 @@ const ButterflyStudio       = lazy(() => import('./admin/ButterflyStudio.jsx'));
 const PhotoFrameStudio      = lazy(() => import('./admin/PhotoFrameStudio.jsx'));
 const RecolorTester         = lazy(() => import('./admin/RecolorTester.jsx'));
 const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx'));
+const FlowerNailStudio      = lazy(() => import('./admin/FlowerNailStudio.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
 const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
 const RainbowStudio         = lazy(() => import('./admin/RainbowStudio.jsx'));
@@ -121,6 +122,7 @@ const ROUTES = {
   '/elements/cake-shapes':       CakeShapeStudio,
   '/elements/recolor-tester':    RecolorTester,
   '/elements/freehand-pen':      FreehandPenStudio,
+  '/elements/flower-nail':       FlowerNailStudio,
   '/elements/chocolate-drip':    ChocolateDripStudio,
   '/elements/grass':             GrassStudio,
   '/elements/rainbow':           RainbowStudio,
@@ -173,6 +175,7 @@ const NAV_GROUPS = [
     { href: '/elements/luster-dust',    label: 'Luster Dust' },
     { href: '/elements/cream-pen',      label: 'Cream Pen' },
     { href: '/elements/freehand-pen',   label: 'Freehand Pen' },
+    { href: '/elements/flower-nail',    label: 'Flower Nail' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
     { href: '/elements/grass',          label: 'Grass' },
     { href: '/elements/rainbow',        label: 'Rainbow' },
