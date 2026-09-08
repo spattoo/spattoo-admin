@@ -355,7 +355,7 @@ function hitPoint(e) {
 
 function Scene({
   thumbView, thumbTarget,
-  cakeColor, minGap, activeRef,
+  cakeColor, minGap, activeRef, endStroke,
   liveColor, liveThickness, liveSoftness, liveNozzle, liveStyleKind, liveFeel, liveStampUrl, liveStampSize, liveSpacing,
   committed, live, onStart, onMove,
 }) {
@@ -369,9 +369,24 @@ function Scene({
   // Disable rotate the instant the pointer is over the cake (not just on press), so the
   // pointerdown that begins a stroke can never be grabbed by OrbitControls first.
   const handleEnter = useCallback(() => { overRef.current = true; setRotate(false); }, []);
-  // Leaving re-arms orbit — unless we're mid-stroke (a fast drag can wander off the cake
-  // and we don't want it to suddenly start spinning the view).
-  const handleLeave = useCallback(() => { overRef.current = false; if (!activeRef.current) setRotate(true); }, [activeRef]);
+  /* ⚠️ LEAVING THE CAKE ENDS THE STROKE, and it used not to.
+   *
+   * handleMove is a MESH handler, so it stops firing the moment the pointer is off the cake — but
+   * the stroke stayed open, so the next point after coming back on was appended to the SAME stroke
+   * and the curve drew a straight chord across the gap. Cream nobody piped, reported as "it is
+   * finding edges and joining", and it showed up near the rim because that is where a pointer
+   * leaves the top.
+   *
+   * Ending is what actually happens: the tip is off the cake, so nothing lands. Clamping to the rim
+   * instead would keep a border continuous by inventing the part that was never drawn.
+   *
+   * Orbit still stays put while a stroke is running — leaving mid-stroke must not start spinning
+   * the view, which is what the old comment here was protecting. That part is unchanged. */
+  const handleLeave = useCallback(() => {
+    overRef.current = false;
+    if (activeRef.current) endStroke();
+    else setRotate(true);
+  }, [activeRef, endStroke]);
 
   const handleDown = useCallback(e => {
     e.stopPropagation();
@@ -577,26 +592,30 @@ export default function FreehandPenStudio() {
     });
   }, []);
 
+  /* Ending a stroke, from wherever it ends. Hoisted out of the effect because there are now TWO
+   * ways: the pointer comes up, or it LEAVES THE CAKE — see the note on handleLeave. */
+  const endStroke = useCallback(() => {
+    if (!activeRef.current) return;
+    activeRef.current = false;
+    setLive(pts => {
+      if (pts.length) {
+        const s = liveStyle.current;
+        setCommitted(c => [...c, { style: s.style, points: pts, color: s.color, thickness: s.thickness, softness: s.softness, nozzle: s.nozzle, stampUrl: s.stampUrl, stampSize: s.stampSize, spacing: s.spacing, seed: Math.floor(Math.random() * 1e6) }]);
+      }
+      return [];
+    });
+  }, []);
+
   // End the stroke wherever the pointer comes up — even off the cake / off-canvas.
   useEffect(() => {
-    const end = () => {
-      if (!activeRef.current) return;
-      activeRef.current = false;
-      setLive(pts => {
-        if (pts.length) {
-          const s = liveStyle.current;
-          setCommitted(c => [...c, { style: s.style, points: pts, color: s.color, thickness: s.thickness, softness: s.softness, nozzle: s.nozzle, stampUrl: s.stampUrl, stampSize: s.stampSize, spacing: s.spacing, seed: Math.floor(Math.random() * 1e6) }]);
-        }
-        return [];
-      });
-    };
+    const end = endStroke;
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
     return () => {
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
     };
-  }, []);
+  }, [endStroke]);
 
   // ── The tile frames the CREAM, fitted to it ───────────────────────────────────────────────────
   // A fixed camera distance was the first attempt and produced a tiny drawing in a big frame: how
@@ -847,7 +866,7 @@ export default function FreehandPenStudio() {
           gl={{ preserveDrawingBuffer: true }}
           style={{ touchAction: 'none', cursor: 'crosshair' }}>
           <Scene
-            cakeColor={cakeColor} minGap={minGap} activeRef={activeRef}
+            cakeColor={cakeColor} minGap={minGap} activeRef={activeRef} endStroke={endStroke}
             liveColor={color} liveThickness={thickness} liveSoftness={softness} liveNozzle={nozzle} liveStyleKind={style} liveFeel={feel}
             liveStampUrl={stampUrl} liveStampSize={stampSize} liveSpacing={spacing}
             committed={committed} live={live} onStart={startStroke} onMove={movePoint}
