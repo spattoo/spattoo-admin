@@ -9,7 +9,7 @@ import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
  * customer's own text with these exact calls, so this preview and the cake cannot drift
  * (INVARIANTS #15). `offsetParts` is the backing layer and was added to core for this. */
 import {
-  topperShapes, offsetParts, components, SizeDial,
+  topperShapes, offsetParts, components, SizeDial, SceneLights, SceneEnv,
   TOPPER_FACES, DEFAULT_TOPPER_FACE, loadTopperFace, faceFit,
 } from '@spattoo/designer';
 
@@ -165,16 +165,20 @@ function Cutout({ font, text, span, faceColour, backColour, offset, thickness, s
           them is visible. That step is what stops it reading as a sticker. */}
       {layers.back.map((g, i) => (
         <mesh key={`b${i}`} geometry={g} position={[0, 0, -thickness]}>
-          <meshPhysicalMaterial color={backColour} roughness={0.82} metalness={0}
-            clearcoat={0.10} clearcoatRoughness={0.75} />
+          <meshStandardMaterial color={backColour} roughness={0.88} metalness={0} />
         </mesh>
       ))}
       {layers.face.map((g, i) => (
         <mesh key={`f${i}`} geometry={g}>
-          {/* Printed cardstock: matte, with just enough sheen that the light finds the edge. Not a
-              plastic clearcoat — that is the acrylic topper, and this is paper. */}
-          <meshPhysicalMaterial color={faceColour} roughness={0.78} metalness={0}
-            clearcoat={0.14} clearcoatRoughness={0.68} />
+          {/* ⚠️ NO CLEARCOAT, and that is a correctness decision rather than a taste one.
+              A clearcoat is a glossy coat: it lives on the environment map, which is the one thing
+              this studio cannot yet match to production, and it adds light rather than multiplying
+              it — so no albedo correction can ever divide it back out. The chocolate drip stops at
+              grey 152 for precisely this reason and the garnish escapes by zeroing its coat
+              (albedoForLight.js, INVARIANTS #16). Printed card is matte anyway: SCENE_ENV notes that
+              matte finishes ignore IBL, so without the coat this element is largely immune to the
+              environment question AND exactly correctable once its reference light is measured. */}
+          <meshStandardMaterial color={faceColour} roughness={0.86} metalness={0} />
         </mesh>
       ))}
       {stick && (() => {
@@ -354,12 +358,17 @@ export default function CardCutoutStudio() {
 
       <div style={{ flex: 1, minWidth: 0, position: 'relative', background: '#F2EFE9' }}>
         <Canvas camera={{ position: [0, 0.75, 3.2], fov: 38 }} style={{ position: 'absolute', inset: 0 }}>
-          {/* Plain lights, no `<Environment preset>`: that fetches a 1.4MB HDR from a public CDN and
-              suspends the whole scene while it does, and printed card is matte — there is nothing
-              here for an environment map to reflect. */}
-          <ambientLight intensity={0.72} />
-          <directionalLight position={[2.5, 3.5, 4]} intensity={1.05} />
-          <directionalLight position={[-3, 1, 2]} intensity={0.35} />
+          {/* ⚠️ THE DESIGNER'S OWN RIG, not a hand-rolled one. This studio lit itself with ambient
+              0.72 and two directionals against production's 0.45 / 1.1 / 0.4 and an environment map
+              — sixty percent more fill and no IBL at all — so every colour judged here was judged
+              under a light no cake has ever had. The Cloud, Grass and Relief Sticker studios already
+              mount these two for the same reason.
+              ⚠️ It is still not the customer's scene: admin never calls `configureEnvMap`, so
+              SceneEnv falls back to drei's INDOOR apartment preset while every deployed cake uses
+              the self-hosted OUTDOOR map. envProps warns about it in the console. Matching the LAMPS
+              is worth having on its own; matching the environment is a separate, wider fix. */}
+          <SceneLights />
+          <SceneEnv />
           <OrbitControls enablePan={false} makeDefault target={[0, 0.45, 0]} />
           {/* ⚠️ THE CAKE, and it is not scenery. "How far into the cake" is a number with no visible
               effect unless the surface it goes into is on screen — you would be setting a depth

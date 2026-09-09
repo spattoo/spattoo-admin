@@ -13,6 +13,17 @@ if [ -n "$untracked" ]; then
   printf '\033[33m   If these belong in the commit, run: git add <file> (or git add -A) and re-commit.\033[0m\n\n'
 fi
 
+# ── Is every studio lit like the cake it authors for? ────────────────────────
+# Cheap (a file scan, no browser), so it runs on every commit rather than on the
+# changed set: the whole point is that a NEW studio cannot be added with its own
+# lighting rig, and a new file is exactly what --changed would be least likely to
+# have a baseline for.
+if ! npm run --silent check:studio-scene; then
+  printf '\n\033[31m✗ A studio previewing cake output lights its own scene.\033[0m\n'
+  printf '   See the note at the top of scripts/check-studio-scene.mjs.\n\n'
+  exit 1
+fi
+
 # ── Does every screen this commit touches still OPEN? ─────────────────────────
 # The gate that catches what reading the source cannot: a build that compiles,
 # tests that pass, and a blank page. Two of those shipped in a week.
