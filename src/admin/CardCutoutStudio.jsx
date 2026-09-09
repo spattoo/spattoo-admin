@@ -9,7 +9,7 @@ import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
  * customer's own text with these exact calls, so this preview and the cake cannot drift
  * (INVARIANTS #15). `offsetParts` is the backing layer and was added to core for this. */
 import {
-  topperShapes, offsetParts, components, SizeDial, SceneLights, SceneEnv,
+  topperShapes, offsetParts, components, backingPlate, SizeDial, SceneLights, SceneEnv,
   TOPPER_FACES, DEFAULT_TOPPER_FACE, loadTopperFace, faceFit,
 } from '@spattoo/designer';
 
@@ -50,6 +50,16 @@ const mm = (u) => `${(u * MM).toFixed(0)}mm`;
 // runs out.
 const STICK_LEN = 0.75;
 
+/* What sits behind the word. `outline` follows the letterforms; the rest are PLATES the word is
+ * written on — the "4" on an orange disc. A key, not a boolean, so a fourth arrives as a row here
+ * and reaches the geometry through `backingPlate`'s family without a branch anywhere. */
+const BACKINGS = [
+  { key: 'outline', label: 'Outline', hint: 'A second cut of the word, slightly larger.' },
+  { key: 'circle',  label: 'Circle',  hint: 'A disc behind it.' },
+  { key: 'rect',    label: 'Panel',   hint: 'A rounded rectangle.' },
+  { key: 'heart',   label: 'Heart',   hint: 'The cake\'s own heart curve.' },
+];
+
 /* ⚠️ A BLOCK FACE, because TOPPER_FACES has none. Every face core offers is a script — right for
  * "Emily", and nothing like the chunky rounded "10" this studio exists to reproduce. helvetiker_bold
  * ships inside three, so it costs no asset and no licence question, and `glyphShape.js` already cuts
@@ -85,7 +95,7 @@ function sheet(parts, thickness) {
   return geos;
 }
 
-function Cutout({ font, text, span, faceColour, backColour, offset, thickness, stick, bury, onMeasure }) {
+function Cutout({ font, text, span, backing, faceColour, backColour, offset, thickness, stick, bury, onMeasure }) {
   const build = useMemo(() => {
     if (!font || !text.trim()) return null;
     const probe = topperShapes(font, text, { height: 1 });
@@ -100,6 +110,17 @@ function Cutout({ font, text, span, faceColour, backColour, offset, thickness, s
     return topperShapes(font, text, { height });
   }, [font, text, span]);
 
+  /* ⚠️ ONE derivation of the backing, used by the meshes, the piece count, the stick's seat and the
+   * measurements. It was computed three times from the same inputs and they can only agree by
+   * accident once anything about it grows. */
+  const backParts = useMemo(() => {
+    if (!build?.parts?.length) return [];
+    const d = offset * (build.capHeight || build.height || 1);
+    if (backing === 'outline') return offsetParts(build.parts, d);
+    const plate = backingPlate(build.parts, { family: backing, pad: d });
+    return plate ? [plate] : [];
+  }, [build, offset, backing]);
+
   const layers = useMemo(() => {
     if (!build?.parts?.length) return null;
     const face = build.parts;
@@ -107,9 +128,8 @@ function Cutout({ font, text, span, faceColour, backColour, offset, thickness, s
      * so the band stays visually the same on a short "10" and a long "Emily" — an absolute distance
      * looks like a hairline on one and a slab on the other, and the baker would have to re-tune it
      * for every word. */
-    const d = offset * (build.capHeight || build.height || 1);
-    return { face: sheet(face, thickness), back: sheet(offsetParts(face, d), thickness) };
-  }, [build, offset, thickness]);
+    return { face: sheet(face, thickness), back: sheet(backParts, thickness) };
+  }, [build, backParts, thickness]);
 
   useEffect(() => () => {
     layers?.face?.forEach(g => g.dispose());
@@ -127,15 +147,21 @@ function Cutout({ font, text, span, faceColour, backColour, offset, thickness, s
    * The acrylic studio counts its pieces for exactly this reason. Counted on the BACKING, because
    * that is the sheet that has to hold together; the face can be as loose as it likes. */
   const measured = useMemo(() => {
-    if (!build?.parts?.length) return { pieces: 0, letter: 0, across: 0 };
-    const d = offset * (build.capHeight || build.height || 1);
+    if (!build?.parts?.length || !backParts.length) return { pieces: 0, letter: 0, across: 0 };
+    let lox = Infinity, hix = -Infinity, loy = Infinity, hiy = -Infinity;
+    for (const p of backParts) for (const q of p.outer) {
+      if (q.x < lox) lox = q.x; if (q.x > hix) hix = q.x;
+      if (q.y < loy) loy = q.y; if (q.y > hiy) hiy = q.y;
+    }
     return {
-      pieces: components(offsetParts(build.parts, d)).length,
-      // The cap height plus the band the backing adds on top and bottom — what a ruler would read.
-      letter: (build.capHeight || 0) + d * 2,
-      across: build.width + d * 2,
+      // Measured off the built backing rather than predicted: on a plate the word's cap height is
+      // no longer what a ruler reads across the finished topper.
+      pieces: components(backParts).length,
+      letter: build.capHeight || 0,
+      across: hix - lox,
+      tall: hiy - loy,
     };
-  }, [build, offset]);
+  }, [build, backParts]);
 
   useEffect(() => { onMeasure?.(measured); }, [measured, onMeasure]);
   const pieces = measured.pieces;
@@ -144,10 +170,8 @@ function Cutout({ font, text, span, faceColour, backColour, offset, thickness, s
 
   /* Measured off the BACKING, which is the biggest sheet — the stick has to disappear behind what
    * is actually there, and the backing hangs lower than the face by the offset. */
-  const d = offset * (build.capHeight || build.height || 1);
-  const back = offsetParts(build.parts, d);
   let lo = Infinity, hi = -Infinity;
-  for (const p of back) for (const q of p.outer) { if (q.y < lo) lo = q.y; if (q.y > hi) hi = q.y; }
+  for (const p of backParts) for (const q of p.outer) { if (q.y < lo) lo = q.y; if (q.y > hi) hi = q.y; }
   const wordH = Math.max(1e-3, hi - lo);
 
   /* ⚠️ SEATED BY THE BOTTOM OF THE STICK, not by the word. `bury` is how deep the stick goes into
@@ -225,6 +249,38 @@ function Slider({ label, value, min, max, step, onChange, hint }) {
   );
 }
 
+/* A row of exclusive choices, styled like this panel's other buttons.
+ *
+ * ⚠️ Not core's `Chip`, and not for want of looking. Chip IS the shared toggleable pill and the root
+ * CLAUDE.md is right that people rebuild it — but it is the CUSTOMER's control, it is not exported
+ * from core's index, and its tone sits against the designer's surfaces rather than this panel's. The
+ * honest options were "export a customer control and use it somewhere it does not match" or "match
+ * the buttons already in this file". If admin ever needs this a third time, extract it here rather
+ * than reaching across for that one.
+ */
+function Pick({ items, value, onChange }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 7 }}>
+      {items.map((it) => {
+        const on = it.key === value;
+        return (
+          <button key={it.key} type="button" onClick={() => onChange(it.key)}
+            aria-pressed={on} title={it.hint}
+            style={{
+              minHeight: 44, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 12.5, fontWeight: 800,
+              border: on ? '1.5px solid #3D5A44' : '1.5px solid #E2E8E3',
+              background: on ? '#3D5A44' : '#fff',
+              color: on ? '#fff' : '#3D5A44',
+            }}>
+            {it.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Swatch({ label, value, onChange, open, onToggle }) {
   return (
     <div style={{ marginBottom: 10 }}>
@@ -255,6 +311,7 @@ export default function CardCutoutStudio() {
   const [wheel, setWheel] = useState(null);
   const [span, setSpan] = useState(0.62);
   const [bury, setBury] = useState(0.22);
+  const [backing, setBacking] = useState('outline');
   const [m, setM] = useState({ pieces: 0, letter: 0, across: 0 });
   const pieces = m.pieces;
 
@@ -310,13 +367,28 @@ export default function CardCutoutStudio() {
           </select>
         </label>
 
+        <div style={{ marginBottom: 14 }}>
+          <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3D5A44', marginBottom: 5 }}>
+            Behind
+          </span>
+          <Pick items={BACKINGS} value={backing} onChange={setBacking} />
+        </div>
+
         <Swatch label="Card" value={faceColour} onChange={setFaceColour}
           open={wheel === 'face'} onToggle={() => setWheel(wheel === 'face' ? null : 'face')} />
         <Swatch label="Offset" value={backColour} onChange={setBackColour}
           open={wheel === 'back'} onToggle={() => setWheel(wheel === 'back' ? null : 'back')} />
 
-        <Slider label="Offset width" value={offset} min={0} max={0.4} step={0.005} onChange={setOffset}
-          hint="How far the sheet behind sticks out. Zero is a single layer." />
+        {/* ⚠️ One control, two readings, and the label follows. On an outline it is how far the
+            second cut sticks out past the letters; on a plate it is the margin between the word and
+            the edge of the disc. Both are "how much backing shows", which is why it is not two
+            sliders — but calling it "offset" while it sets a margin would be a label describing the
+            implementation rather than the thing (INVARIANTS #12). */}
+        <Slider label={backing === 'outline' ? 'Offset width' : 'Margin'}
+          value={offset} min={0} max={0.4} step={0.005} onChange={setOffset}
+          hint={backing === 'outline'
+            ? 'How far the sheet behind sticks out. Zero is a single layer.'
+            : 'Room between the word and the edge of the shape.'} />
 
         {/* Beside the control that fixes it, not in a corner: the offset is the only thing that
             changes this number (INVARIANTS #11). */}
@@ -379,7 +451,8 @@ export default function CardCutoutStudio() {
             <meshStandardMaterial color="#FAF5EE" roughness={0.92} />
           </mesh>
           <Cutout font={font} text={text} span={span} faceColour={faceColour} backColour={backColour}
-            offset={offset} thickness={thickness} stick={stick} bury={bury} onMeasure={setM} />
+            backing={backing} offset={offset} thickness={thickness} stick={stick} bury={bury}
+            onMeasure={setM} />
         </Canvas>
       </div>
     </div>
