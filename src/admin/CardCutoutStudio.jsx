@@ -75,7 +75,7 @@ function sheet(parts, thickness) {
   return geos;
 }
 
-function Cutout({ font, text, faceColour, backColour, offset, thickness, stick }) {
+function Cutout({ font, text, faceColour, backColour, offset, thickness, stick, onPieces }) {
   const build = useMemo(() => {
     if (!font || !text.trim()) return null;
     const probe = topperShapes(font, text, { height: 1, tracking: faceFit(BLOCK_KEY) });
@@ -101,6 +101,24 @@ function Cutout({ font, text, faceColour, backColour, offset, thickness, stick }
     layers?.face?.forEach(g => g.dispose());
     layers?.back?.forEach(g => g.dispose());
   }, [layers]);
+
+  /* ⚠️ HOW MANY SEPARATE BITS OF CARD THIS IS, which decides whether it can be made at all.
+   *
+   * A block face's letters do not touch. "Sandeep" in Poppins is SEVEN loose pieces, and the thing
+   * that joins them is the backing sheet — grow the offset until the outlines meet and it becomes
+   * one cuttable shape. Measured: Lilita One joins at 0.05 and Poppins not until 0.19, against a
+   * default of 0.09. So at the default, one of those faces produces a topper and the other produces
+   * a bag of letters, and NOTHING ON SCREEN WOULD SAY SO — both render identically from the front.
+   *
+   * The acrylic studio counts its pieces for exactly this reason. Counted on the BACKING, because
+   * that is the sheet that has to hold together; the face can be as loose as it likes. */
+  const pieces = useMemo(() => {
+    if (!build?.parts?.length) return 0;
+    const d = offset * (build.capHeight || build.height || 1);
+    return components(offsetParts(build.parts, d)).length;
+  }, [build, offset]);
+
+  useEffect(() => { onPieces?.(pieces); }, [pieces, onPieces]);
 
   if (!layers) return null;
 
@@ -203,6 +221,7 @@ export default function CardCutoutStudio() {
   const [thickness, setThickness] = useState(0.018);
   const [stick, setStick] = useState(true);
   const [wheel, setWheel] = useState(null);
+  const [pieces, setPieces] = useState(0);
 
   const font = useFace(faceKey);
 
@@ -241,8 +260,28 @@ export default function CardCutoutStudio() {
         <Swatch label="Offset" value={backColour} onChange={setBackColour}
           open={wheel === 'back'} onToggle={() => setWheel(wheel === 'back' ? null : 'back')} />
 
-        <Slider label="Offset width" value={offset} min={0} max={0.3} step={0.005} onChange={setOffset}
+        <Slider label="Offset width" value={offset} min={0} max={0.4} step={0.005} onChange={setOffset}
           hint="How far the sheet behind sticks out. Zero is a single layer." />
+
+        {/* Beside the control that fixes it, not in a corner: the offset is the only thing that
+            changes this number (INVARIANTS #11). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
+          padding: '9px 11px', borderRadius: 9,
+          background: pieces === 1 ? '#EEF4EF' : '#FDF3E7',
+          border: `1px solid ${pieces === 1 ? '#CFE0D4' : '#F0DCC0'}` }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: pieces === 1 ? '#3D5A44' : '#8A6320' }}>
+            {pieces === 1 ? 'One piece' : `${pieces} separate pieces`}
+          </span>
+          {/* ⚠️ Two remedies, not one. Widening always joins them eventually, but on a widely-spaced
+              face it joins them into a SLAB — Poppins needs 0.19 and by then the backing is a blob
+              with the letters sunk in it. Sometimes the answer is a different face, and the panel
+              should not send the baker down the one road that ruins it. */}
+          {pieces > 1 && (
+            <span style={{ fontSize: 11, color: '#8A6320', lineHeight: 1.35 }}>
+              — widen the offset until the backing joins them, or pick a face whose letters sit closer.
+            </span>
+          )}
+        </div>
         <Slider label="Card thickness" value={thickness} min={0.004} max={0.06} step={0.002} onChange={setThickness}
           hint="Real cardstock is thin — the step between the two sheets is what you are setting." />
 
@@ -263,7 +302,7 @@ export default function CardCutoutStudio() {
           <directionalLight position={[-3, 1, 2]} intensity={0.35} />
           <OrbitControls enablePan={false} makeDefault />
           <Cutout font={font} text={text} faceColour={faceColour} backColour={backColour}
-            offset={offset} thickness={thickness} stick={stick} />
+            offset={offset} thickness={thickness} stick={stick} onPieces={setPieces} />
         </Canvas>
       </div>
     </div>
