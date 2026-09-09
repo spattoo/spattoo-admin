@@ -45,6 +45,11 @@ const CAKE_R = 1.6;
 const MM = (6 * 25.4) / (CAKE_R * 2);
 const mm = (u) => `${(u * MM).toFixed(0)}mm`;
 
+// How much stick hangs below the word. A cake-pop stick is longer than any topper needs; what
+// matters is that there is more of it than anyone will push in, so `bury` is never the thing that
+// runs out.
+const STICK_LEN = 0.75;
+
 /* ⚠️ A BLOCK FACE, because TOPPER_FACES has none. Every face core offers is a script — right for
  * "Emily", and nothing like the chunky rounded "10" this studio exists to reproduce. helvetiker_bold
  * ships inside three, so it costs no asset and no licence question, and `glyphShape.js` already cuts
@@ -80,7 +85,7 @@ function sheet(parts, thickness) {
   return geos;
 }
 
-function Cutout({ font, text, span, faceColour, backColour, offset, thickness, stick, onMeasure }) {
+function Cutout({ font, text, span, faceColour, backColour, offset, thickness, stick, bury, onMeasure }) {
   const build = useMemo(() => {
     if (!font || !text.trim()) return null;
     const probe = topperShapes(font, text, { height: 1 });
@@ -145,8 +150,16 @@ function Cutout({ font, text, span, faceColour, backColour, offset, thickness, s
   for (const p of back) for (const q of p.outer) { if (q.y < lo) lo = q.y; if (q.y > hi) hi = q.y; }
   const wordH = Math.max(1e-3, hi - lo);
 
+  /* ⚠️ SEATED BY THE BOTTOM OF THE STICK, not by the word. `bury` is how deep the stick goes into
+   * the icing, so the thing that must land at the surface is the stick's END — the word then rides
+   * wherever that leaves it, which is exactly what happens when a baker pushes one in. Positioning
+   * the word and letting the stick dangle would make "into the cake" change nothing you can see.
+   *
+   * With the stick off there is nothing to insert, so the card simply rests on the surface. */
+  const groupY = stick ? STICK_LEN - lo - Math.min(bury, STICK_LEN) : -lo;
+
   return (
-    <group>
+    <group position={[0, groupY, 0]}>
       {/* The backing sits BEHIND the face by exactly one card thickness — they are two sheets glued
           together, not one sheet with a painted border, and at a glancing angle the step between
           them is visible. That step is what stops it reading as a sticker. */}
@@ -179,7 +192,7 @@ function Cutout({ font, text, span, faceColour, backColour, offset, thickness, s
         const TUCK = 0.55;
         const r = 0.018;
         const top = lo + wordH * TUCK;
-        const len = wordH * TUCK + 0.75;              // the part that shows, plus the tuck
+        const len = wordH * TUCK + STICK_LEN;              // the part that shows, plus the tuck
         return (
           <mesh position={[0, top - len / 2, -(thickness + r)]} rotation={[0, 0, 0]}>
             <cylinderGeometry args={[r, r, len, 14]} />
@@ -237,6 +250,7 @@ export default function CardCutoutStudio() {
   const [stick, setStick] = useState(true);
   const [wheel, setWheel] = useState(null);
   const [span, setSpan] = useState(0.62);
+  const [bury, setBury] = useState(0.22);
   const [m, setM] = useState({ pieces: 0, letter: 0, across: 0 });
   const pieces = m.pieces;
 
@@ -327,19 +341,36 @@ export default function CardCutoutStudio() {
           <input type="checkbox" checked={stick} onChange={e => setStick(e.target.checked)} />
           Stick
         </label>
+
+        {/* Only when there is a stick to push in. A depth control beside a topper with nothing to
+            insert is a control that cannot do anything, which reads as broken rather than as
+            inapplicable. The acrylic topper hides its `buried` the same way when it has no legs. */}
+        {stick && (
+          <Slider label="Into the cake" value={bury} min={0} max={STICK_LEN} step={0.005}
+            onChange={setBury}
+            hint={`${mm(bury)} of the stick goes in — ${mm(STICK_LEN - bury)} of it still showing.`} />
+        )}
       </div>
 
       <div style={{ flex: 1, minWidth: 0, position: 'relative', background: '#F2EFE9' }}>
-        <Canvas camera={{ position: [0, 0.1, 2.6], fov: 38 }} style={{ position: 'absolute', inset: 0 }}>
+        <Canvas camera={{ position: [0, 0.75, 3.2], fov: 38 }} style={{ position: 'absolute', inset: 0 }}>
           {/* Plain lights, no `<Environment preset>`: that fetches a 1.4MB HDR from a public CDN and
               suspends the whole scene while it does, and printed card is matte — there is nothing
               here for an environment map to reflect. */}
           <ambientLight intensity={0.72} />
           <directionalLight position={[2.5, 3.5, 4]} intensity={1.05} />
           <directionalLight position={[-3, 1, 2]} intensity={0.35} />
-          <OrbitControls enablePan={false} makeDefault />
+          <OrbitControls enablePan={false} makeDefault target={[0, 0.45, 0]} />
+          {/* ⚠️ THE CAKE, and it is not scenery. "How far into the cake" is a number with no visible
+              effect unless the surface it goes into is on screen — you would be setting a depth
+              against empty space and judging it by the label (INVARIANTS #11). It also shows the
+              thing that actually matters: how much stick is still showing above the icing. */}
+          <mesh position={[0, -0.36, 0]} receiveShadow>
+            <cylinderGeometry args={[CAKE_R, CAKE_R, 0.72, 72]} />
+            <meshStandardMaterial color="#FAF5EE" roughness={0.92} />
+          </mesh>
           <Cutout font={font} text={text} span={span} faceColour={faceColour} backColour={backColour}
-            offset={offset} thickness={thickness} stick={stick} onMeasure={setM} />
+            offset={offset} thickness={thickness} stick={stick} bury={bury} onMeasure={setM} />
         </Canvas>
       </div>
     </div>
