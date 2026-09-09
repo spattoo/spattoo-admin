@@ -9,7 +9,7 @@ import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
  * customer's own text with these exact calls, so this preview and the cake cannot drift
  * (INVARIANTS #15). `offsetParts` is the backing layer and was added to core for this. */
 import {
-  topperShapes, offsetParts, components, backingPlate, SizeDial, SceneLights, SceneEnv,
+  topperShapes, offsetParts, components, backingPlate, SizeDial, SceneLights, SceneEnv, albedoForLight,
   TOPPER_FACES, DEFAULT_TOPPER_FACE, loadTopperFace, faceFit,
 } from '@spattoo/designer';
 
@@ -49,6 +49,43 @@ const mm = (u) => `${(u * MM).toFixed(0)}mm`;
 // matters is that there is more of it than anyone will push in, so `bury` is never the thing that
 // runs out.
 const STICK_LEN = 0.75;
+
+/* ── What this card's light does to a colour ─────────────────────────────────────────────────────
+ *
+ * ⚠️ MEASURED, NEVER DERIVED (INVARIANTS #16). Under the designer's own rig a mid-grey #808080
+ * rendered 193,191,191 — that is the washed-out look, and no material tweak fixes it because the
+ * renderer is MULTIPLYING the chosen colour by the light. Dividing the albedo by that light puts it
+ * back. Measured with `scripts/measure-card-colour.mjs` against `dev/card-colour.html`, which lights
+ * a card the way CakeCanvas lights a cake and pulls the real self-hosted HDRI through the vite
+ * proxy — not the indoor fallback.
+ *
+ * Two readings, interpolated, because one division overshoots: the first guess landed grey on 139
+ * rather than 128.
+ *
+ * ⚠️ ITS OWN NUMBER. A reference light belongs to the SURFACE. This is roughness 0.86, no clearcoat,
+ * no sheen — not the tier wall (0.68) and not cream (0.85 with a sheen layer), whose numbers would
+ * be a guess wearing a measurement's clothes.
+ *
+ * ⚠️ ROLLOFF 6, AND IT WAS SWEPT ON REAL COLOURS RATHER THAN ON GREY. A flat divide is right at
+ * mid-grey and wrong at the top, where tone mapping rolls off: at rolloff 0 white came back 211 and
+ * every pale colour ~40 points dark, and a white topper must look white. But the fade is weighted by
+ * LUMINANCE, so a bright colour with one very low channel is under-corrected — a saturated yellow's
+ * blue ran +75 at rolloff 2. Swept across eleven colours, mean and worst channel both reported:
+ *
+ *     rolloff   0     2     3     4     5     6
+ *     mean     19.5  13.7  12.0  12.6  13.1  13.7
+ *     worst      44    75    66    58    51    46
+ *
+ * 3 has the best mean and crushes the yellow; 0 has the best worst and darkens everything. 6 takes
+ * the mean from 19.5 to 13.7 while returning the worst channel to where it started, which is the
+ * only setting that is not paying for one with the other.
+ *
+ * ⚠️ RE-MEASURE IF ANY OF THIS MOVES: the HDRI, SCENE_ENV's intensity, SceneLights, or this
+ * material's roughness. And when a card is finally rendered ON a cake, this constant belongs at that
+ * shared material, not here — two copies would drift the first time either was touched. */
+const CARD_LIGHT = Object.freeze([3.193, 2.940, 3.028]);
+const CARD_ROLLOFF = 6;
+const asRendered = (hex) => albedoForLight(hex, CARD_LIGHT, { rolloff: CARD_ROLLOFF });
 
 /* What sits behind the word. `outline` follows the letterforms; the rest are PLATES the word is
  * written on — the "4" on an orange disc. A key, not a boolean, so a fourth arrives as a row here
@@ -241,12 +278,12 @@ function Cutout({ font, texts, span, backing, faceColour, backColour, offset, th
           together, not one sheet with a painted border, and at a glancing angle the step between
           them is visible. That step is what stops it reading as a sticker. */}
       {layers.back.map((g, i) => (
-        <mesh key={`b${i}`} geometry={g} position={[0, 0, -thickness]}>
-          <meshStandardMaterial color={backColour} roughness={0.88} metalness={0} />
+        <mesh key={`b${i}`} geometry={g} position={[0, 0, -thickness]} castShadow receiveShadow>
+          <meshStandardMaterial color={asRendered(backColour)} roughness={0.86} metalness={0} />
         </mesh>
       ))}
       {layers.face.map((g, i) => (
-        <mesh key={`f${i}`} geometry={g}>
+        <mesh key={`f${i}`} geometry={g} castShadow receiveShadow>
           {/* ⚠️ NO CLEARCOAT, and that is a correctness decision rather than a taste one.
               A clearcoat is a glossy coat: it lives on the environment map, which is the one thing
               this studio cannot yet match to production, and it adds light rather than multiplying
@@ -255,7 +292,7 @@ function Cutout({ font, texts, span, backing, faceColour, backColour, offset, th
               (albedoForLight.js, INVARIANTS #16). Printed card is matte anyway: SCENE_ENV notes that
               matte finishes ignore IBL, so without the coat this element is largely immune to the
               environment question AND exactly correctable once its reference light is measured. */}
-          <meshStandardMaterial color={faceColour} roughness={0.86} metalness={0} />
+          <meshStandardMaterial color={asRendered(faceColour)} roughness={0.86} metalness={0} />
         </mesh>
       ))}
       {stick && (() => {
@@ -496,7 +533,13 @@ export default function CardCutoutStudio() {
       </div>
 
       <div style={{ flex: 1, minWidth: 0, position: 'relative', background: '#F2EFE9' }}>
-        <Canvas camera={{ position: [0, 0.75, 3.2], fov: 38 }} style={{ position: 'absolute', inset: 0 }}>
+        {/* ⚠️ `shadows`, because the designer's canvas has it and SceneLights only casts when asked.
+            Without it the key light still lights the card but nothing lands on the icing beneath —
+            no contact shadow under the plate, no shadow of the stick — and a lit object with no
+            shadow reads as flat and washed out however correct its colour is. Production mounts
+            `<SceneLights shadows />` inside a `shadows` Canvas; this had neither. */}
+        <Canvas shadows camera={{ position: [0, 0.75, 3.2], fov: 38 }}
+          gl={{ preserveDrawingBuffer: true }} style={{ position: 'absolute', inset: 0 }}>
           {/* ⚠️ THE DESIGNER'S OWN RIG, not a hand-rolled one. This studio lit itself with ambient
               0.72 and two directionals against production's 0.45 / 1.1 / 0.4 and an environment map
               — sixty percent more fill and no IBL at all — so every colour judged here was judged
@@ -506,14 +549,14 @@ export default function CardCutoutStudio() {
               SceneEnv falls back to drei's INDOOR apartment preset while every deployed cake uses
               the self-hosted OUTDOOR map. envProps warns about it in the console. Matching the LAMPS
               is worth having on its own; matching the environment is a separate, wider fix. */}
-          <SceneLights />
+          <SceneLights shadows />
           <SceneEnv />
           <OrbitControls enablePan={false} makeDefault target={[0, 0.45, 0]} />
           {/* ⚠️ THE CAKE, and it is not scenery. "How far into the cake" is a number with no visible
               effect unless the surface it goes into is on screen — you would be setting a depth
               against empty space and judging it by the label (INVARIANTS #11). It also shows the
               thing that actually matters: how much stick is still showing above the icing. */}
-          <mesh position={[0, -0.36, 0]} receiveShadow>
+          <mesh position={[0, -0.36, 0]} receiveShadow castShadow>
             <cylinderGeometry args={[CAKE_R, CAKE_R, 0.72, 72]} />
             <meshStandardMaterial color="#FAF5EE" roughness={0.92} />
           </mesh>
