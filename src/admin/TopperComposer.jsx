@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
@@ -136,6 +136,26 @@ function contoursOf(obj, font) {
   return plate ? [plate] : null;
 }
 
+/* ── Dragging ────────────────────────────────────────────────────────────────────────────────────
+ *
+ * ⚠️ AGAINST A FIXED PLANE, never against the object's own surface. `e.point` is where the ray met
+ * THIS mesh, and the mesh is the thing being moved — read it every frame and the object chases its
+ * own hit point, accelerating away from the pointer. The card plane at z = 0 does not move, so the
+ * arithmetic is stable: grab the offset once, subtract it forever.
+ *
+ * ⚠️ AND THE GRAB OFFSET IS THE WHOLE OF IT. Without it an object jumps so its centre lands under the
+ * pointer the instant you touch it — INVARIANTS #10's law that `handleAt` and `dragTo` are exact
+ * inverses, in the smallest possible form: where you grabbed is where you are still holding.
+ */
+const DRAG_PLANE = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+const SNAP = 0.05;             // how near a centre line counts as on it
+
+// Where the pointer's ray meets the card plane, or null if it runs parallel to it.
+function planeHit(ray) {
+  const p = new THREE.Vector3();
+  return ray.intersectPlane(DRAG_PLANE, p) ? p : null;
+}
+
 const extrude = (parts, z) => (parts ?? []).map((p) => {
   const shape = new THREE.Shape(p.outer.map(q => new THREE.Vector2(q.x, q.y)));
   shape.holes = (p.holes ?? []).map(h => new THREE.Path(h.map(q => new THREE.Vector2(q.x, q.y))));
@@ -144,7 +164,43 @@ const extrude = (parts, z) => (parts ?? []).map((p) => {
   return g;
 });
 
-function Piece({ obj, font, selected, onSelect }) {
+function Piece({ obj, font, selected, onSelect, onMove }) {
+  const { controls } = useThree();
+  const grab = useRef(null);
+
+  const begin = (e) => {
+    e.stopPropagation();
+    onSelect(obj.id);
+    const hit = planeHit(e.ray);
+    if (!hit) return;
+    grab.current = { dx: obj.x - hit.x, dy: obj.y - hit.y };
+    // ⚠️ Orbit off for the duration, or one drag both moves the card and swings the camera.
+    if (controls) controls.enabled = false;
+    e.target.setPointerCapture?.(e.pointerId);
+  };
+
+  const move = (e) => {
+    if (!grab.current) return;
+    e.stopPropagation();
+    const hit = planeHit(e.ray);
+    if (!hit) return;
+    let x = hit.x + grab.current.dx, y = hit.y + grab.current.dy;
+    /* ⚠️ Snapped to the MIDDLE only, not to every grid line. Centring a word on a shape is the
+     * alignment anyone actually wants, and it is the one the eye catches instantly when it is a
+     * pixel out. Snapping to all of them would make the grid a cage — free placement is the normal
+     * case and a drawn grid is there to be read, not obeyed. */
+    if (Math.abs(x) < SNAP) x = 0;
+    if (Math.abs(y) < SNAP) y = 0;
+    onMove(obj.id, { x, y });
+  };
+
+  const end = (e) => {
+    if (!grab.current) return;
+    grab.current = null;
+    if (controls) controls.enabled = true;
+    e.target?.releasePointerCapture?.(e.pointerId);
+  };
+
   const parts = useMemo(() => contoursOf(obj, font), [obj, font]);
 
   /* ⚠️ The offset is a PROPERTY OF THE TEXT, not of the screen. It was a slider that existed whether
@@ -176,13 +232,13 @@ function Piece({ obj, font, selected, onSelect }) {
     <group position={[obj.x, obj.y, 0]}>
       {backGeos.map((g, i) => (
         <mesh key={`b${i}`} geometry={g} castShadow receiveShadow
-          onPointerDown={(e) => { e.stopPropagation(); onSelect(obj.id); }}>
+          onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
           <meshStandardMaterial color={asRendered(obj.offsetColour)} roughness={0.86} metalness={0} />
         </mesh>
       ))}
       {geos.map((g, i) => (
         <mesh key={i} geometry={g} castShadow receiveShadow
-          onPointerDown={(e) => { e.stopPropagation(); onSelect(obj.id); }}>
+          onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
           <meshStandardMaterial color={asRendered(obj.colour)} roughness={0.86} metalness={0} />
         </mesh>
       ))}
@@ -436,7 +492,7 @@ export default function TopperComposer() {
           </mesh>
           {objects.map(o => (
             <Piece key={o.id} obj={o} font={fonts[o.face] ?? blockFont}
-              selected={o.id === selectedId} onSelect={setSelected} />
+              selected={o.id === selectedId} onSelect={setSelected} onMove={update} />
           ))}
           {/* Starts face on — a card is flat, so this IS the 2D view — and turns, because the same
               objects are what stands on the cake. */}
