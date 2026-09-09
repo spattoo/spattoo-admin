@@ -349,8 +349,7 @@ function Properties({ obj, onChange, onDelete }) {
   const set = (patch) => onChange(obj.id, patch);
 
   return (
-    <div style={{ flex: '0 0 268px', overflowY: 'auto', padding: 16, background: '#fff',
-      borderLeft: '1px solid #E8EFE9' }}>
+    <div className="tcProps" style={{ padding: 16, background: '#fff', borderLeft: '1px solid #E8EFE9' }}>
       <h2 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, color: '#2C3E33' }}>
         {obj.kind === 'text' ? 'Text' : (SHAPES.find(x => x.key === obj.family)?.label ?? 'Shape')}
       </h2>
@@ -479,9 +478,31 @@ export default function TopperComposer() {
   const selected = objects.find(o => o.id === selectedId) ?? null;
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
-      <div style={{ flex: '0 0 96px', padding: 14, borderRight: '1px solid #E8EFE9', background: '#fff',
-        display: 'flex', flexDirection: 'column', gap: 16 }}>
+    /* ⚠️ ONE COLUMN ON A PHONE, and built for it now rather than at the port. Three columns —
+     * rail, canvas, properties — is 96 + canvas + 268, which has nothing left at 375px. Stacked, the
+     * rail becomes a strip across the top and the properties a sheet under the canvas, so the canvas
+     * stays visible while a control is touched (INVARIANTS #11): a colour or a size judged with the
+     * thing it changes off-screen is judged blind.
+     * A real media query, because it cannot be written inline — same call as the flower studio. */
+    <div className="tc">
+      <style>{`
+        .tc { display: flex; height: calc(100vh - 56px); overflow: hidden; }
+        .tc > .tcRail { flex: 0 0 96px; display: flex; flex-direction: column; gap: 16; }
+        .tc > .tcStage { flex: 1; min-width: 0; position: relative; }
+        .tc > .tcProps { flex: 0 0 268px; overflow-y: auto; }
+        @media (max-width: 820px) {
+          .tc { flex-direction: column; height: auto; overflow: visible; }
+          .tc > .tcRail {
+            flex: none; flex-direction: row; align-items: flex-start; gap: 14px;
+            overflow-x: auto; border-right: none; border-bottom: 1px solid #E8EFE9;
+          }
+          /* The canvas keeps a definite height of its own — a flex child with nothing to fill
+             collapses to nothing, and R3F will not create a renderer for a zero-height box. */
+          .tc > .tcStage { flex: none; height: 52vh; min-height: 280px; }
+          .tc > .tcProps { flex: none; border-left: none; border-top: 1px solid #E8EFE9; }
+        }
+      `}</style>
+      <div className="tcRail" style={{ padding: 14, borderRight: '1px solid #E8EFE9', background: '#fff' }}>
         <div>
           <span style={{ display: 'block', fontSize: 10, fontWeight: 800, letterSpacing: 0.6,
             textTransform: 'uppercase', color: '#9AA8A0', marginBottom: 7 }}>Text</span>
@@ -514,7 +535,7 @@ export default function TopperComposer() {
         )}
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+      <div className="tcStage">
         <Canvas shadows camera={{ position: [0, 0, 5.2], fov: 34 }}
           gl={{ preserveDrawingBuffer: true }} style={{ position: 'absolute', inset: 0 }}>
           <SceneLights shadows />
