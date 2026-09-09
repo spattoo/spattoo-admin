@@ -104,7 +104,13 @@ function Cutout({ font, text, faceColour, backColour, offset, thickness, stick }
 
   if (!layers) return null;
 
-  const bottom = build.parts.reduce((m, p) => Math.min(m, ...p.outer.map(q => q.y)), Infinity);
+  /* Measured off the BACKING, which is the biggest sheet — the stick has to disappear behind what
+   * is actually there, and the backing hangs lower than the face by the offset. */
+  const d = offset * (build.capHeight || build.height || 1);
+  const back = offsetParts(build.parts, d);
+  let lo = Infinity, hi = -Infinity;
+  for (const p of back) for (const q of p.outer) { if (q.y < lo) lo = q.y; if (q.y > hi) hi = q.y; }
+  const wordH = Math.max(1e-3, hi - lo);
 
   return (
     <group>
@@ -125,12 +131,29 @@ function Cutout({ font, text, faceColour, backColour, offset, thickness, stick }
             clearcoat={0.14} clearcoatRoughness={0.68} />
         </mesh>
       ))}
-      {stick && (
-        <mesh position={[0, bottom - 0.34, -thickness / 2]}>
-          <cylinderGeometry args={[0.018, 0.018, 0.72, 12]} />
-          <meshStandardMaterial color="#D8BE93" roughness={0.85} />
-        </mesh>
-      )}
+      {stick && (() => {
+        /* ⚠️ TUCKED UP BEHIND THE WORD, AND BEHIND BOTH SHEETS. A stick that stops at the baseline
+         * hangs off the bottom of the letters with daylight between them — which is what this did,
+         * and it reads as a word floating above a rod rather than as a topper.
+         *
+         * A real one is taped to the BACK and runs a good way up behind the letterforms; you never
+         * see the join because the card hides it. So it sits at negative z, past the backing sheet,
+         * and reaches up to `TUCK` of the word's height. The overlap is the attachment: nothing is
+         * glued in the geometry, it is simply hidden.
+         *
+         * Off the widest letter's midline rather than the whole word's, so on a word with a
+         * descender the stick still meets solid card instead of the gap under a 'p'. */
+        const TUCK = 0.55;
+        const r = 0.018;
+        const top = lo + wordH * TUCK;
+        const len = wordH * TUCK + 0.75;              // the part that shows, plus the tuck
+        return (
+          <mesh position={[0, top - len / 2, -(thickness + r)]} rotation={[0, 0, 0]}>
+            <cylinderGeometry args={[r, r, len, 14]} />
+            <meshStandardMaterial color="#D8BE93" roughness={0.85} />
+          </mesh>
+        );
+      })()}
     </group>
   );
 }
