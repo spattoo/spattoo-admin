@@ -164,7 +164,17 @@ const extrude = (parts, z) => (parts ?? []).map((p) => {
   return g;
 });
 
-function Piece({ obj, font, selected, editing, onSelect, onMove, onEdit, onChange }) {
+/* ⚠️ EVERY OBJECT ON ITS OWN LAYER, or they interpenetrate. Coplanar extrusions do not stack — a
+ * word laid on a disc at the same z has half its letters INSIDE the disc, so the disc wins wherever
+ * it happens to be nearer and the letters show through in patches. It looks like transparency and is
+ * actually two solids sharing a plane.
+ *
+ * A tenth of the card's thickness per layer: enough that the depth test is decisive, small enough
+ * that the stack is still one flat card when it is cut. Layer order is also z-order, so "the last
+ * thing added is in front" is true rather than accidental. */
+const LAYER_Z = CARD_THICK * 0.1;
+
+function Piece({ obj, layer, font, selected, editing, onSelect, onMove, onEdit, onChange }) {
   const { controls } = useThree();
   const grab = useRef(null);
 
@@ -230,7 +240,7 @@ function Piece({ obj, font, selected, editing, onSelect, onMove, onEdit, onChang
   if (!geos.length || !box) return null;
 
   return (
-    <group position={[obj.x, obj.y, 0]}>
+    <group position={[obj.x, obj.y, layer * LAYER_Z]}>
       {backGeos.map((g, i) => (
         <mesh key={`b${i}`} geometry={g} castShadow receiveShadow
           onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
@@ -428,6 +438,14 @@ export default function TopperComposer() {
   const [objects, setObjects] = useState([]);          // ⚠️ EMPTY. Nothing is on the canvas until asked for.
   const [selectedId, setSelected] = useState(null);
   const [editingId, setEditing] = useState(null);
+  /* ⚠️ FLAT IS THE WORKING VIEW; 3D IS A LOOK, and they are two different jobs. Composing needs a
+   * surface that does not move: an orbit-able perspective camera means one stray drag skews the grid,
+   * turns the selection box into a parallelogram and makes "is this centred" unanswerable. It also
+   * means objects at different layers are scaled differently by perspective, so a card in front
+   * looks bigger than the same card behind. An ORTHOGRAPHIC camera has neither problem.
+   * Seeing it standing on a cake is still worth having, so it is a deliberate switch rather than
+   * something a mis-aimed drag does to you. */
+  const [view3d, setView3d] = useState(false);
   const nextId = useRef(1);
 
   /* ⚠️ FONTS PER OBJECT, loaded once and kept. Two words on one topper can want two faces, so the
@@ -536,7 +554,11 @@ export default function TopperComposer() {
       </div>
 
       <div className="tcStage">
-        <Canvas shadows camera={{ position: [0, 0, 5.2], fov: 34 }}
+        {/* ⚠️ Keyed on the view, because a Canvas takes its camera ON MOUNT ONLY — remounting is the
+            honest way to change camera type, and the same call ChocolateDripStudio makes. */}
+        <Canvas key={view3d ? '3d' : 'flat'} shadows
+          orthographic={!view3d}
+          camera={view3d ? { position: [0, -1.6, 4.6], fov: 34 } : { position: [0, 0, 6], zoom: 190 }}
           gl={{ preserveDrawingBuffer: true }} style={{ position: 'absolute', inset: 0 }}>
           <SceneLights shadows />
           <SceneEnv />
@@ -550,15 +572,24 @@ export default function TopperComposer() {
             <planeGeometry args={[GRID_HALF * 2, GRID_HALF * 2]} />
             <meshBasicMaterial visible={false} />
           </mesh>
-          {objects.map(o => (
-            <Piece key={o.id} obj={o} font={fonts[o.face] ?? blockFont}
+          {objects.map((o, i) => (
+            <Piece key={o.id} obj={o} layer={i} font={fonts[o.face] ?? blockFont}
               selected={o.id === selectedId} editing={o.id === editingId}
               onSelect={setSelected} onMove={update} onEdit={setEditing} onChange={update} />
           ))}
-          {/* Starts face on — a card is flat, so this IS the 2D view — and turns, because the same
-              objects are what stands on the cake. */}
-          <OrbitControls enablePan={false} makeDefault />
+          {/* Only in the 3D look. While composing there is nothing to orbit: the camera is the one
+              thing on this screen that must hold still. */}
+          {view3d && <OrbitControls enablePan={false} makeDefault />}
         </Canvas>
+
+        <button type="button" onClick={() => setView3d(v => !v)}
+          style={{ position: 'absolute', top: 12, right: 12, minHeight: 34, padding: '0 12px',
+            borderRadius: 9, cursor: 'pointer', fontFamily: "'Quicksand', sans-serif", fontSize: 11.5,
+            fontWeight: 800, color: view3d ? '#fff' : '#3D5A44',
+            background: view3d ? '#3D5A44' : 'rgba(255,255,255,0.92)',
+            border: '1.5px solid #C5D4C8' }}>
+          {view3d ? 'Back to flat' : 'See it in 3D'}
+        </button>
 
         {objects.length === 0 && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
