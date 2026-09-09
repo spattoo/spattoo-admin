@@ -9,7 +9,7 @@ import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
  * customer's own text with these exact calls, so this preview and the cake cannot drift
  * (INVARIANTS #15). `offsetParts` is the backing layer and was added to core for this. */
 import {
-  topperShapes, offsetParts, components,
+  topperShapes, offsetParts, components, SizeDial,
   TOPPER_FACES, DEFAULT_TOPPER_FACE, loadTopperFace, faceFit,
 } from '@spattoo/designer';
 
@@ -38,7 +38,12 @@ import {
  *   - The printed outline drawn ON the face, which is ink rather than geometry.
  */
 
-const CAKE_R = 1.0;
+/* The same cake the acrylic studio previews against — a 6-inch top, 1.6 units of radius — so the
+ * millimetres printed here and there mean the same thing. Two studios quoting sizes off two
+ * different cakes is how a 30mm topper turns out to be 40mm. */
+const CAKE_R = 1.6;
+const MM = (6 * 25.4) / (CAKE_R * 2);
+const mm = (u) => `${(u * MM).toFixed(0)}mm`;
 
 /* ⚠️ A BLOCK FACE, because TOPPER_FACES has none. Every face core offers is a script — right for
  * "Emily", and nothing like the chunky rounded "10" this studio exists to reproduce. helvetiker_bold
@@ -75,16 +80,20 @@ function sheet(parts, thickness) {
   return geos;
 }
 
-function Cutout({ font, text, faceColour, backColour, offset, thickness, stick, onPieces }) {
+function Cutout({ font, text, span, faceColour, backColour, offset, thickness, stick, onMeasure }) {
   const build = useMemo(() => {
     if (!font || !text.trim()) return null;
-    const probe = topperShapes(font, text, { height: 1, tracking: faceFit(BLOCK_KEY) });
+    const probe = topperShapes(font, text, { height: 1 });
     if (!probe.width) return null;
-    // Sized by how far it reaches ACROSS the cake, the same rule the acrylic topper sizes by, so a
-    // long name shrinks instead of running off the board.
-    const height = (CAKE_R * 1.5) / probe.width;
-    return topperShapes(font, text, { height, tracking: 0 });
-  }, [font, text]);
+    /* ⚠️ SIZED BY HOW FAR IT REACHES ACROSS THE CAKE, not by a letter height — the same rule the
+     * acrylic topper sizes by. Set the LETTERS instead and a long name simply runs off the board,
+     * because the width follows from the character count and nothing stops it. So `span` is the
+     * control and the letter height is the READOUT: drag until the millimetres say what you want.
+     * That is also why the acrylic topper stacks onto two rows — it is the only other way to keep
+     * a long phrase legible at a fixed span. */
+    const height = (CAKE_R * 2 * span) / probe.width;
+    return topperShapes(font, text, { height });
+  }, [font, text, span]);
 
   const layers = useMemo(() => {
     if (!build?.parts?.length) return null;
@@ -112,13 +121,19 @@ function Cutout({ font, text, faceColour, backColour, offset, thickness, stick, 
    *
    * The acrylic studio counts its pieces for exactly this reason. Counted on the BACKING, because
    * that is the sheet that has to hold together; the face can be as loose as it likes. */
-  const pieces = useMemo(() => {
-    if (!build?.parts?.length) return 0;
+  const measured = useMemo(() => {
+    if (!build?.parts?.length) return { pieces: 0, letter: 0, across: 0 };
     const d = offset * (build.capHeight || build.height || 1);
-    return components(offsetParts(build.parts, d)).length;
+    return {
+      pieces: components(offsetParts(build.parts, d)).length,
+      // The cap height plus the band the backing adds on top and bottom — what a ruler would read.
+      letter: (build.capHeight || 0) + d * 2,
+      across: build.width + d * 2,
+    };
   }, [build, offset]);
 
-  useEffect(() => { onPieces?.(pieces); }, [pieces, onPieces]);
+  useEffect(() => { onMeasure?.(measured); }, [measured, onMeasure]);
+  const pieces = measured.pieces;
 
   if (!layers) return null;
 
@@ -221,7 +236,9 @@ export default function CardCutoutStudio() {
   const [thickness, setThickness] = useState(0.018);
   const [stick, setStick] = useState(true);
   const [wheel, setWheel] = useState(null);
-  const [pieces, setPieces] = useState(0);
+  const [span, setSpan] = useState(0.62);
+  const [m, setM] = useState({ pieces: 0, letter: 0, across: 0 });
+  const pieces = m.pieces;
 
   const font = useFace(faceKey);
 
@@ -243,6 +260,26 @@ export default function CardCutoutStudio() {
             style={{ width: '100%', boxSizing: 'border-box', padding: '10px 11px', borderRadius: 9,
               border: '1.5px solid #E2E8E3', fontFamily: 'inherit', fontSize: 14 }} />
         </label>
+
+        {/* ⚠️ SizeDial, not another slider. The root CLAUDE.md names it as THE size control, and
+            the acrylic topper — the closest thing to this screen — already sizes with it. A second
+            way to set a size is how two topper studios start disagreeing about what 30mm means.
+            The millimetres sit right under it, because "font size" is a number a baker has in mind
+            and the span is only the way to reach it. */}
+        <div style={{ marginBottom: 14 }}>
+          <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3D5A44', marginBottom: 6 }}>
+            Size
+          </span>
+          {/* Capped at the cake's own width. Past 1.0 the FACE is already wider than the cake it
+              sits on, and the backing overhangs further still — measured, "10" at 1.15 came out
+              198mm across a 152mm cake. The readout would have said so, but a slider should not
+              travel into territory that is always wrong. */}
+          <SizeDial size={span} min={0.25} max={1.0} step={0.01} onChange={setSpan} />
+          <span style={{ display: 'block', marginTop: 6, fontSize: 11.5, color: '#6B7C70' }}>
+            letters <strong style={{ color: '#3D5A44' }}>{mm(m.letter)}</strong>
+            {' · '}{mm(m.across)} across, on a 6in cake
+          </span>
+        </div>
 
         <label style={{ display: 'block', marginBottom: 14 }}>
           <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3D5A44', marginBottom: 5 }}>
@@ -301,8 +338,8 @@ export default function CardCutoutStudio() {
           <directionalLight position={[2.5, 3.5, 4]} intensity={1.05} />
           <directionalLight position={[-3, 1, 2]} intensity={0.35} />
           <OrbitControls enablePan={false} makeDefault />
-          <Cutout font={font} text={text} faceColour={faceColour} backColour={backColour}
-            offset={offset} thickness={thickness} stick={stick} onPieces={setPieces} />
+          <Cutout font={font} text={text} span={span} faceColour={faceColour} backColour={backColour}
+            offset={offset} thickness={thickness} stick={stick} onMeasure={setM} />
         </Canvas>
       </div>
     </div>
