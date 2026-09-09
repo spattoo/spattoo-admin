@@ -9,7 +9,8 @@ import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
  * customer's own text with these exact calls, so this preview and the cake cannot drift
  * (INVARIANTS #15). `offsetParts` is the backing layer and was added to core for this. */
 import {
-  topperShapes, offsetParts, components, backingPlate, SizeDial, SceneLights, SceneEnv, albedoForLight,
+  topperShapes, offsetParts, components, backingPlate, SizeDial, albedoForLight,
+  SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
   TOPPER_FACES, DEFAULT_TOPPER_FACE, loadTopperFace, faceFit,
 } from '@spattoo/designer';
 
@@ -532,13 +533,7 @@ export default function CardCutoutStudio() {
         )}
       </div>
 
-      {/* ⚠️ A NEUTRAL MID GREY, not the cream every other studio uses, and it is a colour-judging
-          decision rather than a decorative one. This screen exists to choose two card colours. A
-          near-white backdrop behind a near-white cake makes a WHITE card invisible and flatters a
-          pink one — so the surface was quietly answering the question the baker came to ask. Grey is
-          also the only neutral that adds no cast of its own, which is why INVARIANTS #16 solves the
-          reference light on it. Kept light enough to sit in an admin panel without glaring. */}
-      <div style={{ flex: 1, minWidth: 0, position: 'relative', background: '#9E9E9C' }}>
+      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
         {/* ⚠️ `shadows`, because the designer's canvas has it and SceneLights only casts when asked.
             Without it the key light still lights the card but nothing lands on the icing beneath —
             no contact shadow under the plate, no shadow of the stick — and a lit object with no
@@ -557,6 +552,17 @@ export default function CardCutoutStudio() {
               is worth having on its own; matching the environment is a separate, wider fix. */}
           <SceneLights shadows />
           <SceneEnv />
+          {/* ⚠️ THE DESIGNER'S OWN GROUND, and picking a nicer one is a trap I already fell into.
+              A white offset was invisible here, so the backdrop was changed to a mid grey to make it
+              read — which fixed the SYMPTOM in a surface that does not exist on a cake. Worse, core
+              sets its ground as a SCENE background, so it is in the render; a colour painted behind
+              a transparent canvas is a different mechanism as well as a different colour.
+              `DESIGNER_GROUND` is the one core uses, imported rather than copied.
+              ⚠️ And the thing it was hiding is TRUE: a white card on a white cake against a
+              near-white ground genuinely has almost no contrast, in the product as much as here.
+              The studio was reporting that correctly and I muffled it. If that matters, it is a
+              decision about what colours a card topper should default to — not about the backdrop. */}
+          <SceneBackground colour={DESIGNER_GROUND} />
           <OrbitControls enablePan={false} makeDefault target={[0, 0.45, 0]} />
           {/* ⚠️ THE CAKE, and it is not scenery. "How far into the cake" is a number with no visible
               effect unless the surface it goes into is on screen — you would be setting a depth
