@@ -532,7 +532,13 @@ export default function CardCutoutStudio() {
         )}
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, position: 'relative', background: '#F2EFE9' }}>
+      {/* ⚠️ A NEUTRAL MID GREY, not the cream every other studio uses, and it is a colour-judging
+          decision rather than a decorative one. This screen exists to choose two card colours. A
+          near-white backdrop behind a near-white cake makes a WHITE card invisible and flatters a
+          pink one — so the surface was quietly answering the question the baker came to ask. Grey is
+          also the only neutral that adds no cast of its own, which is why INVARIANTS #16 solves the
+          reference light on it. Kept light enough to sit in an admin panel without glaring. */}
+      <div style={{ flex: 1, minWidth: 0, position: 'relative', background: '#9E9E9C' }}>
         {/* ⚠️ `shadows`, because the designer's canvas has it and SceneLights only casts when asked.
             Without it the key light still lights the card but nothing lands on the icing beneath —
             no contact shadow under the plate, no shadow of the stick — and a lit object with no
