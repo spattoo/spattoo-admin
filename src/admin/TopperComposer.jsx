@@ -4,10 +4,11 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
+import { HexColorPicker } from 'react-colorful';
 import {
-  topperShapes, backingPlate, outlineOf,
+  topperShapes, backingPlate, offsetParts, outlineOf,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
-  SelectionBox, albedoForLight, loadTopperFace,
+  SelectionBox, albedoForLight, loadTopperFace, TOPPER_FACES,
 } from '@spattoo/designer';
 
 /* ── Topper composer — STEP 1 of a staged rebuild ────────────────────────────────────────────────
@@ -44,6 +45,11 @@ const CARD_LIGHT = Object.freeze([3.193, 2.940, 3.028]);
 const asRendered = (hex) => albedoForLight(hex, CARD_LIGHT, { rolloff: 6 });
 
 const blockFont = new FontLoader().parse(helvetikerBold);
+
+/* Every face core offers, plus the block one three ships. Same list as the card cutout studio, and
+ * for the same reason: TOPPER_FACES is all scripts, and a number topper wants a block. */
+const BLOCK_KEY = '__block';
+const FACES = { [BLOCK_KEY]: { label: 'Block' }, ...TOPPER_FACES };
 
 /* The shapes on offer are the families `backingPlate` already understands — the cake's own
  * `OUTLINE_FAMILIES` plus the two analytic ones it samples itself. Listed by key, so a family
@@ -116,7 +122,7 @@ function Grid() {
 // can share everything downstream.
 function contoursOf(obj, font) {
   if (obj.kind === 'text') {
-    if (!font) return null;
+    if (!font || !obj.text.trim()) return null;
     const probe = topperShapes(font, obj.text, { height: 1 });
     if (!probe.width) return null;
     return topperShapes(font, obj.text, { height: obj.size / probe.width }).parts;
@@ -130,22 +136,34 @@ function contoursOf(obj, font) {
   return plate ? [plate] : null;
 }
 
+const extrude = (parts, z) => (parts ?? []).map((p) => {
+  const shape = new THREE.Shape(p.outer.map(q => new THREE.Vector2(q.x, q.y)));
+  shape.holes = (p.holes ?? []).map(h => new THREE.Path(h.map(q => new THREE.Vector2(q.x, q.y))));
+  const g = new THREE.ExtrudeGeometry(shape, { depth: CARD_THICK, bevelEnabled: false });
+  g.translate(0, 0, z - CARD_THICK / 2);
+  return g;
+});
+
 function Piece({ obj, font, selected, onSelect }) {
   const parts = useMemo(() => contoursOf(obj, font), [obj, font]);
 
-  const geos = useMemo(() => (parts ?? []).map((p) => {
-    const shape = new THREE.Shape(p.outer.map(q => new THREE.Vector2(q.x, q.y)));
-    shape.holes = (p.holes ?? []).map(h => new THREE.Path(h.map(q => new THREE.Vector2(q.x, q.y))));
-    const g = new THREE.ExtrudeGeometry(shape, { depth: CARD_THICK, bevelEnabled: false });
-    g.translate(0, 0, -CARD_THICK / 2);
-    return g;
-  }), [parts]);
-  useEffect(() => () => geos.forEach(g => g.dispose()), [geos]);
+  /* ⚠️ The offset is a PROPERTY OF THE TEXT, not of the screen. It was a slider that existed whether
+   * or not there was anything to offset; here it belongs to the object it acts on, so two words on
+   * one topper can carry different bands — which the single-object studio could never express. */
+  const backParts = useMemo(() => (
+    obj.kind === 'text' && obj.offset > 0 && parts ? offsetParts(parts, obj.offset * obj.size) : null
+  ), [obj.kind, obj.offset, obj.size, parts]);
 
-  // The selection border traces the object's own bounds, which is also what a drag will grab.
+  const geos = useMemo(() => extrude(parts, 0), [parts]);
+  const backGeos = useMemo(() => extrude(backParts, -CARD_THICK), [backParts]);
+  useEffect(() => () => { geos.forEach(g => g.dispose()); backGeos.forEach(g => g.dispose()); },
+    [geos, backGeos]);
+
+  // The selection border traces the object's own bounds — including its backing, because that is
+  // the extent of the thing and what a drag will grab.
   const box = useMemo(() => {
     let lo = Infinity, hi = -Infinity, bo = Infinity, to = -Infinity;
-    for (const p of parts ?? []) for (const q of p.outer) {
+    for (const p of (backParts ?? parts ?? [])) for (const q of p.outer) {
       if (q.x < lo) lo = q.x; if (q.x > hi) hi = q.x;
       if (q.y < bo) bo = q.y; if (q.y > to) to = q.y;
     }
@@ -156,6 +174,12 @@ function Piece({ obj, font, selected, onSelect }) {
 
   return (
     <group position={[obj.x, obj.y, 0]}>
+      {backGeos.map((g, i) => (
+        <mesh key={`b${i}`} geometry={g} castShadow receiveShadow
+          onPointerDown={(e) => { e.stopPropagation(); onSelect(obj.id); }}>
+          <meshStandardMaterial color={asRendered(obj.offsetColour)} roughness={0.86} metalness={0} />
+        </mesh>
+      ))}
       {geos.map((g, i) => (
         <mesh key={i} geometry={g} castShadow receiveShadow
           onPointerDown={(e) => { e.stopPropagation(); onSelect(obj.id); }}>
@@ -171,6 +195,130 @@ function Piece({ obj, font, selected, onSelect }) {
         </group>
       )}
     </group>
+  );
+}
+
+/* ── The properties of whatever is selected ──────────────────────────────────────────────────────
+ *
+ * ⚠️ IT ONLY EXISTS WHEN SOMETHING IS SELECTED, and that is the point of the whole rebuild. The card
+ * cutout studio showed every control at all times — the offset slider with nothing to offset, the
+ * insertion depth with no stick — and a control that cannot act is one the reader has to rule out
+ * before finding the one that can (INVARIANTS #12). Here a control's presence IS the answer to
+ * "does this apply".
+ *
+ * ⚠️ And it sits BESIDE the canvas, never over it: the whole reason for the composition model is
+ * that you watch the thing change as you change it (INVARIANTS #11).
+ */
+function Row({ label, children }) {
+  return (
+    <label style={{ display: 'block', marginBottom: 12 }}>
+      <span style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#3D5A44', marginBottom: 5 }}>
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function Slide({ label, value, min, max, step, onChange, fmt }) {
+  return (
+    <label style={{ display: 'block', marginBottom: 12 }}>
+      <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#3D5A44' }}>{label}</span>
+        <span style={{ fontSize: 11.5, color: '#6B7C70', fontVariantNumeric: 'tabular-nums' }}>
+          {fmt ? fmt(value) : value}
+        </span>
+      </span>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        style={{ width: '100%', accentColor: '#3D5A44' }} />
+    </label>
+  );
+}
+
+function Colour({ label, value, onChange, open, onToggle }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <button type="button" onClick={onToggle}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, minHeight: 42,
+          padding: '0 11px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+          border: '1.5px solid #E2E8E3', background: '#fff' }}>
+        <span style={{ width: 19, height: 19, borderRadius: 5, background: value,
+          border: '1px solid rgba(0,0,0,0.12)' }} />
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#3D5A44' }}>{label}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#8A9A8E' }}>{value}</span>
+      </button>
+      {open && <HexColorPicker color={value} onChange={onChange}
+        style={{ width: '100%', height: 132, marginTop: 8 }} />}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: 9,
+  border: '1.5px solid #E2E8E3', fontFamily: 'inherit', fontSize: 13.5,
+};
+
+function Properties({ obj, onChange, onDelete }) {
+  const [wheel, setWheel] = useState(null);
+  const set = (patch) => onChange(obj.id, patch);
+
+  return (
+    <div style={{ flex: '0 0 268px', overflowY: 'auto', padding: 16, background: '#fff',
+      borderLeft: '1px solid #E8EFE9' }}>
+      <h2 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, color: '#2C3E33' }}>
+        {obj.kind === 'text' ? 'Text' : (SHAPES.find(x => x.key === obj.family)?.label ?? 'Shape')}
+      </h2>
+
+      {obj.kind === 'text' && (
+        <>
+          <Row label="Words">
+            <input value={obj.text} onChange={e => set({ text: e.target.value })} style={inputStyle} />
+          </Row>
+          <Row label="Face">
+            <select value={obj.face} onChange={e => set({ face: e.target.value })}
+              style={{ ...inputStyle, background: '#fff' }}>
+              {Object.entries(FACES).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
+            </select>
+          </Row>
+        </>
+      )}
+
+      {obj.kind === 'shape' && (
+        <Row label="Shape">
+          <select value={obj.family} onChange={e => set({ family: e.target.value })}
+            style={{ ...inputStyle, background: '#fff' }}>
+            {SHAPES.map(sh => <option key={sh.key} value={sh.key}>{sh.label}</option>)}
+          </select>
+        </Row>
+      )}
+
+      <Slide label="Size" value={obj.size} min={0.25} max={2.6} step={0.02} onChange={v => set({ size: v })}
+        fmt={v => v.toFixed(2)} />
+
+      <Colour label="Colour" value={obj.colour} onChange={v => set({ colour: v })}
+        open={wheel === 'c'} onToggle={() => setWheel(wheel === 'c' ? null : 'c')} />
+
+      {/* ⚠️ Offset belongs to TEXT and appears with it. A shape is already a solid — an outline
+          around it is a second shape, which is what adding another shape is for. */}
+      {obj.kind === 'text' && (
+        <>
+          <Slide label="Offset" value={obj.offset} min={0} max={0.22} step={0.005}
+            onChange={v => set({ offset: v })} fmt={v => (v === 0 ? 'none' : v.toFixed(3))} />
+          {obj.offset > 0 && (
+            <Colour label="Offset colour" value={obj.offsetColour} onChange={v => set({ offsetColour: v })}
+              open={wheel === 'o'} onToggle={() => setWheel(wheel === 'o' ? null : 'o')} />
+          )}
+        </>
+      )}
+
+      <button type="button" onClick={() => onDelete(obj.id)}
+        style={{ width: '100%', marginTop: 10, minHeight: 42, borderRadius: 9, cursor: 'pointer',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 800, color: '#8A6320',
+          background: '#FDF3E7', border: '1.5px solid #F0DCC0' }}>
+        Remove
+      </button>
+    </div>
   );
 }
 
@@ -191,16 +339,23 @@ function RailButton({ onClick, title, children, wide = false }) {
 export default function TopperComposer() {
   const [objects, setObjects] = useState([]);          // ⚠️ EMPTY. Nothing is on the canvas until asked for.
   const [selectedId, setSelected] = useState(null);
-  const [faceKey] = useState('__block');
-  const [font, setFont] = useState(blockFont);
   const nextId = useRef(1);
 
+  /* ⚠️ FONTS PER OBJECT, loaded once and kept. Two words on one topper can want two faces, so the
+   * font cannot be a property of the screen the way it was in the single-word studio. Held in state
+   * rather than a ref so arrival re-renders — a ref would load the face and never draw it. */
+  const [fonts, setFonts] = useState({ [BLOCK_KEY]: blockFont });
+  const wanted = useMemo(
+    () => [...new Set(objects.filter(o => o.kind === 'text').map(o => o.face))], [objects]);
   useEffect(() => {
-    if (faceKey === '__block') { setFont(blockFont); return; }
     let alive = true;
-    loadTopperFace(faceKey).then(f => alive && setFont(f)).catch(() => {});
+    for (const key of wanted) {
+      if (fonts[key]) continue;
+      loadTopperFace(key).then(f => alive && setFonts(m => (m[key] ? m : { ...m, [key]: f })))
+        .catch(() => {});
+    }
     return () => { alive = false; };
-  }, [faceKey]);
+  }, [wanted, fonts]);
 
   const add = useCallback((obj) => {
     const id = nextId.current++;
@@ -211,8 +366,22 @@ export default function TopperComposer() {
     setSelected(id);
   }, [objects.length]);
 
-  const addText = () => add({ kind: 'text', text: 'TEST', size: 1.2 });
+  const addText = () => add({
+    kind: 'text', text: 'TEST', size: 1.2, face: BLOCK_KEY,
+    // A band by default, because a card topper almost always has one and a baker who does not want
+    // it can drag it to none — easier than discovering a control that starts at zero.
+    offset: 0.06, offsetColour: '#FFFFFF',
+  });
   const addShape = (family) => add({ kind: 'shape', family, size: 1.0, colour: '#E9DFF2' });
+
+  const update = useCallback((id, patch) => {
+    setObjects(o => o.map(x => (x.id === id ? { ...x, ...patch } : x)));
+  }, []);
+  const remove = useCallback((id) => {
+    setObjects(o => o.filter(x => x.id !== id));
+    setSelected(s => (s === id ? null : s));
+  }, []);
+  const selected = objects.find(o => o.id === selectedId) ?? null;
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
@@ -266,7 +435,8 @@ export default function TopperComposer() {
             <meshBasicMaterial visible={false} />
           </mesh>
           {objects.map(o => (
-            <Piece key={o.id} obj={o} font={font} selected={o.id === selectedId} onSelect={setSelected} />
+            <Piece key={o.id} obj={o} font={fonts[o.face] ?? blockFont}
+              selected={o.id === selectedId} onSelect={setSelected} />
           ))}
           {/* Starts face on — a card is flat, so this IS the 2D view — and turns, because the same
               objects are what stands on the cake. */}
@@ -283,6 +453,9 @@ export default function TopperComposer() {
           </div>
         )}
       </div>
+
+      {/* Only when there is something selected — see the note on Properties. */}
+      {selected && <Properties obj={selected} onChange={update} onDelete={remove} />}
     </div>
   );
 }
