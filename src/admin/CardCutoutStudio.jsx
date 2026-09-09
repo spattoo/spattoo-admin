@@ -84,6 +84,38 @@ function useFace(key) {
   return font;
 }
 
+/* Lay one or two units out, and flatten them into one face list and one backing list.
+ *
+ * ⚠️ THE PAIR OVERLAPS ON PURPOSE. Two hearts set apart read as two toppers standing near each
+ * other; nudged together until they touch they read as ONE topper about two people, which is what a
+ * couple's cake wants. It is also what lets the piece count come back as 1 — overlapping backings
+ * are a single cuttable shape, and two that merely sit close are not.
+ */
+const PAIR_OVERLAP = 0.12;
+
+function place(units, gap) {
+  if (units.length === 1) return { face: units[0].face, back: units[0].back };
+  const widthOf = (u) => {
+    let lo = Infinity, hi = -Infinity;
+    for (const p of u.back) for (const q of p.outer) { if (q.x < lo) lo = q.x; if (q.x > hi) hi = q.x; }
+    return hi - lo;
+  };
+  const w = Math.max(...units.map(widthOf));
+  const step = w * (1 - PAIR_OVERLAP);
+  const shift = (parts, dx) => parts.map(p => ({
+    ...p,
+    outer: p.outer.map(q => ({ x: q.x + dx, y: q.y })),
+    holes: (p.holes ?? []).map(h => h.map(q => ({ x: q.x + dx, y: q.y }))),
+  }));
+  const face = [], back = [];
+  units.forEach((u, i) => {
+    const dx = (i - (units.length - 1) / 2) * step;
+    face.push(...shift(u.face, dx));
+    back.push(...shift(u.back, dx));
+  });
+  return { face, back };
+}
+
 // One extruded sheet of card, from a list of {outer, holes} contours.
 function sheet(parts, thickness) {
   if (!parts?.length) return null;
@@ -95,9 +127,18 @@ function sheet(parts, thickness) {
   return geos;
 }
 
-function Cutout({ font, text, span, backing, faceColour, backColour, offset, thickness, stick, bury, onMeasure }) {
+function Cutout({ font, texts, span, backing, faceColour, backColour, offset, thickness, stick, bury, onMeasure }) {
+  /* ⚠️ A PAIR IS TWO WORDS ON TWO MATCHING PLATES — the couple's cake, two hearts, a name in each.
+   *
+   * Both are cut at the same LETTER HEIGHT rather than to the same width: two names on one cake are
+   * read as a pair, and "Jo" set twice the size of "Alexandra" so their boxes match would look like
+   * a mistake. The plates are then matched the other way round — each is fitted, the larger wins,
+   * and both are rebuilt to it (`minHalf`), so a short name simply sits in more space. */
+  const words = useMemo(() => texts.map(t => t.trim()).filter(Boolean), [texts]);
+
   const build = useMemo(() => {
-    if (!font || !text.trim()) return null;
+    const text = words[0];
+    if (!font || !text) return null;
     const probe = topperShapes(font, text, { height: 1 });
     if (!probe.width) return null;
     /* ⚠️ SIZED BY HOW FAR IT REACHES ACROSS THE CAKE, not by a letter height — the same rule the
@@ -106,30 +147,44 @@ function Cutout({ font, text, span, backing, faceColour, backColour, offset, thi
      * control and the letter height is the READOUT: drag until the millimetres say what you want.
      * That is also why the acrylic topper stacks onto two rows — it is the only other way to keep
      * a long phrase legible at a fixed span. */
-    const height = (CAKE_R * 2 * span) / probe.width;
-    return topperShapes(font, text, { height });
-  }, [font, text, span]);
+    /* One height for both, taken from the LONGER word so the pair fits the cake. */
+    const widest = Math.max(...words.map(w => topperShapes(font, w, { height: 1 }).width || 1));
+    const height = (CAKE_R * 2 * span) / (widest * (words.length > 1 ? 2.1 : 1));
+    return words.map(w => topperShapes(font, w, { height }));
+  }, [font, words, span]);
 
-  /* ⚠️ ONE derivation of the backing, used by the meshes, the piece count, the stick's seat and the
-   * measurements. It was computed three times from the same inputs and they can only agree by
-   * accident once anything about it grows. */
-  const backParts = useMemo(() => {
-    if (!build?.parts?.length) return [];
-    const d = offset * (build.capHeight || build.height || 1);
-    if (backing === 'outline') return offsetParts(build.parts, d);
-    const plate = backingPlate(build.parts, { family: backing, pad: d });
-    return plate ? [plate] : [];
+  /* ⚠️ ONE derivation, used by the meshes, the piece count, the stick's seat and the measurements.
+   * These were computed separately from the same inputs and can only agree by accident once any of
+   * it grows.
+   *
+   * For a pair: each word's plate is fitted, the larger wins, and BOTH are rebuilt to it, then the
+   * two are pushed apart and left slightly overlapping — which is what makes two hearts read as one
+   * topper rather than as two toppers that happen to be near each other. The overlap is also what
+   * lets the piece count come back as 1: joined backings are one cuttable shape. */
+  const pair = useMemo(() => {
+    if (!build?.length) return null;
+    const d = offset * (build[0].capHeight || build[0].height || 1);
+
+    if (backing === 'outline') {
+      const units = build.map(b => ({ face: b.parts, back: offsetParts(b.parts, d), b }));
+      return place(units, d);
+    }
+    const first = build.map(b => backingPlate(b.parts, { family: backing, pad: d })).filter(Boolean);
+    if (!first.length) return null;
+    const floor = {
+      w: Math.max(...first.map(p => p.half.w)),
+      h: Math.max(...first.map(p => p.half.h)),
+    };
+    const units = build.map((b, i) => {
+      const plate = backingPlate(b.parts, { family: backing, pad: d, minHalf: floor });
+      return { face: b.parts, back: plate ? [plate] : [], b };
+    });
+    return place(units, d);
   }, [build, offset, backing]);
 
-  const layers = useMemo(() => {
-    if (!build?.parts?.length) return null;
-    const face = build.parts;
-    /* ⚠️ Offset in the WORD's units, not in scene units. `offset` is a fraction of the cap height,
-     * so the band stays visually the same on a short "10" and a long "Emily" — an absolute distance
-     * looks like a hairline on one and a slab on the other, and the baker would have to re-tune it
-     * for every word. */
-    return { face: sheet(face, thickness), back: sheet(backParts, thickness) };
-  }, [build, backParts, thickness]);
+  const layers = useMemo(() => (pair
+    ? { face: sheet(pair.face, thickness), back: sheet(pair.back, thickness) }
+    : null), [pair, thickness]);
 
   useEffect(() => () => {
     layers?.face?.forEach(g => g.dispose());
@@ -139,39 +194,37 @@ function Cutout({ font, text, span, backing, faceColour, backColour, offset, thi
   /* ⚠️ HOW MANY SEPARATE BITS OF CARD THIS IS, which decides whether it can be made at all.
    *
    * A block face's letters do not touch. "Sandeep" in Poppins is SEVEN loose pieces, and the thing
-   * that joins them is the backing sheet — grow the offset until the outlines meet and it becomes
-   * one cuttable shape. Measured: Lilita One joins at 0.05 and Poppins not until 0.19, against a
-   * default of 0.09. So at the default, one of those faces produces a topper and the other produces
-   * a bag of letters, and NOTHING ON SCREEN WOULD SAY SO — both render identically from the front.
-   *
-   * The acrylic studio counts its pieces for exactly this reason. Counted on the BACKING, because
-   * that is the sheet that has to hold together; the face can be as loose as it likes. */
+   * that joins them is the backing — grow the offset until the outlines meet and it becomes one
+   * cuttable shape. Measured: Lilita One joins at 0.05 and Poppins not until 0.19, against a default
+   * of 0.09. So at the default one face gives a topper and the other a bag of letters, and NOTHING
+   * ON SCREEN WOULD SAY SO — both render identically from the front. The acrylic studio counts its
+   * pieces for the same reason. Counted on the BACKING: that is the sheet that has to hold together,
+   * and the face can be as loose as it likes. */
   const measured = useMemo(() => {
-    if (!build?.parts?.length || !backParts.length) return { pieces: 0, letter: 0, across: 0 };
+    if (!pair?.back?.length) return { pieces: 0, letter: 0, across: 0, tall: 0 };
     let lox = Infinity, hix = -Infinity, loy = Infinity, hiy = -Infinity;
-    for (const p of backParts) for (const q of p.outer) {
+    for (const p of pair.back) for (const q of p.outer) {
       if (q.x < lox) lox = q.x; if (q.x > hix) hix = q.x;
       if (q.y < loy) loy = q.y; if (q.y > hiy) hiy = q.y;
     }
     return {
+      pieces: components(pair.back).length,
       // Measured off the built backing rather than predicted: on a plate the word's cap height is
       // no longer what a ruler reads across the finished topper.
-      pieces: components(backParts).length,
-      letter: build.capHeight || 0,
+      letter: build?.[0]?.capHeight || 0,
       across: hix - lox,
       tall: hiy - loy,
     };
-  }, [build, backParts]);
+  }, [pair, build]);
 
   useEffect(() => { onMeasure?.(measured); }, [measured, onMeasure]);
   const pieces = measured.pieces;
 
   if (!layers) return null;
 
-  /* Measured off the BACKING, which is the biggest sheet — the stick has to disappear behind what
-   * is actually there, and the backing hangs lower than the face by the offset. */
+  /* The stick hides behind the BACKING, which is the biggest sheet and hangs lowest. */
   let lo = Infinity, hi = -Infinity;
-  for (const p of backParts) for (const q of p.outer) { if (q.y < lo) lo = q.y; if (q.y > hi) hi = q.y; }
+  for (const p of pair.back) for (const q of p.outer) { if (q.y < lo) lo = q.y; if (q.y > hi) hi = q.y; }
   const wordH = Math.max(1e-3, hi - lo);
 
   /* ⚠️ SEATED BY THE BOTTOM OF THE STICK, not by the word. `bury` is how deep the stick goes into
@@ -302,6 +355,7 @@ function Swatch({ label, value, onChange, open, onToggle }) {
 
 export default function CardCutoutStudio() {
   const [text, setText] = useState('10');
+  const [text2, setText2] = useState('');
   const [faceKey, setFaceKey] = useState(BLOCK_KEY);
   const [faceColour, setFaceColour] = useState('#F2AEC4');
   const [backColour, setBackColour] = useState('#FFFFFF');
@@ -332,6 +386,19 @@ export default function CardCutoutStudio() {
             Word or number
           </span>
           <input value={text} onChange={e => setText(e.target.value)} placeholder="10"
+            style={{ width: '100%', boxSizing: 'border-box', padding: '10px 11px', borderRadius: 9,
+              border: '1.5px solid #E2E8E3', fontFamily: 'inherit', fontSize: 14 }} />
+        </label>
+
+        {/* ⚠️ A second name, for a couple's cake — two hearts, a name in each. Kept as one extra
+            FIELD rather than a mode with a toggle: leaving it empty is the same as not wanting it,
+            which needs no explaining and nothing to switch off. The pair only exists while there is
+            something in it. */}
+        <label style={{ display: 'block', marginBottom: 14 }}>
+          <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3D5A44', marginBottom: 5 }}>
+            Second name <span style={{ fontWeight: 500, color: '#8A9A8E' }}>— for a couple, optional</span>
+          </span>
+          <input value={text2} onChange={e => setText2(e.target.value)} placeholder="leave empty for one"
             style={{ width: '100%', boxSizing: 'border-box', padding: '10px 11px', borderRadius: 9,
               border: '1.5px solid #E2E8E3', fontFamily: 'inherit', fontSize: 14 }} />
         </label>
@@ -450,7 +517,7 @@ export default function CardCutoutStudio() {
             <cylinderGeometry args={[CAKE_R, CAKE_R, 0.72, 72]} />
             <meshStandardMaterial color="#FAF5EE" roughness={0.92} />
           </mesh>
-          <Cutout font={font} text={text} span={span} faceColour={faceColour} backColour={backColour}
+          <Cutout font={font} texts={[text, text2]} span={span} faceColour={faceColour} backColour={backColour}
             backing={backing} offset={offset} thickness={thickness} stick={stick} bury={bury}
             onMeasure={setM} />
         </Canvas>
