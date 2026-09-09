@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
@@ -8,7 +8,7 @@ import { HexColorPicker } from 'react-colorful';
 import {
   topperShapes, backingPlate, offsetParts, outlineOf,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
-  SelectionBox, albedoForLight, loadTopperFace, TOPPER_FACES,
+  SelectionBox, SELECTION_COLOR, albedoForLight, loadTopperFace, TOPPER_FACES,
 } from '@spattoo/designer';
 
 /* ── Topper composer — STEP 1 of a staged rebuild ────────────────────────────────────────────────
@@ -164,13 +164,14 @@ const extrude = (parts, z) => (parts ?? []).map((p) => {
   return g;
 });
 
-function Piece({ obj, font, selected, onSelect, onMove }) {
+function Piece({ obj, font, selected, editing, onSelect, onMove, onEdit, onChange }) {
   const { controls } = useThree();
   const grab = useRef(null);
 
   const begin = (e) => {
     e.stopPropagation();
     onSelect(obj.id);
+    if (editing) return;                 // a drag would fight the caret
     const hit = planeHit(e.ray);
     if (!hit) return;
     grab.current = { dx: obj.x - hit.x, dy: obj.y - hit.y };
@@ -180,7 +181,7 @@ function Piece({ obj, font, selected, onSelect, onMove }) {
   };
 
   const move = (e) => {
-    if (!grab.current) return;
+    if (!grab.current || editing) return;
     e.stopPropagation();
     const hit = planeHit(e.ray);
     if (!hit) return;
@@ -238,10 +239,38 @@ function Piece({ obj, font, selected, onSelect, onMove }) {
       ))}
       {geos.map((g, i) => (
         <mesh key={i} geometry={g} castShadow receiveShadow
-          onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+          onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+          onDoubleClick={(e) => { if (obj.kind === 'text') { e.stopPropagation(); onEdit(obj.id); } }}>
           <meshStandardMaterial color={asRendered(obj.colour)} roughness={0.86} metalness={0} />
         </mesh>
       ))}
+      {/* ⚠️ EDITED WHERE IT IS. The words were also a field in the side panel, which meant typing in
+          one place and watching another — and two controls for one value, either of which could be
+          the one you reach for. A real <input> is laid over the object rather than keystrokes being
+          captured: a caret, selection, undo, IME and a phone keyboard all come free, and none of
+          them can be faked by listening for keydown.
+          Screen-space rather than `transform`, on purpose — this is an editing affordance, not the
+          artwork, so it should stay legible when the card is small or the camera is turned. */}
+      {editing && obj.kind === 'text' && (
+        <Html center zIndexRange={[40, 0]} style={{ pointerEvents: 'auto' }}>
+          <input
+            autoFocus
+            defaultValue={obj.text}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => onChange(obj.id, { text: e.target.value })}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
+            }}
+            onBlur={() => onEdit(null)}
+            style={{
+              minWidth: 120, textAlign: 'center', padding: '6px 10px', borderRadius: 8,
+              border: `2px solid ${SELECTION_COLOR}`, outline: 'none', background: '#fff',
+              fontFamily: "'Quicksand', sans-serif", fontSize: 16, fontWeight: 700, color: '#2C3E33',
+            }}
+          />
+        </Html>
+      )}
       {selected && (
         <group position={[box.cx, box.cy, 0]}>
           {/* THE selection cue, from core — a border and not a tint, because an emissive highlight is
@@ -328,9 +357,13 @@ function Properties({ obj, onChange, onDelete }) {
 
       {obj.kind === 'text' && (
         <>
-          <Row label="Words">
-            <input value={obj.text} onChange={e => set({ text: e.target.value })} style={inputStyle} />
-          </Row>
+          {/* ⚠️ NO "Words" FIELD HERE. It used to be one, which meant typing on the right while
+              watching the middle — and two controls for one value, either of which might be the one
+              you reach for. The words are edited on the object; this panel is for everything that is
+              not the words. */}
+          <p style={{ margin: '-4px 0 12px', fontSize: 11, color: '#8A9A8E', lineHeight: 1.4 }}>
+            Double-click the text to edit it.
+          </p>
           <Row label="Face">
             <select value={obj.face} onChange={e => set({ face: e.target.value })}
               style={{ ...inputStyle, background: '#fff' }}>
@@ -395,6 +428,7 @@ function RailButton({ onClick, title, children, wide = false }) {
 export default function TopperComposer() {
   const [objects, setObjects] = useState([]);          // ⚠️ EMPTY. Nothing is on the canvas until asked for.
   const [selectedId, setSelected] = useState(null);
+  const [editingId, setEditing] = useState(null);
   const nextId = useRef(1);
 
   /* ⚠️ FONTS PER OBJECT, loaded once and kept. Two words on one topper can want two faces, so the
@@ -420,6 +454,10 @@ export default function TopperComposer() {
     const n = objects.length;
     setObjects(o => [...o, { id, x: n * 0.12, y: -n * 0.12, colour: '#F2AEC4', ...obj }]);
     setSelected(id);
+    /* New text opens for editing with "TEST" selected, so the first keystroke replaces it. Adding a
+     * word and then having to discover how to change it is a step nobody wants. */
+    if (obj.kind === 'text') setEditing(id);
+    return id;
   }, [objects.length]);
 
   const addText = () => add({
@@ -436,6 +474,7 @@ export default function TopperComposer() {
   const remove = useCallback((id) => {
     setObjects(o => o.filter(x => x.id !== id));
     setSelected(s => (s === id ? null : s));
+    setEditing(e => (e === id ? null : e));
   }, []);
   const selected = objects.find(o => o.id === selectedId) ?? null;
 
@@ -486,13 +525,14 @@ export default function TopperComposer() {
           <Grid />
           {/* A click on nothing clears the selection, which is what every canvas does and what makes
               the border mean "this one" rather than "the last one you touched". */}
-          <mesh position={[0, 0, -0.05]} onPointerDown={() => setSelected(null)}>
+          <mesh position={[0, 0, -0.05]} onPointerDown={() => { setSelected(null); setEditing(null); }}>
             <planeGeometry args={[GRID_HALF * 2, GRID_HALF * 2]} />
             <meshBasicMaterial visible={false} />
           </mesh>
           {objects.map(o => (
             <Piece key={o.id} obj={o} font={fonts[o.face] ?? blockFont}
-              selected={o.id === selectedId} onSelect={setSelected} onMove={update} />
+              selected={o.id === selectedId} editing={o.id === editingId}
+              onSelect={setSelected} onMove={update} onEdit={setEditing} onChange={update} />
           ))}
           {/* Starts face on — a card is flat, so this IS the 2D view — and turns, because the same
               objects are what stands on the cake. */}
