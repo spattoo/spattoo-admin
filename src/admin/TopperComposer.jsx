@@ -174,9 +174,14 @@ const extrude = (parts, z) => (parts ?? []).map((p) => {
  * thing added is in front" is true rather than accidental. */
 const LAYER_Z = CARD_THICK * 0.1;
 
+/* Corner grips on the selection box. Small squares in world units — the working camera is
+ * orthographic and fixed, so a world size IS a screen size and there is nothing to compensate for. */
+const HANDLE = 0.075;
+
 function Piece({ obj, layer, font, selected, editing, onSelect, onMove, onEdit, onChange }) {
   const { controls } = useThree();
   const grab = useRef(null);
+  const sizing = useRef(null);
 
   const begin = (e) => {
     e.stopPropagation();
@@ -208,6 +213,47 @@ function Piece({ obj, layer, font, selected, editing, onSelect, onMove, onEdit, 
   const end = (e) => {
     if (!grab.current) return;
     grab.current = null;
+    if (controls) controls.enabled = true;
+    e.target?.releasePointerCapture?.(e.pointerId);
+  };
+
+  /* ── Resizing, from any corner ─────────────────────────────────────────────────────────────────
+   *
+   * ⚠️ SCALED BY THE RATIO OF DISTANCES FROM THE CENTRE, not by matching the corner to the pointer.
+   * The two agree only while the grip is exactly under the finger, and they part company the moment
+   * the pointer strays off the diagonal — matching the corner then makes the object lunge. A ratio
+   * of "how far out are you now" to "how far out were you when you grabbed" is stable in every
+   * direction, and it is the same law as the drag's grab offset (INVARIANTS #10): the thing you took
+   * hold of stays where you are holding it.
+   *
+   * ⚠️ AND IT SCALES ABOUT THE OBJECT'S CENTRE, so the piece grows evenly and its position does not
+   * drift. Anchoring the opposite corner is the other convention and needs the object's own bounds
+   * to stay fixed while its size changes — which is exactly what a re-cut word does not do. */
+  const sizeStart = (e) => {
+    e.stopPropagation();
+    onSelect(obj.id);
+    const hit = planeHit(e.ray);
+    if (!hit) return;
+    const r = Math.hypot(hit.x - obj.x, hit.y - obj.y);
+    if (r < 1e-4) return;
+    sizing.current = { r, size: obj.size };
+    if (controls) controls.enabled = false;
+    e.target.setPointerCapture?.(e.pointerId);
+  };
+
+  const sizeMove = (e) => {
+    if (!sizing.current) return;
+    e.stopPropagation();
+    const hit = planeHit(e.ray);
+    if (!hit) return;
+    const r = Math.hypot(hit.x - obj.x, hit.y - obj.y);
+    const next = sizing.current.size * (r / sizing.current.r);
+    onChange(obj.id, { size: Math.max(0.2, Math.min(3.2, next)) });
+  };
+
+  const sizeEnd = (e) => {
+    if (!sizing.current) return;
+    sizing.current = null;
     if (controls) controls.enabled = true;
     e.target?.releasePointerCapture?.(e.pointerId);
   };
@@ -287,6 +333,17 @@ function Piece({ obj, layer, font, selected, editing, onSelect, onMove, onEdit, 
               additive and corrupts the albedo it is meant to advertise. On a screen for choosing
               colours that is not a small thing. */}
           <SelectionBox width={box.w * 1.06} height={box.h * 1.12} depth={CARD_THICK * 3} />
+          {/* A grip on each corner, so the nearest one is always to hand whichever way the piece
+              is sitting. All four do the same thing — the scale is about the centre. */}
+          {[[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => (
+            <mesh key={`${sx}${sy}`}
+              position={[sx * box.w * 0.53, sy * box.h * 0.56, CARD_THICK * 2]}
+              onPointerDown={sizeStart} onPointerMove={sizeMove}
+              onPointerUp={sizeEnd} onPointerCancel={sizeEnd}>
+              <planeGeometry args={[HANDLE, HANDLE]} />
+              <meshBasicMaterial color={SELECTION_COLOR} toneMapped={false} />
+            </mesh>
+          ))}
         </group>
       )}
     </group>
@@ -332,8 +389,22 @@ function Slide({ label, value, min, max, step, onChange, fmt }) {
 }
 
 function Colour({ label, value, onChange, open, onToggle }) {
+  const wrap = useRef(null);
+  /* ⚠️ CLOSES ON A CLICK OUTSIDE IT. Opened, the wheel is 130px of panel sitting between the colour
+   * and everything below it, and the only way out was to find the same swatch again — so it stayed
+   * open and pushed the rest of the controls down the page. Closing on the next click anywhere else
+   * is what every picker does and needs no affordance of its own.
+   * `mousedown`, not `click`: a click that lands on another control should close this AND reach that
+   * control, and waiting for click means the first press is spent shutting the picker. */
+  useEffect(() => {
+    if (!open) return;
+    const away = (e) => { if (wrap.current && !wrap.current.contains(e.target)) onToggle(); };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open, onToggle]);
+
   return (
-    <div style={{ marginBottom: 10 }}>
+    <div ref={wrap} style={{ marginBottom: 10 }}>
       <button type="button" onClick={onToggle}
         style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, minHeight: 42,
           padding: '0 11px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
