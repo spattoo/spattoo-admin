@@ -519,7 +519,7 @@ function SaveBlock({ medium, setMedium, editing, saveName, setSaveName, busy, ms
     <div style={{ padding: 16, marginTop: 'auto' }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase',
         color: '#9AA8A0', marginBottom: 8 }}>
-        {editing ? 'Editing a saved element' : 'Save as element'}
+        {editing ? 'Editing a ready-made' : 'Save as a ready-made'}
       </div>
 
       {editing && (
@@ -553,8 +553,13 @@ function SaveBlock({ medium, setMedium, editing, saveName, setSaveName, busy, ms
         </div>
       </div>
 
+      {/* ⚠️ It is named for what a BAKER will see on the shelf, not for this screen. The field asked
+          for "the element name" once and got answered with the name of the studio, which is exactly
+          the confusion the old wording invited. */}
+      <span style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#3D5A44',
+        marginBottom: 6 }}>Called</span>
       <input value={saveName} onChange={e => setSaveName(e.target.value)}
-        placeholder="e.g. Gold 10 on a heart" style={{ ...inputStyle, marginBottom: 8 }} />
+        placeholder="e.g. Happy Birthday on a heart" style={{ ...inputStyle, marginBottom: 8 }} />
 
       <button type="button" onClick={save} disabled={busy || !ready}
         style={{ width: '100%', minHeight: 42, borderRadius: 9, fontFamily: 'inherit', fontSize: 12.5,
@@ -579,8 +584,15 @@ function SaveBlock({ medium, setMedium, editing, saveName, setSaveName, busy, ms
       )}
 
       <p style={{ margin: '10px 0 0', fontSize: 11, lineHeight: 1.5, color: '#8A9A8E' }}>
-        The row carries WHAT IS ON THE CANVAS — the words, the shapes, their colours and where they
-        sit. Not which cake it goes on, and not how big: that is the customer's to decide.
+        This saves a <b>ready-made</b>: a card topper that appears on the shelf under Numbers &amp;
+        Letters, with this canvas as its picture. Tapping it opens the studio with these pieces
+        already on it — a starting point, not a finished thing. The baker retypes the name, changes
+        the colours, and keeps their own version.
+      </p>
+      <p style={{ margin: '8px 0 0', fontSize: 11, lineHeight: 1.5, color: '#8A9A8E' }}>
+        ⚠️ The plain <b>make one from scratch</b> item is not saved here — it is a single element
+        row with an empty canvas, added once in Add Element. Ready-mades are extra doors to the same
+        studio, not a catalogue of every topper anyone might want.
       </p>
     </div>
   );
