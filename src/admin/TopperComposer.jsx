@@ -10,6 +10,7 @@ import {
   offsetParts, outlineOf, topperContours,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
   SelectionBox, SELECTION_COLOR, albedoForLight, loadTopperFace, TOPPER_FACES,
+  TOPPER_PRESETS, presetPaths,
 } from '@spattoo/designer';
 
 /* ── Topper composer — STEP 1 of a staged rebuild ────────────────────────────────────────────────
@@ -652,12 +653,25 @@ function ThumbFit({ active, target }) {
   return null;
 }
 
-function RailButton({ onClick, title, children, wide = false }) {
+/* The picture on a preset button — the real outlines, drawn flat. `presetPaths` is the same function
+   the cake's shapes come from, so it cannot drift from what gets made (INVARIANTS #15). */
+function PresetIcon({ objects, font, size = 46 }) {
+  const built = useMemo(() => presetPaths(objects, font), [objects, font]);
+  if (!built) return null;
+  return (
+    <svg viewBox={built.viewBox} width={size} height={size}
+      style={{ display: 'block', overflow: 'hidden' }} aria-hidden="true">
+      {built.paths.map(p => <path key={p.key} d={p.d} fill={p.colour} fillRule="evenodd" />)}
+    </svg>
+  );
+}
+
+function RailButton({ onClick, title, children, wide = false, compact = false }) {
   return (
     <button type="button" onClick={onClick} title={title} aria-label={title}
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-        width: wide ? '100%' : 46, minHeight: 46, borderRadius: 10, cursor: 'pointer',
+        width: wide ? '100%' : 46, minHeight: compact ? 38 : 46, borderRadius: 10, cursor: 'pointer',
         fontFamily: 'inherit', fontSize: 15, fontWeight: 800, color: '#3D5A44',
         background: '#fff', border: '1.5px solid #E2E8E3',
       }}>
@@ -771,6 +785,13 @@ export default function TopperComposer() {
     // it can drag it to none — easier than discovering a control that starts at zero.
     offset: 0.06, offsetColour: '#FFFFFF',
   });
+  /* Ids are minted here, so picking the same preset twice cannot make two objects share one. */
+  const usePreset = (pre) => {
+    setObjects(pre.objects.map(o => ({ ...o, id: nextId.current++ })));
+    setSelected(null);
+    setEditing(null);
+  };
+
   // Offset starts at nothing: an outline appears because somebody asked for one.
   const addShape = (family) => add({
     kind: 'shape', family, size: 1.0, colour: '#E9DFF2', offset: 0, offsetColour: '#FFFFFF',
@@ -796,7 +817,7 @@ export default function TopperComposer() {
     <div className="tc">
       <style>{`
         .tc { display: flex; height: calc(100vh - 56px); overflow: hidden; }
-        .tc > .tcRail { flex: 0 0 96px; display: flex; flex-direction: column; gap: 16; }
+        .tc > .tcRail { flex: 0 0 112px; display: flex; flex-direction: column; gap: 16; overflow-y: auto; }
         .tc > .tcStage { flex: 1; min-width: 0; position: relative; }
         .tc > .tcProps { flex: 0 0 268px; overflow-y: auto; }
         @media (max-width: 820px) {
@@ -829,6 +850,22 @@ export default function TopperComposer() {
             {SHAPES.map(sh => (
               <RailButton key={sh.key} onClick={() => addShape(sh.key)} title={`Add ${sh.label.toLowerCase()}`} wide>
                 <ShapeIcon family={sh.key} />
+              </RailButton>
+            ))}
+          </div>
+        </div>
+
+        {/* The same presets the baker's studio opens with — imported, never a second list. Here they
+            are also the quickest way to author a ready-made: start from one, change the wording,
+            save. Icon only, like the shapes; the name rides on the tooltip. */}
+        <div>
+          <span style={{ display: 'block', fontSize: 10, fontWeight: 800, letterSpacing: 0.6,
+            textTransform: 'uppercase', color: '#9AA8A0', marginBottom: 7 }}>Presets</span>
+          {/* Two columns: six will not stack without the last pair falling below the fold. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+            {TOPPER_PRESETS.map(pre => (
+              <RailButton key={pre.key} onClick={() => usePreset(pre)} title={pre.label} wide compact>
+                <PresetIcon objects={pre.objects} font={blockFont} size={30} />
               </RailButton>
             ))}
           </div>
@@ -891,9 +928,10 @@ export default function TopperComposer() {
         {objects.length === 0 && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
             justifyContent: 'center', pointerEvents: 'none' }}>
-            <span style={{ fontSize: 13, color: '#8A9A8E', fontFamily: "'Quicksand', sans-serif",
-              background: 'rgba(255,255,255,0.82)', padding: '8px 14px', borderRadius: 9 }}>
-              Add text or a shape from the left
+            <span style={{ fontSize: 13, color: '#5B6B60', fontFamily: "'Quicksand', sans-serif",
+              fontWeight: 700, background: 'rgba(255,255,255,0.82)', padding: '8px 14px',
+              borderRadius: 9 }}>
+              Pick a preset on the left, or add text or a shape
             </span>
           </div>
         )}
