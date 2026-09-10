@@ -598,6 +598,63 @@ function SaveBlock({ medium, setMedium, editing, saveName, setSaveName, busy, ms
   );
 }
 
+/* ── The catalogue tile is a PHOTO OF THE PIECE, not a photo of the studio ──────────────────────
+ *
+ * ⚠️ WHAT IS CAPTURED IS THE LIVE CANVAS, so everything the studio draws to help you WORK ends up in
+ * the shop. The first tile this produced was a square of graph paper with a purple selection box
+ * across it and the topper about a quarter of the width — at the 60px a picker card actually is,
+ * that is a grid with a smudge on it.
+ *
+ * Three separate faults, and hiding the grid alone would have fixed only the ugliest:
+ *   1. the grid       — a working surface, not part of the product
+ *   2. the selection  — the box and its handles are UI about what you last touched
+ *   3. the framing    — a composition drawn small, or off to one side, stays that way in the tile
+ *
+ * The third is the one `useElementSave` already has a long note about ("the thumbnail is still
+ * small"), and it cannot be fixed by cropping: the capture takes the middle square, so a piece drawn
+ * near an edge is cropped OUT rather than shrunk. So the camera is moved onto the pieces and zoomed
+ * to fit them, for the one frame that gets photographed, and put back straight after.
+ *
+ * ⚠️ IT RESTORES WHAT IT FOUND. This is the working camera — leaving it zoomed would silently change
+ * where every later drag lands, and the drag maths reads the camera. */
+function ThumbFit({ active, target }) {
+  const { camera } = useThree();
+  const saved = useRef(null);
+
+  useEffect(() => {
+    if (!active) {
+      if (saved.current) {
+        camera.zoom = saved.current.zoom;
+        camera.position.set(...saved.current.pos);
+        camera.updateProjectionMatrix();
+        saved.current = null;
+      }
+      return;
+    }
+    const group = target?.current;
+    if (!group) return;
+    const box = new THREE.Box3().setFromObject(group);
+    if (box.isEmpty()) return;
+
+    saved.current = { zoom: camera.zoom, pos: camera.position.toArray() };
+
+    const size = box.getSize(new THREE.Vector3());
+    const mid = box.getCenter(new THREE.Vector3());
+    /* The SQUARE is what gets uploaded, so the shorter side of the viewport is the one that must
+       hold the piece — fitting to the width would push a tall topper out of the crop. */
+    const visW = (camera.right - camera.left) / camera.zoom;
+    const visH = (camera.top - camera.bottom) / camera.zoom;
+    const fill = Math.max(size.x, size.y);
+    if (!(fill > 0)) return;
+    // 0.8, so the piece is not jammed against the edges of its own card.
+    camera.zoom *= (0.8 * Math.min(visW, visH)) / fill;
+    camera.position.set(mid.x, mid.y, camera.position.z);
+    camera.updateProjectionMatrix();
+  }, [active, camera, target]);
+
+  return null;
+}
+
 function RailButton({ onClick, title, children, wide = false }) {
   return (
     <button type="button" onClick={onClick} title={title} aria-label={title}
@@ -645,7 +702,10 @@ export default function TopperComposer() {
   /* ⚠️ THE THUMBNAIL IS WHATEVER THIS BOX SHOWS, so the ref goes on the stage and not on the canvas:
      `captureThumbnail` looks for a canvas INSIDE the node it is given. */
   const stageRef = useRef(null);
+  const piecesRef = useRef(null);
   const [medium, setMedium] = useState('acrylic');
+  /* True only for the handful of frames being photographed — see ThumbFit. */
+  const [capturing, setCapturing] = useState(false);
 
   /* The same hook every other generated studio uses (INVARIANTS #3). Until this existed the studio
      could only hand its work to a developer to paste into code, which rule 3 calls a mock-up rather
@@ -684,6 +744,16 @@ export default function TopperComposer() {
       if (el.medium) setMedium(el.medium);
     },
   });
+
+  /* ⚠️ TWO FRAMES, NOT ONE. `preserveDrawingBuffer` keeps the LAST frame drawn, so the capture has
+     to happen after the grid has actually gone and the camera has actually moved — asking for the
+     pixels in the same tick photographs the studio exactly as it looked before. Two rAFs is one
+     React commit plus one R3F draw. */
+  async function saveWithCleanTile() {
+    setCapturing(true);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try { await save(); } finally { setCapturing(false); }
+  }
 
   const add = useCallback((obj) => {
     const id = nextId.current++;
@@ -786,18 +856,24 @@ export default function TopperComposer() {
           {/* The designer's own ground, imported rather than chosen, so what is judged here is what a
               cake shows (INVARIANTS #17). */}
           <SceneBackground colour={DESIGNER_GROUND} />
-          <Grid />
+          {/* A working surface, and no part of the product — so it is not in the tile. */}
+          {!capturing && <Grid />}
           {/* A click on nothing clears the selection, which is what every canvas does and what makes
               the border mean "this one" rather than "the last one you touched". */}
           <mesh position={[0, 0, -0.05]} onPointerDown={() => { setSelected(null); setEditing(null); }}>
             <planeGeometry args={[GRID_HALF * 2, GRID_HALF * 2]} />
             <meshBasicMaterial visible={false} />
           </mesh>
-          {objects.map((o, i) => (
-            <Piece key={o.id} obj={o} layer={i} font={fonts[o.face] ?? blockFont}
-              selected={o.id === selectedId} editing={o.id === editingId}
-              onSelect={setSelected} onMove={update} onEdit={setEditing} onChange={update} />
-          ))}
+          {/* Grouped so the tile framing has one thing to measure — see ThumbFit. */}
+          <group ref={piecesRef}>
+            {objects.map((o, i) => (
+              <Piece key={o.id} obj={o} layer={i} font={fonts[o.face] ?? blockFont}
+                selected={!capturing && o.id === selectedId}
+                editing={!capturing && o.id === editingId}
+                onSelect={setSelected} onMove={update} onEdit={setEditing} onChange={update} />
+            ))}
+          </group>
+          <ThumbFit active={capturing} target={piecesRef} />
           {/* Only in the 3D look. While composing there is nothing to orbit: the camera is the one
               thing on this screen that must hold still. */}
           {view3d && <OrbitControls enablePan={false} makeDefault />}
@@ -834,7 +910,7 @@ export default function TopperComposer() {
           {selected && <Properties obj={selected} onChange={update} onDelete={remove} embedded />}
           <SaveBlock medium={medium} setMedium={setMedium}
             editing={editing} saveName={saveName} setSaveName={setSaveName}
-            busy={busy} msg={msg} save={save} startNew={startNew} />
+            busy={busy} msg={msg} save={saveWithCleanTile} startNew={startNew} />
         </div>
       )}
     </div>
