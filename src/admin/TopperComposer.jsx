@@ -5,8 +5,9 @@ import * as THREE from 'three';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
 import { HexColorPicker } from 'react-colorful';
+import { useElementSave } from '../lib/useElementSave.js';
 import {
-  topperShapes, backingPlate, offsetParts, outlineOf,
+  offsetParts, outlineOf, topperContours,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
   SelectionBox, SELECTION_COLOR, albedoForLight, loadTopperFace, TOPPER_FACES,
 } from '@spattoo/designer';
@@ -36,6 +37,27 @@ import {
  */
 
 const GRID_HALF = 2.2;        // how far the drawing surface extends from the middle
+
+/* What a saved row was drawn for. The payload is the OBJECT LIST, so a later improvement to how a
+   word is cut reaches every topper already authored — and if a generator ever changes in a way that
+   must NOT reach old rows, this says which recipe each one was drawn for. */
+const PAYLOAD_VERSION = 1;
+
+/* ⚠️ THE MATERIAL IS `medium` (migration 032), NOT THE ELEMENT TYPE AND NOT THE CATEGORY.
+ *
+ * 032 puts it plainly: technique lives in `element_types`, what a thing depicts lives in
+ * `element_categories`, and what it is MADE OF has a column of its own. So "this is a paper cut, not
+ * fondant" was never a question about the type — typing it `fondant_decor` would have been a lie
+ * written into a table that is not about material at all.
+ *
+ * OFFERED rather than fixed, because one generator genuinely cuts both: the same composition is a
+ * card cutout on a stick or a wafer-sheet print laid flat, and which one it is belongs to whoever
+ * is authoring the row. */
+const MEDIA = [
+  { key: 'acrylic',      label: 'Card or acrylic',      note: 'not edible — 032 files these together' },
+  { key: 'edible_paper', label: 'Wafer or icing sheet', note: 'printed and edible' },
+  { key: 'other',        label: 'Something else',       note: '' },
+];
 const GRID_STEP = 0.2;
 const CARD_THICK = 0.02;
 
@@ -116,24 +138,6 @@ function Grid() {
       </lineSegments>
     </group>
   );
-}
-
-// One object's geometry: a word, or a shape plate. Both end as extruded contours, which is why they
-// can share everything downstream.
-function contoursOf(obj, font) {
-  if (obj.kind === 'text') {
-    if (!font || !obj.text.trim()) return null;
-    const probe = topperShapes(font, obj.text, { height: 1 });
-    if (!probe.width) return null;
-    return topperShapes(font, obj.text, { height: obj.size / probe.width }).parts;
-  }
-  // A shape on its own has no word to fit, so it is fitted to a square of its own size.
-  const box = [{ outer: [
-    { x: -obj.size / 2, y: -obj.size / 2 }, { x: obj.size / 2, y: -obj.size / 2 },
-    { x: obj.size / 2, y: obj.size / 2 }, { x: -obj.size / 2, y: obj.size / 2 },
-  ], holes: [] }];
-  const plate = backingPlate(box, { family: obj.family, pad: 0 });
-  return plate ? [plate] : null;
 }
 
 /* ── Dragging ────────────────────────────────────────────────────────────────────────────────────
@@ -258,7 +262,7 @@ function Piece({ obj, layer, font, selected, editing, onSelect, onMove, onEdit, 
     e.target?.releasePointerCapture?.(e.pointerId);
   };
 
-  const parts = useMemo(() => contoursOf(obj, font), [obj, font]);
+  const parts = useMemo(() => topperContours(obj, font), [obj, font]);
 
   /* ⚠️ The offset is a PROPERTY OF THE TEXT, not of the screen. It was a slider that existed whether
    * or not there was anything to offset; here it belongs to the object it acts on, so two words on
@@ -425,12 +429,19 @@ const inputStyle = {
   border: '1.5px solid #E2E8E3', fontFamily: 'inherit', fontSize: 13.5,
 };
 
-function Properties({ obj, onChange, onDelete }) {
+/* `embedded` = this is a SECTION of the right-hand column rather than the column itself. The column
+   moved out to the caller when Save arrived, because Save has to outlive the selection: Properties
+   still come and go with what is selected, and a panel that vanished with them would take the Save
+   button with it. */
+function Properties({ obj, onChange, onDelete, embedded = false }) {
   const [wheel, setWheel] = useState(null);
   const set = (patch) => onChange(obj.id, patch);
 
   return (
-    <div className="tcProps" style={{ padding: 16, background: '#fff', borderLeft: '1px solid #E8EFE9' }}>
+    <div className={embedded ? undefined : 'tcProps'}
+      style={{ padding: 16, background: '#fff',
+        borderLeft: embedded ? 'none' : '1px solid #E8EFE9',
+        borderBottom: embedded ? '1px solid #E8EFE9' : 'none' }}>
       <h2 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, color: '#2C3E33' }}>
         {obj.kind === 'text' ? 'Text' : (SHAPES.find(x => x.key === obj.family)?.label ?? 'Shape')}
       </h2>
@@ -491,6 +502,90 @@ function Properties({ obj, onChange, onDelete }) {
   );
 }
 
+/* ── Save it to the catalogue ──────────────────────────────────────────────────────────────────
+ *
+ * ⚠️ WITHOUT THIS THE STUDIO IS A MOCK-UP. Rule 3 says so in as many words: a studio whose output can
+ * only be pasted into code is not authoring. Every other generated studio — drip, grass, clouds,
+ * rainbow, letter blocks — has had this; this one shipped without it, so nothing it made could ever
+ * reach a customer.
+ *
+ * ⚠️ `startNew` IS RENDERED WHEREVER SAVE IS, and that pairing is not decoration. Saving rewrites the
+ * address to `?element=<id>` so a reload revises the row instead of cloning it — which then means
+ * somebody authoring a SECOND variant would silently overwrite the first. The two buttons together
+ * are what make "which row am I about to write" answerable. */
+function SaveBlock({ medium, setMedium, editing, saveName, setSaveName, busy, msg, save, startNew }) {
+  const ready = !!saveName.trim();
+  return (
+    <div style={{ padding: 16, marginTop: 'auto' }}>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase',
+        color: '#9AA8A0', marginBottom: 8 }}>
+        {editing ? 'Editing a saved element' : 'Save as element'}
+      </div>
+
+      {editing && (
+        <p style={{ margin: '0 0 10px', fontSize: 11.5, lineHeight: 1.5, color: '#5B6B60' }}>
+          Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather than
+          adding another row.
+        </p>
+      )}
+
+      {/* ⚠️ BESIDE the thing it decides, and BEFORE the name field, because it changes what is being
+          saved rather than describing it (INVARIANTS #11). */}
+      <div style={{ marginBottom: 10 }}>
+        <span style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#3D5A44',
+          marginBottom: 6 }}>Made of</span>
+        <div style={{ display: 'grid', gap: 5 }}>
+          {MEDIA.map(m => (
+            <button key={m.key} type="button" onClick={() => setMedium(m.key)}
+              aria-pressed={medium === m.key}
+              style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 9, cursor: 'pointer',
+                fontFamily: 'inherit', lineHeight: 1.3,
+                border: `1.5px solid ${medium === m.key ? '#3D5A44' : '#E2E8E3'}`,
+                background: medium === m.key ? '#EFF4F0' : '#fff' }}>
+              <span style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#2C3E33' }}>
+                {m.label}
+              </span>
+              {m.note && (
+                <span style={{ display: 'block', fontSize: 10.5, color: '#8A9A8E' }}>{m.note}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <input value={saveName} onChange={e => setSaveName(e.target.value)}
+        placeholder="e.g. Gold 10 on a heart" style={{ ...inputStyle, marginBottom: 8 }} />
+
+      <button type="button" onClick={save} disabled={busy || !ready}
+        style={{ width: '100%', minHeight: 42, borderRadius: 9, fontFamily: 'inherit', fontSize: 12.5,
+          fontWeight: 800, border: 'none', color: '#fff',
+          cursor: busy || !ready ? 'default' : 'pointer',
+          background: busy || !ready ? '#B9C7BC' : '#3D5A44' }}>
+        {busy ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update this element' : 'Save to catalogue')}
+      </button>
+
+      {msg && (
+        <p style={{ margin: '8px 0 0', fontSize: 11.5, lineHeight: 1.5,
+          color: msg.ok ? '#2e7d32' : '#c0392b' }}>{msg.text}</p>
+      )}
+
+      {editing && (
+        <button type="button" onClick={startNew}
+          style={{ width: '100%', marginTop: 6, padding: '7px 0', fontSize: 11.5, borderRadius: 7,
+            border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+            fontFamily: 'inherit', cursor: 'pointer' }}>
+          Start a new element instead
+        </button>
+      )}
+
+      <p style={{ margin: '10px 0 0', fontSize: 11, lineHeight: 1.5, color: '#8A9A8E' }}>
+        The row carries WHAT IS ON THE CANVAS — the words, the shapes, their colours and where they
+        sit. Not which cake it goes on, and not how big: that is the customer's to decide.
+      </p>
+    </div>
+  );
+}
+
 function RailButton({ onClick, title, children, wide = false }) {
   return (
     <button type="button" onClick={onClick} title={title} aria-label={title}
@@ -534,6 +629,49 @@ export default function TopperComposer() {
     }
     return () => { alive = false; };
   }, [wanted, fonts]);
+
+  /* ⚠️ THE THUMBNAIL IS WHATEVER THIS BOX SHOWS, so the ref goes on the stage and not on the canvas:
+     `captureThumbnail` looks for a canvas INSIDE the node it is given. */
+  const stageRef = useRef(null);
+  const [medium, setMedium] = useState('acrylic');
+
+  /* The same hook every other generated studio uses (INVARIANTS #3). Until this existed the studio
+     could only hand its work to a developer to paste into code, which rule 3 calls a mock-up rather
+     than authoring. */
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
+    /* ⚠️ `topper`, and deliberately NOT `fondant_decor`. `element_types` is how a thing BEHAVES, and
+       a card cutout behaves exactly like the digit already typed this way: generated, standing on
+       the cake top, movable, nothing to upload. What it is MADE of is `medium` above; what it
+       DEPICTS is the category below. Sending it to `fondant_decor` would have put a material in the
+       behaviour table — the thing migration 032 exists to prevent. */
+    typeSlug: 'topper',
+    categorySlug: 'numbers-letters',   // where a customer browses for a name or a number
+    canvasRef: stageRef,
+    buildPayload: () => ({
+      // A card topper goes on the cake top. `allowed_zones` on the ELEMENT is what governs placement
+      // — the type's own zones are only the default offered to an un-promoted upload (073).
+      allowed_zones: ['top_surface'],
+      medium,
+      /* ⚠️ THE ROW CARRIES THE OBJECT LIST, never the built geometry — the same call `baker_garnishes`
+         made. A word is stored as its WORD, so the payload is a hundredth of the size and a later
+         improvement to `topperShapes` or `offsetParts` reaches every row already authored. */
+      placement_config: {
+        procedural: 'card_topper',
+        card_topper: { v: PAYLOAD_VERSION, objects },
+      },
+    }),
+    onHydrate: (el) => {
+      const saved = el.placement_config?.card_topper;
+      if (Array.isArray(saved?.objects) && saved.objects.length) {
+        setObjects(saved.objects);
+        /* ⚠️ ADVANCE THE ID COUNTER PAST WHAT WAS LOADED. It starts at 1, so the first piece added
+           after opening a saved row would otherwise collide with a hydrated one — two objects with
+           one id, and selecting either moves both. */
+        nextId.current = Math.max(0, ...saved.objects.map(o => Number(o.id) || 0)) + 1;
+      }
+      if (el.medium) setMedium(el.medium);
+    },
+  });
 
   const add = useCallback((obj) => {
     const id = nextId.current++;
@@ -624,7 +762,7 @@ export default function TopperComposer() {
         )}
       </div>
 
-      <div className="tcStage">
+      <div className="tcStage" ref={stageRef}>
         {/* ⚠️ Keyed on the view, because a Canvas takes its camera ON MOUNT ONLY — remounting is the
             honest way to change camera type, and the same call ChocolateDripStudio makes. */}
         <Canvas key={view3d ? '3d' : 'flat'} shadows
@@ -673,8 +811,20 @@ export default function TopperComposer() {
         )}
       </div>
 
-      {/* Only when there is something selected — see the note on Properties. */}
-      {selected && <Properties obj={selected} onChange={update} onDelete={remove} />}
+      {/* ⚠️ The column appears once there is something ON the canvas, not once something is
+          SELECTED. Properties still come and go with the selection — a control that cannot act is
+          one the reader has to rule out first (INVARIANTS #12) — but Save has to stay reachable
+          after you click away from the last piece, or the only way to reach it is to re-select
+          something, which nobody would guess. An empty canvas still shows no column at all. */}
+      {objects.length > 0 && (
+        <div className="tcProps" style={{ background: '#fff', borderLeft: '1px solid #E8EFE9',
+          display: 'flex', flexDirection: 'column' }}>
+          {selected && <Properties obj={selected} onChange={update} onDelete={remove} embedded />}
+          <SaveBlock medium={medium} setMedium={setMedium}
+            editing={editing} saveName={saveName} setSaveName={setSaveName}
+            busy={busy} msg={msg} save={save} startNew={startNew} />
+        </div>
+      )}
     </div>
   );
 }
