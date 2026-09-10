@@ -268,7 +268,7 @@ function Piece({ obj, layer, font, selected, editing, onSelect, onMove, onEdit, 
    * or not there was anything to offset; here it belongs to the object it acts on, so two words on
    * one topper can carry different bands — which the single-object studio could never express. */
   const backParts = useMemo(() => (
-    obj.kind === 'text' && obj.offset > 0 && parts ? offsetParts(parts, obj.offset * obj.size) : null
+    obj.offset > 0 && parts ? offsetParts(parts, obj.offset * obj.size) : null
   ), [obj.kind, obj.offset, obj.size, parts]);
 
   const geos = useMemo(() => extrude(parts, 0), [parts]);
@@ -479,17 +479,14 @@ function Properties({ obj, onChange, onDelete, embedded = false }) {
       <Colour label="Colour" value={obj.colour} onChange={v => set({ colour: v })}
         open={wheel === 'c'} onToggle={() => setWheel(wheel === 'c' ? null : 'c')} />
 
-      {/* ⚠️ Offset belongs to TEXT and appears with it. A shape is already a solid — an outline
-          around it is a second shape, which is what adding another shape is for. */}
-      {obj.kind === 'text' && (
-        <>
-          <Slide label="Offset" value={obj.offset} min={0} max={0.22} step={0.005}
-            onChange={v => set({ offset: v })} fmt={v => (v === 0 ? 'none' : v.toFixed(3))} />
-          {obj.offset > 0 && (
-            <Colour label="Offset colour" value={obj.offsetColour} onChange={v => set({ offsetColour: v })}
-              open={wheel === 'o'} onToggle={() => setWheel(wheel === 'o' ? null : 'o')} />
-          )}
-        </>
+      {/* ⚠️ EVERY PIECE CAN HAVE ONE — a shape's outline was missing, and a second hand-placed shape
+          is not the same thing: it has to be centred by eye and comes apart when the first moves. */}
+      <Slide label="Offset" value={obj.offset ?? 0} min={0} max={0.22} step={0.005}
+        onChange={v => set({ offset: v })} fmt={v => (v === 0 ? 'none' : v.toFixed(3))} />
+      {obj.offset > 0 && (
+        <Colour label="Offset colour" value={obj.offsetColour ?? '#FFFFFF'}
+          onChange={v => set({ offsetColour: v })}
+          open={wheel === 'o'} onToggle={() => setWheel(wheel === 'o' ? null : 'o')} />
       )}
 
       <button type="button" onClick={() => onDelete(obj.id)}
@@ -774,7 +771,10 @@ export default function TopperComposer() {
     // it can drag it to none — easier than discovering a control that starts at zero.
     offset: 0.06, offsetColour: '#FFFFFF',
   });
-  const addShape = (family) => add({ kind: 'shape', family, size: 1.0, colour: '#E9DFF2' });
+  // Offset starts at nothing: an outline appears because somebody asked for one.
+  const addShape = (family) => add({
+    kind: 'shape', family, size: 1.0, colour: '#E9DFF2', offset: 0, offsetColour: '#FFFFFF',
+  });
 
   const update = useCallback((id, patch) => {
     setObjects(o => o.map(x => (x.id === id ? { ...x, ...patch } : x)));
