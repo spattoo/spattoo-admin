@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { CREAM_STYLES, STYLE_ORDER, buildStyledWall, getRusticNormalMap, getWeaveNormalMap, weaveTiles, loadStrokeMaps, displaceByHeightField } from '@spattoo/designer';
+import { CREAM_STYLES, STYLE_ORDER, buildStyledWall, buildStyledTop, getRusticNormalMap, getWeaveNormalMap, weaveTiles, loadStrokeMaps, displaceByHeightField } from '@spattoo/designer';
 import { fetchAdminTextures, createTexture, updateTexture } from '../lib/api.js';
 
 // Surface-map generators (normal-map finishes like rustic) — keyed like the designer's registry.
@@ -24,7 +24,9 @@ const R = 1, H = 1.4;
 const ALGORITHMS = STYLE_ORDER.filter(k => k !== 'smooth');   // textures with a displacement strategy
 
 // A fresh working copy seeded from the in-code registry for a style. A style is EITHER a geometry
-// `wall` (wave/swirl/ribbed) or a normal-map `surfaceMap` (rustic).
+// `wall` (wave/swirl/ribbed/piped) or a normal-map `surfaceMap` (rustic), and it may additionally
+// carry a `top` strategy (piped's cream spiral) — a separate axis, so a style can texture the wall
+// and leave the lid flat.
 function seedFor(styleKey) {
   const def = CREAM_STYLES[styleKey] ?? {};
   return {
@@ -32,6 +34,7 @@ function seedFor(styleKey) {
     key: styleKey,
     label: def.label ?? styleKey,
     wall: def.wall ?? 'smooth',
+    top: def.top ?? null,
     surfaceMap: def.surfaceMap ?? null,
     params: (def.params ?? []).map(p => ({ ...p })),
   };
@@ -79,7 +82,7 @@ function StrokeDecals({ maps, color, depth, count, seed }) {
 }
 
 function PreviewMesh({ work, overrideMaps, cakeColor = '#f0cad6' }) {
-  const sig = work.params.map(p => p.default).join(',') + '|' + work.wall + '|' + work.surfaceMap;
+  const sig = work.params.map(p => p.default).join(',') + '|' + work.wall + '|' + work.top + '|' + work.surfaceMap;
   const defaults = useMemo(() => {
     const o = {}; for (const p of work.params) o[p.key] = p.default; return o;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,7 +101,11 @@ function PreviewMesh({ work, overrideMaps, cakeColor = '#f0cad6' }) {
       }
     }
     if (work.wall && work.wall !== 'smooth') geo = buildStyledWall(work.wall, R, H, defaults);
-    return { geo, nrm };
+    /* ⚠️ THE TOP IS BUILT HERE TOO, or the Top coils / Top peak sliders move nothing on screen and
+     * the admin is authoring blind (INVARIANTS #11 — a control and what it changes are visible at
+     * the same time). Same call the designer makes, so what is tuned is what customers see. */
+    const top = geo ? buildStyledTop(work.wall, work.top, R, H, defaults) : null;
+    return { geo, nrm, top };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
 
@@ -116,13 +123,26 @@ function PreviewMesh({ work, overrideMaps, cakeColor = '#f0cad6' }) {
     );
   }
 
+  const cream = (
+    <meshPhysicalMaterial color={cakeColor} roughness={0.72} metalness={0}
+      sheen={0.45} sheenRoughness={0.65} sheenColor="#fff6e8" clearcoat={0.05} clearcoatRoughness={0.6}
+      normalMap={built.nrm ?? null} normalScale={[defaults.depth ?? 0.5, defaults.depth ?? 0.5]} />
+  );
   return (
-    <mesh key={work.wall + (work.surfaceMap || '')} castShadow>
-      {built.geo ? <primitive object={built.geo} attach="geometry" /> : <cylinderGeometry args={[R, R, H, 128, 1]} />}
-      <meshPhysicalMaterial color={cakeColor} roughness={0.72} metalness={0}
-        sheen={0.45} sheenRoughness={0.65} sheenColor="#fff6e8" clearcoat={0.05} clearcoatRoughness={0.6}
-        normalMap={built.nrm ?? null} normalScale={[defaults.depth ?? 0.5, defaults.depth ?? 0.5]} />
-    </mesh>
+    <group key={work.wall + (work.top || '') + (work.surfaceMap || '')}>
+      <mesh castShadow>
+        {built.geo ? <primitive object={built.geo} attach="geometry" /> : <cylinderGeometry args={[R, R, H, 128, 1]} />}
+        {cream}
+      </mesh>
+      {built.top && (
+        // The wall geometry is centred on the origin, so its lid sits at +H/2 — the same place
+        // CakeTier puts it (`topY`).
+        <mesh position={[0, H / 2, 0]} castShadow>
+          <primitive key={built.top.uuid} object={built.top} attach="geometry" />
+          {cream}
+        </mesh>
+      )}
+    </group>
   );
 }
 
@@ -168,6 +188,7 @@ export default function TextureCalibrator() {
       key: row.key,
       label: row.label,
       wall: row.algorithm ?? 'smooth',
+      top: row.config?.top ?? null,
       surfaceMap: row.config?.surfaceMap ?? null,
       params: Array.isArray(row.config?.params) ? row.config.params.map(p => ({ ...p })) : [],
     });
@@ -188,7 +209,11 @@ export default function TextureCalibrator() {
       const payload = {
         key: work.key.trim(), label: work.label.trim(),
         algorithm: work.wall || 'smooth',
-        config: { params: work.params, ...(work.surfaceMap ? { surfaceMap: work.surfaceMap } : {}) },
+        config: {
+          params: work.params,
+          ...(work.top ? { top: work.top } : {}),
+          ...(work.surfaceMap ? { surfaceMap: work.surfaceMap } : {}),
+        },
       };
       const saved = work.id ? await updateTexture(work.id, payload) : await createTexture(payload);
       setWork(w => ({ ...w, id: saved.id }));
@@ -235,7 +260,8 @@ export default function TextureCalibrator() {
           <input style={s.input} value={work.label} onChange={e => setWork(w => ({ ...w, label: e.target.value }))} />
           <label style={s.lbl}>Strategy (code)</label>
           <input style={{ ...s.input, color: '#888' }}
-            value={work.surfaceMap ? `${work.surfaceMap} (normal map)` : work.wall} readOnly />
+            value={work.surfaceMap ? `${work.surfaceMap} (normal map)`
+                 : work.top ? `${work.wall} + ${work.top} top` : work.wall} readOnly />
           {work.surfaceMap && (
             <label style={{ ...s.userToggle, marginTop: 10, marginLeft: 0 }}>
               <input type="checkbox" checked={useRefImage} onChange={e => setUseRefImage(e.target.checked)} />
