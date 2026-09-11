@@ -35,6 +35,7 @@ function seedFor(styleKey) {
     label: def.label ?? styleKey,
     wall: def.wall ?? 'smooth',
     top: def.top ?? null,
+    nozzle: def.nozzle ?? null,
     surfaceMap: def.surfaceMap ?? null,
     params: (def.params ?? []).map(p => ({ ...p })),
   };
@@ -82,9 +83,13 @@ function StrokeDecals({ maps, color, depth, count, seed }) {
 }
 
 function PreviewMesh({ work, overrideMaps, cakeColor = '#f0cad6' }) {
-  const sig = work.params.map(p => p.default).join(',') + '|' + work.wall + '|' + work.top + '|' + work.surfaceMap;
+  const sig = work.params.map(p => p.default).join(',') + '|' + work.wall + '|' + work.top + '|' + work.nozzle + '|' + work.surfaceMap;
   const defaults = useMemo(() => {
-    const o = {}; for (const p of work.params) o[p.key] = p.default; return o;
+    // ⚠️ `nozzle` is a KEY on the style, not a slider — the same fold CakeTier does, or the preview
+    // renders every tip as the default one and the two rows look identical.
+    const o = { nozzle: work.nozzle ?? undefined };
+    for (const p of work.params) o[p.key] = p.default;
+    return o;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
   // Heavy geometry/normal for the wave/swirl/procedural cases (unused in the decal case).
@@ -189,6 +194,7 @@ export default function TextureCalibrator() {
       label: row.label,
       wall: row.algorithm ?? 'smooth',
       top: row.config?.top ?? null,
+      nozzle: row.config?.nozzle ?? null,
       surfaceMap: row.config?.surfaceMap ?? null,
       params: Array.isArray(row.config?.params) ? row.config.params.map(p => ({ ...p })) : [],
     });
@@ -212,6 +218,7 @@ export default function TextureCalibrator() {
         config: {
           params: work.params,
           ...(work.top ? { top: work.top } : {}),
+          ...(work.nozzle ? { nozzle: work.nozzle } : {}),
           ...(work.surfaceMap ? { surfaceMap: work.surfaceMap } : {}),
         },
       };
@@ -261,7 +268,8 @@ export default function TextureCalibrator() {
           <label style={s.lbl}>Strategy (code)</label>
           <input style={{ ...s.input, color: '#888' }}
             value={work.surfaceMap ? `${work.surfaceMap} (normal map)`
-                 : work.top ? `${work.wall} + ${work.top} top` : work.wall} readOnly />
+                 : [work.wall, work.nozzle && `${work.nozzle} tip`, work.top && `${work.top} top`]
+                     .filter(Boolean).join(' + ')} readOnly />
           {work.surfaceMap && (
             <label style={{ ...s.userToggle, marginTop: 10, marginLeft: 0 }}>
               <input type="checkbox" checked={useRefImage} onChange={e => setUseRefImage(e.target.checked)} />
