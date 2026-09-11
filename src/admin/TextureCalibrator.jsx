@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { CREAM_STYLES, STYLE_ORDER, buildStyledWall, buildStyledTop, getRusticNormalMap, getWeaveNormalMap, weaveTiles, loadStrokeMaps, displaceByHeightField } from '@spattoo/designer';
+import { CREAM_STYLES, STYLE_ORDER, NOZZLE_BY_KEY, buildStyledWall, buildStyledTop, getRusticNormalMap, getWeaveNormalMap, weaveTiles, loadStrokeMaps, displaceByHeightField } from '@spattoo/designer';
 import { fetchAdminTextures, createTexture, updateTexture } from '../lib/api.js';
 
 // Surface-map generators (normal-map finishes like rustic) — keyed like the designer's registry.
@@ -268,8 +268,11 @@ export default function TextureCalibrator() {
           <label style={s.lbl}>Strategy (code)</label>
           <input style={{ ...s.input, color: '#888' }}
             value={work.surfaceMap ? `${work.surfaceMap} (normal map)`
-                 : [work.wall, work.nozzle && `${work.nozzle} tip`, work.top && `${work.top} top`]
-                     .filter(Boolean).join(' + ')} readOnly />
+                 : [work.wall,
+                    /* The tip's real name, read from the pen's own registry — a style names a KEY,
+                       and "star5" on screen tells an admin nothing about which tip that is. */
+                    work.nozzle && `${NOZZLE_BY_KEY[work.nozzle]?.label ?? work.nozzle} tip`,
+                    work.top && `${work.top} top`].filter(Boolean).join(' + ')} readOnly />
           {work.surfaceMap && (
             <label style={{ ...s.userToggle, marginTop: 10, marginLeft: 0 }}>
               <input type="checkbox" checked={useRefImage} onChange={e => setUseRefImage(e.target.checked)} />
