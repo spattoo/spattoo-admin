@@ -11,6 +11,7 @@ import {
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
 import DecorationGuidePanel from './DecorationGuidePanel.jsx';
+import Modal from './Modal.jsx';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 import { statsFromElement } from '../lib/glb.js';
@@ -439,6 +440,36 @@ const PROCEDURAL_STUDIOS = {
 // a generator. An entry for it would be a key nothing ever matches.
 
 // ── Main component ────────────────────────────────────────────────────────────
+/* ── A named band of the editor ───────────────────────────────────────────────────────────────────
+ *
+ * The form is ~20 sections and 4.4 screens, and before this every one of them was a small-caps
+ * label at the same weight as every other — no landmarks, and nothing saying which of them answer
+ * the same question. The grouping is the fix; the ORDER inside it is the other half, because the
+ * sections were in the order they were built rather than the order they are used (INVARIANTS #12).
+ *
+ * What moved, and why:
+ *   • `Made of` and `Default Color` were stranded between Print finish and Placement Config. They
+ *     are identity and colour facts; they now sit with the things they belong to.
+ *   • Capabilities, Recolourable area and Default Color are ONE decision — "can the customer
+ *     recolour this, and how" — and were §13, §14 and §18, split by Raised relief and Print finish.
+ *   • Asset file → thumbnail now reads straight through. The GLB material sliders used to sit
+ *     between them, cutting the one story that has to be followed in order.
+ *
+ * Headings only — nothing collapses. A section folded away is a section somebody cannot find, and
+ * which of these are touched once versus constantly is not something the code knows.
+ */
+function Group({ title, sub, children }) {
+  return (
+    <section style={{ marginBottom: 26 }}>
+      <div style={{ borderTop: '2px solid #2C4433', paddingTop: 10, marginBottom: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#2C4433', letterSpacing: 0.3 }}>{title}</div>
+        {sub && <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 2 }}>{sub}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 export default function ManageElements() {
   const [elementTypes, setElementTypes] = useState([]);
   // Browsing category (migration 065). This screen is where the 86 backfilled elements get their
@@ -457,6 +488,12 @@ export default function ManageElements() {
   const [addedWithin, setAddedWithin] = useState(0);   // days; 0 = any time
   const [selectedId,   setSelectedId]   = useState(null);
   const [cloneMode,    setCloneMode]    = useState(false);   // "create a NEW element from these settings"
+  /* The preview is a POPUP, not a band in the flow. It used to sit inline under the placement
+     editor — ~500px of 3D canvas that every element carried whether anybody was looking at it or
+     not, on a form already 4.4 screens long. You do not always need to see the cake; when you do,
+     you want it beside the knob you are turning, which a dialog gives and a block 70% down the page
+     never did. */
+  const [previewOpen, setPreviewOpen] = useState(false);
   // Bumped on every successful save. The preview renders the SAVED row, so this is its cue to
   // re-fetch — which is what makes "save, then look" a loop instead of a page reload.
   const [savedAt,      setSavedAt]      = useState(0);
@@ -1654,6 +1691,7 @@ export default function ManageElements() {
                   </label>
                 </div>
 
+                <Group title="What it is" sub="Name, kind, and how customers find it">
                 {/* Name */}
                 <div style={s.field}>
                   <label style={s.label}>Name</label>
@@ -1721,49 +1759,33 @@ export default function ManageElements() {
                   </div>
                 </div>
 
-                {/* Zones */}
-                <div style={s.field}>
-                  <label style={s.label}>Applicable Zones</label>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 20px', marginTop: 4 }}>
-                    {CAKE_ZONES.map(z => (
-                      <label key={z.value} style={s.checkRow}>
-                        <input type="checkbox" style={s.checkbox}
-                          checked={applicableZones.includes(z.value)}
-                          onChange={() => setApplicableZones(prev =>
-                            prev.includes(z.value) ? prev.filter(x => x !== z.value) : [...prev, z.value]
-                          )} />
-                        <span style={s.checkLabel}>{z.label}</span>
-                      </label>
-                    ))}
+                {/* ── Made of ──
+                    MATERIAL only. How it is worked is already the element TYPE — 'Cream Piping'
+                    and 'Palette knife art' are the same material, and that is exactly why this
+                    column does not carry technique.
 
-                    {/* ── Ready-made ────────────────────────────────────────────────────────────
-                        Not a customer capability like the rest of this list — it is about the
-                        BAKER. A faux ball, a bought topper, a candle: these come from a supply
-                        shop, and an X-Ray sheet that explains how to roll a faux ball is telling
-                        somebody to do work that does not exist.
-                        Default OFF, i.e. everything has a guide, which is the OPPOSITE default to
-                        "Allow hand piping" and for the same reason: the absent value has to be the
-                        harmless one. Off-by-default there means a feature nobody gets until it is
-                        enabled; off-by-default here means nothing loses a guide it already had.
-                        Lives in placement_config, and the guide endpoint filters on it — so ticking
-                        this hides the how-to on orders ALREADY PLACED too. That is honest: the ball
-                        was always bought. */}
-                    <label style={{ ...s.checkRow, alignItems: 'flex-start', cursor: 'pointer' }}>
-                      <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
-                        checked={!!pcVal('ready_made')}
-                        /* '' rather than false — patchPc removes a key on '', so unticking leaves
-                           the config clean instead of carrying `ready_made: false` forever. */
-                        onChange={e => patchPc({ ready_made: e.target.checked || '' })} />
-                      <div>
-                        <div style={s.checkLabel}>Ready-made — no how-to guide</div>
-                        <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                          Bought from a supply shop rather than made: faux balls, ready toppers,
-                          candles. Keeps it off the X-Ray sheet&rsquo;s &ldquo;how to make them&rdquo;.
-                        </div>
-                      </div>
-                    </label>
+                    It decides WHAT X-RAY OFFERS, which is why it is worth setting even though it
+                    is optional: fondant gets both a modelling guide and printing at actual size
+                    (bakers substitute one for the other constantly — time, budget, a cake that has
+                    to travel); a printed sheet gets only printing, because there is no hand-made
+                    version of one; acrylic gets neither, being bought rather than made.
+
+                    Blank is safe: X-Ray offers both and the model self-reports when something is
+                    not hand-made, which costs at most one generation. */}
+                {!isPipingConfig && (
+                  <div style={s.field}>
+                    <label style={s.label}>Made of</label>
+                    <select value={medium} onChange={e => setMedium(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2F4A38' }}>
+                      <option value="">Not stated — X-Ray offers both</option>
+                      <option value="fondant">Fondant / gumpaste — guide + print</option>
+                      <option value="chocolate">Modelling chocolate — print only for now</option>
+                      <option value="edible_paper">Edible paper (printed sheet) — print only</option>
+                      <option value="acrylic">Acrylic / non-edible — neither</option>
+                      <option value="other">Other</option>
+                    </select>
                   </div>
-                </div>
+                )}
 
                 {/* Parent */}
                 <div style={s.field}>
@@ -1785,6 +1807,8 @@ export default function ManageElements() {
                   </div>
                 )}
 
+                </Group>
+                <Group title="The artwork" sub="The file, its thumbnail, and how it is rendered">
                 {/* ── Asset file ── */}
                 <div style={s.field}>
                   <label style={s.label}>Asset File</label>
@@ -2054,76 +2078,6 @@ export default function ManageElements() {
                   </label>
                 </div>
 
-                {/* ── Capabilities ── */}
-                <div style={s.field}>
-                  <label style={s.label}>Capabilities</label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-                    {[
-                      { key: 'resize',    label: 'Resizable',        hint: '+/− size buttons in edit strip' },
-                      { key: 'duplicate', label: 'Duplicatable',     hint: 'Copy button creates another instance' },
-                      { key: 'color',     label: 'Color changeable', hint: 'Color picker in the designer — tints a GLB material, or recolours a 2D image (choose the area below)' },
-                      { key: 'gradient',  label: 'Gradient colors',  hint: 'Customer can blend up to 3 colors (swirl / vertical / linear) — for swirls & ombré (GLB only)' },
-                      { key: 'delete',    label: 'Deletable',        hint: 'Always on — a customer can remove anything from their cake. Kept as a field so the rule stays visible and could be revisited, but it is not a choice.', fixed: true },
-                      { key: 'move',      label: 'Movable',          hint: 'Nudge ◀▶▲▼ position on the cake' },
-                      { key: 'tilt',      label: 'Tiltable',         hint: 'Lean / rotate slightly in the designer' },
-                    /* `fixed`: ticked and not clickable — every element is deletable, and the
-                       designer stopped honouring `delete: false`. See AddElement for the reasoning. */
-                    ].map(({ key, label, hint, fixed }) => (
-                      <label key={key} style={{ ...s.checkRow, alignItems: 'flex-start', cursor: fixed ? 'default' : 'pointer' }}>
-                        <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
-                          checked={fixed ? true : (capabilities[key] ?? false)}
-                          disabled={fixed}
-                          onChange={e => {
-                            if (fixed) return;
-                            const checked = e.target.checked;
-                            setCapabilities(c => ({ ...c, [key]: checked }));
-                            // A colour-changeable 2D image needs a recolour region descriptor (which
-                            // pixels). Write the default on enable, remove it on disable.
-                            if (key === 'color' && selectedEl?.image_url && !isGlb) {
-                              patchPc({ recolor: checked ? recolorDesc() : '' });
-                            }
-                          }} />
-                        <div>
-                          <div style={s.checkLabel}>{label}</div>
-                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>{hint}</div>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                  {/* Recolourable area — generic; appears only when colour-changeable AND a 2D image. */}
-                  {capabilities.color && selectedEl?.image_url && !isGlb && (
-                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed #C5D4C8' }}>
-                      <label style={{ ...s.label, marginBottom: 4 }}>Recolourable area</label>
-                      <select style={s.select} value={recolorMethod}
-                        onChange={e => { const m = e.target.value; setRecolorMethod(m); patchPc({ recolor: recolorDesc(m) }); }}>
-                        <option value="opaque">Whole image — recolour every pixel (solid stickers)</option>
-                        <option value="saturated">Coloured fill, keep black/white lines (any colour + outline)</option>
-                        <option value="blue_gt_green">Coloured fill, keep gold/white outline (blue-dominant fill)</option>
-                        <option value="hue_regions">Multi-colour — one swatch per colour (tree: trunk + leaves + flower)</option>
-                      </select>
-                      {recolorMethod === 'blue_gt_green' && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Edge protect</span>
-                          <input type="number" min="0" max="50" step="1" style={{ ...s.input, flex: 1 }} value={recolorGuard}
-                            placeholder="12 — raise if colour bleeds into the outline"
-                            onChange={e => { const g = e.target.value; setRecolorGuard(g); patchPc({ recolor: recolorDesc('blue_gt_green', g) }); }} />
-                        </div>
-                      )}
-                      {(recolorMethod === 'saturated' || recolorMethod === 'hue_regions') && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Saturation min</span>
-                          <input type="number" min="0" max="0.8" step="0.01" style={{ ...s.input, flex: 1 }} value={recolorSat}
-                            placeholder="lower catches more, higher protects lines"
-                            onChange={e => { const sv = e.target.value; setRecolorSat(sv); patchPc({ recolor: recolorDesc(recolorMethod, recolorGuard, sv) }); }} />
-                        </div>
-                      )}
-                      <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>
-                        Which pixels the colour picker recolours (brightness preserved). <b>Whole image</b> for a single-fill sticker; <b>Coloured fill</b> keeps gold/white outlines; <b>Multi-colour</b> gives the customer one swatch per detected colour (whites/blacks stay) — the fit for artwork like a tree or a dino.
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 {/* ── Raised relief — 2D image stickers only ───────────────────────────────────────
                     PRESENCE of `placement_config.relief` is the whole switch: the designer lifts the flat
                     sticker into a 3D relief when the object is there and renders it flat when it is not.
@@ -2235,46 +2189,49 @@ export default function ManageElements() {
                   </div>
                 )}
 
-                {/* ── Made of ──
-                    MATERIAL only. How it is worked is already the element TYPE — 'Cream Piping'
-                    and 'Palette knife art' are the same material, and that is exactly why this
-                    column does not carry technique.
-
-                    It decides WHAT X-RAY OFFERS, which is why it is worth setting even though it
-                    is optional: fondant gets both a modelling guide and printing at actual size
-                    (bakers substitute one for the other constantly — time, budget, a cake that has
-                    to travel); a printed sheet gets only printing, because there is no hand-made
-                    version of one; acrylic gets neither, being bought rather than made.
-
-                    Blank is safe: X-Ray offers both and the model self-reports when something is
-                    not hand-made, which costs at most one generation. */}
-                {!isPipingConfig && (
-                  <div style={s.field}>
-                    <label style={s.label}>Made of</label>
-                    <select value={medium} onChange={e => setMedium(e.target.value)}
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2F4A38' }}>
-                      <option value="">Not stated — X-Ray offers both</option>
-                      <option value="fondant">Fondant / gumpaste — guide + print</option>
-                      <option value="chocolate">Modelling chocolate — print only for now</option>
-                      <option value="edible_paper">Edible paper (printed sheet) — print only</option>
-                      <option value="acrylic">Acrylic / non-edible — neither</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                )}
-
-                {/* ── Default color ── */}
+                </Group>
+                <Group title="Where it goes on the cake" sub="Surfaces, pose and size — press Preview to see it">
+                {/* Zones */}
                 <div style={s.field}>
-                  <label style={s.label}>Default Color</label>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <input type="color" value={defaultColor}
-                      onChange={e => setDefaultColor(e.target.value)}
-                      style={{ width: 40, height: 32, border: '1.5px solid #C5D4C8', borderRadius: 6, cursor: 'pointer', padding: 2 }} />
-                    <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600 }}>{defaultColor}</span>
-                    <button onClick={() => setDefaultColor('')}
-                      style={{ padding: '4px 10px', borderRadius: 6, border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: "'Quicksand', sans-serif" }}>
-                      Clear
-                    </button>
+                  <label style={s.label}>Applicable Zones</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 20px', marginTop: 4 }}>
+                    {CAKE_ZONES.map(z => (
+                      <label key={z.value} style={s.checkRow}>
+                        <input type="checkbox" style={s.checkbox}
+                          checked={applicableZones.includes(z.value)}
+                          onChange={() => setApplicableZones(prev =>
+                            prev.includes(z.value) ? prev.filter(x => x !== z.value) : [...prev, z.value]
+                          )} />
+                        <span style={s.checkLabel}>{z.label}</span>
+                      </label>
+                    ))}
+
+                    {/* ── Ready-made ────────────────────────────────────────────────────────────
+                        Not a customer capability like the rest of this list — it is about the
+                        BAKER. A faux ball, a bought topper, a candle: these come from a supply
+                        shop, and an X-Ray sheet that explains how to roll a faux ball is telling
+                        somebody to do work that does not exist.
+                        Default OFF, i.e. everything has a guide, which is the OPPOSITE default to
+                        "Allow hand piping" and for the same reason: the absent value has to be the
+                        harmless one. Off-by-default there means a feature nobody gets until it is
+                        enabled; off-by-default here means nothing loses a guide it already had.
+                        Lives in placement_config, and the guide endpoint filters on it — so ticking
+                        this hides the how-to on orders ALREADY PLACED too. That is honest: the ball
+                        was always bought. */}
+                    <label style={{ ...s.checkRow, alignItems: 'flex-start', cursor: 'pointer' }}>
+                      <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
+                        checked={!!pcVal('ready_made')}
+                        /* '' rather than false — patchPc removes a key on '', so unticking leaves
+                           the config clean instead of carrying `ready_made: false` forever. */
+                        onChange={e => patchPc({ ready_made: e.target.checked || '' })} />
+                      <div>
+                        <div style={s.checkLabel}>Ready-made — no how-to guide</div>
+                        <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                          Bought from a supply shop rather than made: faux balls, ready toppers,
+                          candles. Keeps it off the X-Ray sheet&rsquo;s &ldquo;how to make them&rdquo;.
+                        </div>
+                      </div>
+                    </label>
                   </div>
                 </div>
 
@@ -2508,14 +2465,109 @@ export default function ManageElements() {
                   </div>
                 )}
 
-                {/* ── Preview ─────────────────────────────────────────────────────────────────
-                    Directly under the placement editor because that is what it verifies. It is also
-                    the only way to see a decoration on a cake without signing in as a baker, which
-                    an admin cannot do. Renders the SAVED row — see ElementPreviewPanel. */}
-                {selectedId && !cloneMode && (
-                  <ElementPreviewPanel elementId={selectedId} savedAt={savedAt} />
-                )}
 
+                {/* ── Preview, on demand ──────────────────────────────────────────────────────────
+                    At the END of the placement editor, because that is what it verifies. It is also
+                    the only way to see a decoration on a cake without signing in as a baker, which
+                    an admin cannot do.
+                    ⚠️ It draws the SAVED row (see ElementPreviewPanel), which is why an unsaved
+                    clone has no button: there is no row yet to draw, and a dialog that opened on
+                    nothing would read as broken rather than as premature. */}
+                {selectedId && !cloneMode && (
+                  <button type="button" onClick={() => setPreviewOpen(true)}
+                    style={{ ...s.smallBtn, display: 'inline-block', marginTop: 4, padding: '9px 18px' }}>
+                    Preview on a cake…
+                  </button>
+                )}
+                </Group>
+                <Group title="What a customer may do to it" sub="The controls they get in the designer">
+                {/* ── Capabilities ── */}
+                <div style={s.field}>
+                  <label style={s.label}>Capabilities</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+                    {[
+                      { key: 'resize',    label: 'Resizable',        hint: '+/− size buttons in edit strip' },
+                      { key: 'duplicate', label: 'Duplicatable',     hint: 'Copy button creates another instance' },
+                      { key: 'color',     label: 'Color changeable', hint: 'Color picker in the designer — tints a GLB material, or recolours a 2D image (choose the area below)' },
+                      { key: 'gradient',  label: 'Gradient colors',  hint: 'Customer can blend up to 3 colors (swirl / vertical / linear) — for swirls & ombré (GLB only)' },
+                      { key: 'delete',    label: 'Deletable',        hint: 'Always on — a customer can remove anything from their cake. Kept as a field so the rule stays visible and could be revisited, but it is not a choice.', fixed: true },
+                      { key: 'move',      label: 'Movable',          hint: 'Nudge ◀▶▲▼ position on the cake' },
+                      { key: 'tilt',      label: 'Tiltable',         hint: 'Lean / rotate slightly in the designer' },
+                    /* `fixed`: ticked and not clickable — every element is deletable, and the
+                       designer stopped honouring `delete: false`. See AddElement for the reasoning. */
+                    ].map(({ key, label, hint, fixed }) => (
+                      <label key={key} style={{ ...s.checkRow, alignItems: 'flex-start', cursor: fixed ? 'default' : 'pointer' }}>
+                        <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
+                          checked={fixed ? true : (capabilities[key] ?? false)}
+                          disabled={fixed}
+                          onChange={e => {
+                            if (fixed) return;
+                            const checked = e.target.checked;
+                            setCapabilities(c => ({ ...c, [key]: checked }));
+                            // A colour-changeable 2D image needs a recolour region descriptor (which
+                            // pixels). Write the default on enable, remove it on disable.
+                            if (key === 'color' && selectedEl?.image_url && !isGlb) {
+                              patchPc({ recolor: checked ? recolorDesc() : '' });
+                            }
+                          }} />
+                        <div>
+                          <div style={s.checkLabel}>{label}</div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>{hint}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {/* Recolourable area — generic; appears only when colour-changeable AND a 2D image. */}
+                  {capabilities.color && selectedEl?.image_url && !isGlb && (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed #C5D4C8' }}>
+                      <label style={{ ...s.label, marginBottom: 4 }}>Recolourable area</label>
+                      <select style={s.select} value={recolorMethod}
+                        onChange={e => { const m = e.target.value; setRecolorMethod(m); patchPc({ recolor: recolorDesc(m) }); }}>
+                        <option value="opaque">Whole image — recolour every pixel (solid stickers)</option>
+                        <option value="saturated">Coloured fill, keep black/white lines (any colour + outline)</option>
+                        <option value="blue_gt_green">Coloured fill, keep gold/white outline (blue-dominant fill)</option>
+                        <option value="hue_regions">Multi-colour — one swatch per colour (tree: trunk + leaves + flower)</option>
+                      </select>
+                      {recolorMethod === 'blue_gt_green' && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Edge protect</span>
+                          <input type="number" min="0" max="50" step="1" style={{ ...s.input, flex: 1 }} value={recolorGuard}
+                            placeholder="12 — raise if colour bleeds into the outline"
+                            onChange={e => { const g = e.target.value; setRecolorGuard(g); patchPc({ recolor: recolorDesc('blue_gt_green', g) }); }} />
+                        </div>
+                      )}
+                      {(recolorMethod === 'saturated' || recolorMethod === 'hue_regions') && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Saturation min</span>
+                          <input type="number" min="0" max="0.8" step="0.01" style={{ ...s.input, flex: 1 }} value={recolorSat}
+                            placeholder="lower catches more, higher protects lines"
+                            onChange={e => { const sv = e.target.value; setRecolorSat(sv); patchPc({ recolor: recolorDesc(recolorMethod, recolorGuard, sv) }); }} />
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>
+                        Which pixels the colour picker recolours (brightness preserved). <b>Whole image</b> for a single-fill sticker; <b>Coloured fill</b> keeps gold/white outlines; <b>Multi-colour</b> gives the customer one swatch per detected colour (whites/blacks stay) — the fit for artwork like a tree or a dino.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Default color ── */}
+                <div style={s.field}>
+                  <label style={s.label}>Default Color</label>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <input type="color" value={defaultColor}
+                      onChange={e => setDefaultColor(e.target.value)}
+                      style={{ width: 40, height: 32, border: '1.5px solid #C5D4C8', borderRadius: 6, cursor: 'pointer', padding: 2 }} />
+                    <span style={{ fontSize: 12, color: '#6B8C74', fontWeight: 600 }}>{defaultColor}</span>
+                    <button onClick={() => setDefaultColor('')}
+                      style={{ padding: '4px 10px', borderRadius: 6, border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: "'Quicksand', sans-serif" }}>
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                </Group>
+                <Group title="Raw config" sub="The JSON every control above writes. Edit it directly if you must.">
                 {/* ── placement_config JSON editor (+ calibrator paste side-by-side for piping) ── */}
                 <div style={s.field}>
                   <label style={s.label}>placement_config (JSON)
@@ -2606,6 +2658,21 @@ export default function ManageElements() {
                       </div>
                     </>
                 </div>
+                </Group>
+
+                {/* The preview itself. Mounted only while open, so the 3D canvas is not built —
+                    and not kept alive — for every element somebody merely selects. `key` on the
+                    element id so switching elements with it open rebuilds rather than redraws a
+                    stale scene. */}
+                {previewOpen && selectedId && (
+                  <Modal title={`Preview — ${name || 'element'}`} width={860} onClose={() => setPreviewOpen(false)}>
+                    <ElementPreviewPanel key={selectedId} elementId={selectedId} savedAt={savedAt} />
+                    <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 10, lineHeight: 1.5 }}>
+                      This draws what is <b>saved</b>, not what is on the form. Save first to see an
+                      edit you have just made.
+                    </div>
+                  </Modal>
+                )}
 
                 {/* Baker craft guide (X-Ray) — sidecar table, saved independently */}
                 {isPipingConfig && (
