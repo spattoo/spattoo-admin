@@ -25,7 +25,12 @@ import { fetchElementTypes, fetchAdminElementCategories, createGlobalElement, up
 //   categorySlug  where a customer BROWSES to find it ('unicorn-rainbow', …). Optional, and the
 //                 studio that leaves it out gets an element nobody can find — see below.
 //   canvasRef   a ref to a node CONTAINING the canvas — the thumbnail is literally what it shows
-//   buildPayload()  → { placement_config, default_color?, allowed_zones? } — the per-studio bits
+//   buildPayload()  → { placement_config, default_color?, allowed_zones?, medium? } — the per-studio
+//                 bits. `medium` is the MATERIAL (migration 032) — fondant, edible_paper, acrylic.
+//                 ⚠️ It is not the element TYPE and not the category: 032 says technique lives in
+//                 element_types and what a thing depicts lives in element_categories, so "is this
+//                 fondant or a paper cut" has only ever had one right home. A studio whose generator
+//                 can be made in two materials should OFFER it rather than pick one.
 //   onHydrate(el)   ← called when opened with ?element=<id>, to load the row back into the sliders
 //
 // Returns the save state plus `save()` and `startNew()`. The caller renders its own name field and
@@ -132,7 +137,7 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
     if (!saveName.trim()) { setMsg({ ok: false, text: 'Give the element a name.' }); return; }
     setBusy(true); setMsg(null);
     try {
-      const { placement_config, default_color, allowed_zones } = buildPayload();
+      const { placement_config, default_color, allowed_zones, medium } = buildPayload();
       // Best-effort: a failed capture must never lose the tuning. But it must not be SILENT either —
       // swallowing it whole is how three elements reached the catalogue as white squares while the
       // screen said "Saved". The reason is kept and reported below.
@@ -146,6 +151,9 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
           name: saveName.trim(),
           ...(default_color !== undefined ? { default_color } : {}),
           ...(allowed_zones ? { allowed_zones } : {}),
+          /* ⚠️ `!== undefined`, not a truthiness test: PATCH reads undefined as "leave alone", so a
+             studio clearing the medium back to "not stated" has to be able to send null. */
+          ...(medium !== undefined ? { medium } : {}),
           placement_config,
           // Only send a thumbnail actually captured. PATCH treats undefined as "leave alone", so a
           // failed capture keeps the existing picture rather than blanking it.
@@ -178,6 +186,7 @@ export function useElementSave({ typeSlug, categorySlug, canvasRef, buildPayload
           default_color: default_color ?? null,
           image_url: null,          // generated — there is no asset; the thumbnail carries the look
           thumbnail_url,
+          medium: medium ?? null,
           placement_config,
         });
         // Become an EDIT of what was just made, so the next press revises this row instead of

@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, useGLTF } from '@react-three/drei';
 import { HexColorPicker } from 'react-colorful';
 import * as THREE from 'three';
+import { buildPipingStroke, NOZZLES, NOZZLE_BY_KEY, DEFAULT_NOZZLE, PEN_FEEL } from '@spattoo/designer';
 import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Freehand cream pen ──────────────────────────────────────────────────────
@@ -27,36 +28,14 @@ function creamMaterialProps(softness, color) {
 
 const STANDARD_CAKE_COLOR = '#f5c6d0';
 
-// ── Nozzles ──────────────────────────────────────────────────────────────────
-// A piping tip is really just a CROSS-SECTION. Cream extruded through it = that
-// profile swept along the stroke. So a round tip → smooth rope, an open star →
-// ribbed rope with grooves down its length, French → many fine ribs. Each profile
-// is a closed polygon at unit radius (max reach = 1); thickness scales it to size.
-function starProfile(spikes, inner) {
-  const out = [];
-  for (let i = 0; i < spikes; i++) {
-    const a0 = (i / spikes) * Math.PI * 2;          // outer point
-    const a1 = ((i + 0.5) / spikes) * Math.PI * 2;  // valley between points
-    out.push([Math.cos(a0), Math.sin(a0)]);
-    out.push([Math.cos(a1) * inner, Math.sin(a1) * inner]);
-  }
-  return out;
-}
-function roundProfile(n) {
-  const out = [];
-  for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; out.push([Math.cos(a), Math.sin(a)]); }
-  return out;
-}
 // Tunable: spikes = rib count, inner = valley depth (smaller = deeper grooves).
-const NOZZLES = [
-  { key: 'round',    label: 'Round',       hint: 'Writing / smooth rope',  profile: roundProfile(16) },
-  { key: 'star5',    label: 'Open Star',   hint: '1M — the classic',        profile: starProfile(5, 0.55) },
-  { key: 'star6',    label: '6-Star',      hint: 'Tighter ribs',            profile: starProfile(6, 0.55) },
-  { key: 'closed',   label: 'Closed Star', hint: 'Deep grooves',            profile: starProfile(6, 0.40) },
-  { key: 'french',   label: 'French',      hint: 'Fine fluted ribs',        profile: starProfile(14, 0.82) },
-];
-const NOZZLE_BY_KEY = Object.fromEntries(NOZZLES.map(n => [n.key, n]));
-const DEFAULT_NOZZLE = 'star5';
+/* ⚠️ CORE'S NOZZLES, not a second list. This one had five tips built from its own `starProfile`
+ * while core had nine built from `lobedProfile` — so the studio offered fewer tips than the product,
+ * drew their icons from different maths, and could not offer the petal at all. Same drift as the
+ * sweep: this file was the prototype core was ported from, and it kept its copy.
+ *
+ * The icons below read `profile` off each entry, and core's carry one, so nothing else changes —
+ * except that a tip previewed here is now the tip a baker actually gets. */
 
 // ── Sweep core ───────────────────────────────────────────────────────────────
 // Everything (rope, shell, rosette) is the SAME nozzle profile swept along some
@@ -178,12 +157,15 @@ function stubIfSingle(pts, thickness) {
 
 // ── Style builders ──────────────────────────────────────────────────────────
 // LINE — steady rope resting on the surface (single layer). Stems, vines, writing.
-function buildLine(points, profile, thickness) {
+function buildLine(points, profile, thickness, nozzle, feel) {
+  /* ⚠️ CORE'S SWEEP, not this file's. This studio was the prototype the cream pen was ported FROM,
+   * and it kept its own copy of the sweep, the nozzles and the material afterwards. The two drifted,
+   * which makes tuning here a tuning of a renderer no customer ever sees — the mock-up the root
+   * CLAUDE.md warns about. Seating stays local (it is about THIS stage's cake); the geometry is the
+   * product's, so what is dialled in here is what a baker gets. */
   const pts = stubIfSingle(seat(points, thickness, false), thickness);
   if (pts.length === 0) return null;
-  const pos = [], idx = [];
-  pushSweep(pos, idx, pts, profile, () => thickness);
-  return finishGeo(pos, idx);
+  return buildPipingStroke(pts, nozzle, thickness, feel);
 }
 
 // SHELL — a fat rounded head tapering to a pointed tail, piped in a row (shell border).
@@ -219,22 +201,22 @@ function buildShells(points, profile, thickness) {
 // swirl). It's Line with stacking ON — the first coil sits on the cake, and where your
 // spiral comes back over an earlier coil it climbs onto it, so tight coils dome up while
 // a spread-out spiral stays flat. No floating: cream only rises when there's cream under it.
-function buildRosettes(points, profile, thickness) {
+function buildRosettes(points, profile, thickness, nozzle, feel) {
+  // Same core sweep as Line — the difference is the SEAT (stacking on), not the geometry.
   const pts = stubIfSingle(seat(points, thickness, true), thickness);
   if (pts.length === 0) return null;
-  const pos = [], idx = [];
-  pushSweep(pos, idx, pts, profile, () => thickness);
-  return finishGeo(pos, idx);
+  return buildPipingStroke(pts, nozzle, thickness, feel);
 }
 
 const STROKE_BUILDERS = { line: buildLine, shell: buildShells, rosette: buildRosettes };
-function buildStrokeGeometry(style, points, profile, thickness) {
-  return (STROKE_BUILDERS[style] || buildLine)(points, profile, thickness);
+function buildStrokeGeometry(style, points, profile, thickness, nozzle, feel) {
+  return (STROKE_BUILDERS[style] || buildLine)(points, profile, thickness, nozzle, feel);
 }
 
-function StrokeMesh({ style, points, color, thickness, softness, nozzle }) {
+function StrokeMesh({ style, points, color, thickness, softness, nozzle, feel }) {
   const profile = (NOZZLE_BY_KEY[nozzle] || NOZZLE_BY_KEY[DEFAULT_NOZZLE]).profile;
-  const geo = useMemo(() => buildStrokeGeometry(style, points, profile, thickness), [style, points, profile, thickness]);
+  const geo = useMemo(() => buildStrokeGeometry(style, points, profile, thickness, nozzle, feel),
+    [style, points, profile, thickness, nozzle, feel]);
   if (!geo) return null;
   return (
     <mesh geometry={geo} castShadow>
@@ -351,8 +333,8 @@ function hitPoint(e) {
 
 function Scene({
   thumbView, thumbTarget,
-  cakeColor, minGap, activeRef,
-  liveColor, liveThickness, liveSoftness, liveNozzle, liveStyleKind, liveStampUrl, liveStampSize, liveSpacing,
+  cakeColor, minGap, activeRef, endStroke,
+  liveColor, liveThickness, liveSoftness, liveNozzle, liveStyleKind, liveFeel, liveStampUrl, liveStampSize, liveSpacing,
   committed, live, onStart, onMove,
 }) {
   // Orbit is on by default; we only switch OFF rotate while the pointer is over the
@@ -365,9 +347,24 @@ function Scene({
   // Disable rotate the instant the pointer is over the cake (not just on press), so the
   // pointerdown that begins a stroke can never be grabbed by OrbitControls first.
   const handleEnter = useCallback(() => { overRef.current = true; setRotate(false); }, []);
-  // Leaving re-arms orbit — unless we're mid-stroke (a fast drag can wander off the cake
-  // and we don't want it to suddenly start spinning the view).
-  const handleLeave = useCallback(() => { overRef.current = false; if (!activeRef.current) setRotate(true); }, [activeRef]);
+  /* ⚠️ LEAVING THE CAKE ENDS THE STROKE, and it used not to.
+   *
+   * handleMove is a MESH handler, so it stops firing the moment the pointer is off the cake — but
+   * the stroke stayed open, so the next point after coming back on was appended to the SAME stroke
+   * and the curve drew a straight chord across the gap. Cream nobody piped, reported as "it is
+   * finding edges and joining", and it showed up near the rim because that is where a pointer
+   * leaves the top.
+   *
+   * Ending is what actually happens: the tip is off the cake, so nothing lands. Clamping to the rim
+   * instead would keep a border continuous by inventing the part that was never drawn.
+   *
+   * Orbit still stays put while a stroke is running — leaving mid-stroke must not start spinning
+   * the view, which is what the old comment here was protecting. That part is unchanged. */
+  const handleLeave = useCallback(() => {
+    overRef.current = false;
+    if (activeRef.current) endStroke();
+    else setRotate(true);
+  }, [activeRef, endStroke]);
 
   const handleDown = useCallback(e => {
     e.stopPropagation();
@@ -440,10 +437,10 @@ function Scene({
       <Suspense fallback={null}>
         {committed.map((s, i) => (s.style === 'stamp'
           ? <StampStrokeMesh key={i} url={s.stampUrl} points={s.points} size={s.stampSize} spacing={s.spacing} softness={s.softness} color={s.color} seed={s.seed} />
-          : <StrokeMesh key={i} style={s.style} points={s.points} color={s.color} thickness={s.thickness} softness={s.softness} nozzle={s.nozzle} />))}
+          : <StrokeMesh key={i} style={s.style} points={s.points} color={s.color} thickness={s.thickness} softness={s.softness} nozzle={s.nozzle} feel={liveFeel} />))}
         {live.length > 0 && (liveStyleKind === 'stamp'
           ? <StampStrokeMesh url={liveStampUrl} points={live} size={liveStampSize} spacing={liveSpacing} softness={liveSoftness} color={liveColor} seed={1} />
-          : <StrokeMesh style={liveStyleKind} points={live} color={liveColor} thickness={liveThickness} softness={liveSoftness} nozzle={liveNozzle} />)}
+          : <StrokeMesh style={liveStyleKind} points={live} color={liveColor} thickness={liveThickness} softness={liveSoftness} nozzle={liveNozzle} feel={liveFeel} />)}
       </Suspense>
 
       {/* rotate auto-disables while the pointer is over the cake (see handlers above) */}
@@ -501,6 +498,8 @@ export default function FreehandPenStudio() {
   const [color, setColor]       = useState('#ffffff');
   const [thickness, setThick]   = useState(0.03);
   const [softness, setSoft]     = useState(PIPING_SOFTNESS_DEFAULT);
+  // The pen's feel, seeded from core's shipped values so the studio opens on what a baker gets.
+  const [feel, setFeel]         = useState(PEN_FEEL);
   const [nozzle, setNozzle]     = useState(DEFAULT_NOZZLE);
   const [style, setStyle]       = useState('line');   // line | shell | rosette | stamp
   const [stampUrl, setStampUrl] = useState(DEFAULT_STAMP);
@@ -571,26 +570,30 @@ export default function FreehandPenStudio() {
     });
   }, []);
 
+  /* Ending a stroke, from wherever it ends. Hoisted out of the effect because there are now TWO
+   * ways: the pointer comes up, or it LEAVES THE CAKE — see the note on handleLeave. */
+  const endStroke = useCallback(() => {
+    if (!activeRef.current) return;
+    activeRef.current = false;
+    setLive(pts => {
+      if (pts.length) {
+        const s = liveStyle.current;
+        setCommitted(c => [...c, { style: s.style, points: pts, color: s.color, thickness: s.thickness, softness: s.softness, nozzle: s.nozzle, stampUrl: s.stampUrl, stampSize: s.stampSize, spacing: s.spacing, seed: Math.floor(Math.random() * 1e6) }]);
+      }
+      return [];
+    });
+  }, []);
+
   // End the stroke wherever the pointer comes up — even off the cake / off-canvas.
   useEffect(() => {
-    const end = () => {
-      if (!activeRef.current) return;
-      activeRef.current = false;
-      setLive(pts => {
-        if (pts.length) {
-          const s = liveStyle.current;
-          setCommitted(c => [...c, { style: s.style, points: pts, color: s.color, thickness: s.thickness, softness: s.softness, nozzle: s.nozzle, stampUrl: s.stampUrl, stampSize: s.stampSize, spacing: s.spacing, seed: Math.floor(Math.random() * 1e6) }]);
-        }
-        return [];
-      });
-    };
+    const end = endStroke;
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
     return () => {
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
     };
-  }, []);
+  }, [endStroke]);
 
   // ── The tile frames the CREAM, fitted to it ───────────────────────────────────────────────────
   // A fixed camera distance was the first attempt and produced a tiny drawing in a big frame: how
@@ -737,6 +740,33 @@ export default function FreehandPenStudio() {
           <div style={{ marginTop: 12 }}>
             <Slider label="Thickness" value={thickness} min={0.008} max={0.07} step={0.002} resetTo={0.03} onChange={setThick} color="#c47ad6" />
             <Slider label="Softness" value={softness} min={0} max={1} step={0.05} resetTo={PIPING_SOFTNESS_DEFAULT} onChange={setSoft} />
+
+            {/* ── How it FEELS, which is what makes it read as cream rather than cord ────────────
+                Reported from the cake: "too robotic, does not look like cream at all". The cause was
+                that every bit of variation in the rope was high-frequency and perfectly periodic,
+                and there was none of the slow uneven kind a hand actually makes.
+                ⚠️ Drag SPEED is the big one, and it is free — capture samples at a fixed rate, so the
+                spacing between stored points already IS the speed. Set it to 0 to see the old rope. */}
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: '#6B8C74', letterSpacing: 0.5,
+                          textTransform: 'uppercase', margin: '12px 0 6px' }}>Feel</div>
+            <Slider label="Speed → width" value={feel.speedWidth} min={0} max={1.6} step={0.05}
+              resetTo={PEN_FEEL.speedWidth} onChange={v => setFeel(f => ({ ...f, speedWidth: v }))} color="#c47ad6" />
+            <Slider label="Rib twist" value={feel.twistTurnsPerDia} min={0} max={0.2} step={0.005}
+              resetTo={PEN_FEEL.twistTurnsPerDia} onChange={v => setFeel(f => ({ ...f, twistTurnsPerDia: v }))} />
+            <Slider label="Swell" value={feel.swellAmp} min={0} max={0.25} step={0.005}
+              resetTo={PEN_FEEL.swellAmp} onChange={v => setFeel(f => ({ ...f, swellAmp: v }))} />
+            <Slider label="Swell / dia" value={feel.swellPerDia} min={0.02} max={1.2} step={0.01}
+              resetTo={PEN_FEEL.swellPerDia} onChange={v => setFeel(f => ({ ...f, swellPerDia: v }))} />
+            <Slider label="Tail length" value={feel.tailDias} min={0} max={4} step={0.1}
+              resetTo={PEN_FEEL.tailDias} onChange={v => setFeel(f => ({ ...f, tailDias: v }))} />
+            <Slider label="Tail thinness" value={feel.tailEnd} min={0.05} max={1} step={0.02}
+              resetTo={PEN_FEEL.tailEnd} onChange={v => setFeel(f => ({ ...f, tailEnd: v }))} />
+            {/* ⚠️ SLIT TIPS ONLY (Petal 104) — it does nothing to a rope, whose roll is invisible.
+                Held upright a petal ribbon stands on its edge and reads as a loop of tape; leaning
+                it away from the flower's centre lays the sheet over so it cups. Every reference
+                photo of a piped rose is a bag held at an angle. */}
+            <Slider label="Lean (petal)" value={feel.leanDeg} min={-80} max={80} step={2}
+              resetTo={PEN_FEEL.leanDeg} onChange={v => setFeel(f => ({ ...f, leanDeg: v }))} color="#c47ad6" />
           </div>
           <p style={{ fontSize: 10, color: '#9BB5A2', margin: '8px 0 0', lineHeight: 1.5 }}>
             Softness: 0 = glossy gel · 0.7 = buttercream · 1 = matte.
@@ -820,8 +850,8 @@ export default function FreehandPenStudio() {
           gl={{ preserveDrawingBuffer: true }}
           style={{ touchAction: 'none', cursor: 'crosshair' }}>
           <Scene
-            cakeColor={cakeColor} minGap={minGap} activeRef={activeRef}
-            liveColor={color} liveThickness={thickness} liveSoftness={softness} liveNozzle={nozzle} liveStyleKind={style}
+            cakeColor={cakeColor} minGap={minGap} activeRef={activeRef} endStroke={endStroke}
+            liveColor={color} liveThickness={thickness} liveSoftness={softness} liveNozzle={nozzle} liveStyleKind={style} liveFeel={feel}
             liveStampUrl={stampUrl} liveStampSize={stampSize} liveSpacing={spacing}
             committed={committed} live={live} onStart={startStroke} onMove={movePoint}
             thumbView={thumbView} thumbTarget={shot.centre}

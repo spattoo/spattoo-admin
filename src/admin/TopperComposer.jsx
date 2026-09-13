@@ -1,0 +1,956 @@
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
+import { OrbitControls, Html } from '@react-three/drei';
+import * as THREE from 'three';
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
+import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
+import { HexColorPicker } from 'react-colorful';
+import { useElementSave } from '../lib/useElementSave.js';
+import {
+  offsetParts, outlineOf, topperContours,
+  SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
+  SelectionBox, SELECTION_COLOR, albedoForLight, loadTopperFace, TOPPER_FACES,
+  TOPPER_PRESETS, presetPaths,
+} from '@spattoo/designer';
+
+/* ── Topper composer — STEP 1 of a staged rebuild ────────────────────────────────────────────────
+ *
+ * The card cutout studio does one word on one plate, and everything about it is decided by controls
+ * that are all on screen all the time. This replaces that model with a COMPOSITION: an empty canvas
+ * you add text and shapes to, where a control only appears once there is something for it to act on.
+ *
+ * ⚠️ THE CANVAS IS THE 3D SCENE SEEN FACE ON — it is NOT a separate 2D editor with a 3D preview
+ * beside it. Two representations of one object is the drift INVARIANTS #15 exists to stop: the
+ * moment a 2D canvas draws a heart and the 3D preview builds one, they are two hearts and only one
+ * of them ships. A card topper is FLAT, so face-on 3D and a 2D canvas look identical anyway — and
+ * dragging the camera round shows the same objects standing on a cake, with nothing to keep in step.
+ *
+ * The grid is a scene object behind the work, at the plane the cards sit on, so it reads as a
+ * drawing surface without being a second coordinate system.
+ *
+ * ⚠️ STEP 1 ONLY. Here: an empty canvas, the grid, the face-on camera, the insert menu, and
+ * selection. NOT here, and coming in order: per-selection property panels, dragging, and saving —
+ * saving last, because what it stores stops being "a word and some numbers" and becomes a list of
+ * objects, which is an element-type decision rather than a studio one.
+ *
+ * The card cutout studio is deliberately left alone until this can do everything it does. Two
+ * screens for a while is cheaper than a half-converted one.
+ */
+
+const GRID_HALF = 2.2;        // how far the drawing surface extends from the middle
+
+/* What a saved row was drawn for. The payload is the OBJECT LIST, so a later improvement to how a
+   word is cut reaches every topper already authored — and if a generator ever changes in a way that
+   must NOT reach old rows, this says which recipe each one was drawn for. */
+const PAYLOAD_VERSION = 1;
+
+/* ⚠️ THE MATERIAL IS `medium` (migration 032), NOT THE ELEMENT TYPE AND NOT THE CATEGORY.
+ *
+ * 032 puts it plainly: technique lives in `element_types`, what a thing depicts lives in
+ * `element_categories`, and what it is MADE OF has a column of its own. So "this is a paper cut, not
+ * fondant" was never a question about the type — typing it `fondant_decor` would have been a lie
+ * written into a table that is not about material at all.
+ *
+ * OFFERED rather than fixed, because one generator genuinely cuts both: the same composition is a
+ * card cutout on a stick or a wafer-sheet print laid flat, and which one it is belongs to whoever
+ * is authoring the row. */
+const MEDIA = [
+  { key: 'acrylic',      label: 'Card or acrylic',      note: 'not edible — 032 files these together' },
+  { key: 'edible_paper', label: 'Wafer or icing sheet', note: 'printed and edible' },
+  { key: 'other',        label: 'Something else',       note: '' },
+];
+const GRID_STEP = 0.2;
+const CARD_THICK = 0.02;
+
+/* Measured for this exact material under the designer's rig — see CardCutoutStudio for the working,
+ * and re-measure if the HDRI, SceneLights or the roughness moves (INVARIANTS #16). */
+const CARD_LIGHT = Object.freeze([3.193, 2.940, 3.028]);
+const asRendered = (hex) => albedoForLight(hex, CARD_LIGHT, { rolloff: 6 });
+
+const blockFont = new FontLoader().parse(helvetikerBold);
+
+/* Every face core offers, plus the block one three ships. Same list as the card cutout studio, and
+ * for the same reason: TOPPER_FACES is all scripts, and a number topper wants a block. */
+const BLOCK_KEY = '__block';
+const FACES = { [BLOCK_KEY]: { label: 'Block' }, ...TOPPER_FACES };
+
+/* The shapes on offer are the families `backingPlate` already understands — the cake's own
+ * `OUTLINE_FAMILIES` plus the two analytic ones it samples itself. Listed by key, so a family
+ * authored later needs a row here and no new code. */
+const SHAPES = [
+  { key: 'circle', label: 'Circle' },
+  { key: 'rect',   label: 'Panel' },
+  { key: 'heart',  label: 'Heart' },
+];
+
+/* ⚠️ THE ICON IS THE SHAPE'S OWN OUTLINE, drawn from the same function that builds it. A hand-drawn
+ * heart icon beside a generated heart is two hearts, and the icon is the one that lies first — it
+ * keeps looking right after the curve behind it has been retuned. */
+function ShapeIcon({ family, size = 22 }) {
+  const d = useMemo(() => {
+    const pts = family === 'heart'
+      ? (outlineOf('heart', {}) || []).map(p => ({ x: p.x, y: -p.z }))
+      : family === 'rect'
+        ? [{ x: -1, y: -0.72 }, { x: 1, y: -0.72 }, { x: 1, y: 0.72 }, { x: -1, y: 0.72 }]
+        : Array.from({ length: 48 }, (_, i) => {
+            const a = (i / 48) * Math.PI * 2;
+            return { x: Math.cos(a), y: Math.sin(a) };
+          });
+    if (!pts.length) return '';
+    const k = size / 2.4;
+    return pts.map((p, i) => `${i ? 'L' : 'M'} ${(p.x * k).toFixed(2)} ${(-p.y * k).toFixed(2)}`).join(' ') + ' Z';
+  }, [family, size]);
+  return (
+    <svg width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`}
+      aria-hidden="true" focusable="false">
+      <path d={d} fill="currentColor" />
+    </svg>
+  );
+}
+
+/* The drawing surface. Lines, not a textured plane: a grid drawn as geometry stays crisp at any
+ * zoom and costs nothing, and it sits just behind the work so a card never z-fights with it. */
+function Grid() {
+  const geo = useMemo(() => {
+    const pts = [];
+    for (let v = -GRID_HALF; v <= GRID_HALF + 1e-6; v += GRID_STEP) {
+      pts.push(-GRID_HALF, v, 0, GRID_HALF, v, 0);
+      pts.push(v, -GRID_HALF, 0, v, GRID_HALF, 0);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    return g;
+  }, []);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return (
+    <group position={[0, 0, -0.06]}>
+      <lineSegments geometry={geo}>
+        <lineBasicMaterial color="#D8D8DA" transparent opacity={0.9} toneMapped={false} />
+      </lineSegments>
+      {/* The two middle lines darker, so the centre of the card is findable without counting. */}
+      <lineSegments>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[new Float32Array([
+            -GRID_HALF, 0, 0.001, GRID_HALF, 0, 0.001,
+            0, -GRID_HALF, 0.001, 0, GRID_HALF, 0.001,
+          ]), 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color="#B9B9BD" toneMapped={false} />
+      </lineSegments>
+    </group>
+  );
+}
+
+/* ── Dragging ────────────────────────────────────────────────────────────────────────────────────
+ *
+ * ⚠️ AGAINST A FIXED PLANE, never against the object's own surface. `e.point` is where the ray met
+ * THIS mesh, and the mesh is the thing being moved — read it every frame and the object chases its
+ * own hit point, accelerating away from the pointer. The card plane at z = 0 does not move, so the
+ * arithmetic is stable: grab the offset once, subtract it forever.
+ *
+ * ⚠️ AND THE GRAB OFFSET IS THE WHOLE OF IT. Without it an object jumps so its centre lands under the
+ * pointer the instant you touch it — INVARIANTS #10's law that `handleAt` and `dragTo` are exact
+ * inverses, in the smallest possible form: where you grabbed is where you are still holding.
+ */
+const DRAG_PLANE = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+const SNAP = 0.05;             // how near a centre line counts as on it
+
+// Where the pointer's ray meets the card plane, or null if it runs parallel to it.
+function planeHit(ray) {
+  const p = new THREE.Vector3();
+  return ray.intersectPlane(DRAG_PLANE, p) ? p : null;
+}
+
+const extrude = (parts, z) => (parts ?? []).map((p) => {
+  const shape = new THREE.Shape(p.outer.map(q => new THREE.Vector2(q.x, q.y)));
+  shape.holes = (p.holes ?? []).map(h => new THREE.Path(h.map(q => new THREE.Vector2(q.x, q.y))));
+  const g = new THREE.ExtrudeGeometry(shape, { depth: CARD_THICK, bevelEnabled: false });
+  g.translate(0, 0, z - CARD_THICK / 2);
+  return g;
+});
+
+/* ⚠️ EVERY OBJECT ON ITS OWN LAYER, or they interpenetrate. Coplanar extrusions do not stack — a
+ * word laid on a disc at the same z has half its letters INSIDE the disc, so the disc wins wherever
+ * it happens to be nearer and the letters show through in patches. It looks like transparency and is
+ * actually two solids sharing a plane.
+ *
+ * A tenth of the card's thickness per layer: enough that the depth test is decisive, small enough
+ * that the stack is still one flat card when it is cut. Layer order is also z-order, so "the last
+ * thing added is in front" is true rather than accidental. */
+const LAYER_Z = CARD_THICK * 0.1;
+
+/* Corner grips on the selection box. Small squares in world units — the working camera is
+ * orthographic and fixed, so a world size IS a screen size and there is nothing to compensate for. */
+const HANDLE = 0.075;
+
+function Piece({ obj, layer, font, selected, editing, onSelect, onMove, onEdit, onChange }) {
+  const { controls } = useThree();
+  const grab = useRef(null);
+  const sizing = useRef(null);
+
+  const begin = (e) => {
+    e.stopPropagation();
+    onSelect(obj.id);
+    if (editing) return;                 // a drag would fight the caret
+    const hit = planeHit(e.ray);
+    if (!hit) return;
+    grab.current = { dx: obj.x - hit.x, dy: obj.y - hit.y };
+    // ⚠️ Orbit off for the duration, or one drag both moves the card and swings the camera.
+    if (controls) controls.enabled = false;
+    e.target.setPointerCapture?.(e.pointerId);
+  };
+
+  const move = (e) => {
+    if (!grab.current || editing) return;
+    e.stopPropagation();
+    const hit = planeHit(e.ray);
+    if (!hit) return;
+    let x = hit.x + grab.current.dx, y = hit.y + grab.current.dy;
+    /* ⚠️ Snapped to the MIDDLE only, not to every grid line. Centring a word on a shape is the
+     * alignment anyone actually wants, and it is the one the eye catches instantly when it is a
+     * pixel out. Snapping to all of them would make the grid a cage — free placement is the normal
+     * case and a drawn grid is there to be read, not obeyed. */
+    if (Math.abs(x) < SNAP) x = 0;
+    if (Math.abs(y) < SNAP) y = 0;
+    onMove(obj.id, { x, y });
+  };
+
+  const end = (e) => {
+    if (!grab.current) return;
+    grab.current = null;
+    if (controls) controls.enabled = true;
+    e.target?.releasePointerCapture?.(e.pointerId);
+  };
+
+  /* ── Resizing, from any corner ─────────────────────────────────────────────────────────────────
+   *
+   * ⚠️ SCALED BY THE RATIO OF DISTANCES FROM THE CENTRE, not by matching the corner to the pointer.
+   * The two agree only while the grip is exactly under the finger, and they part company the moment
+   * the pointer strays off the diagonal — matching the corner then makes the object lunge. A ratio
+   * of "how far out are you now" to "how far out were you when you grabbed" is stable in every
+   * direction, and it is the same law as the drag's grab offset (INVARIANTS #10): the thing you took
+   * hold of stays where you are holding it.
+   *
+   * ⚠️ AND IT SCALES ABOUT THE OBJECT'S CENTRE, so the piece grows evenly and its position does not
+   * drift. Anchoring the opposite corner is the other convention and needs the object's own bounds
+   * to stay fixed while its size changes — which is exactly what a re-cut word does not do. */
+  const sizeStart = (e) => {
+    e.stopPropagation();
+    onSelect(obj.id);
+    const hit = planeHit(e.ray);
+    if (!hit) return;
+    const r = Math.hypot(hit.x - obj.x, hit.y - obj.y);
+    if (r < 1e-4) return;
+    sizing.current = { r, size: obj.size };
+    if (controls) controls.enabled = false;
+    e.target.setPointerCapture?.(e.pointerId);
+  };
+
+  const sizeMove = (e) => {
+    if (!sizing.current) return;
+    e.stopPropagation();
+    const hit = planeHit(e.ray);
+    if (!hit) return;
+    const r = Math.hypot(hit.x - obj.x, hit.y - obj.y);
+    const next = sizing.current.size * (r / sizing.current.r);
+    onChange(obj.id, { size: Math.max(0.2, Math.min(3.2, next)) });
+  };
+
+  const sizeEnd = (e) => {
+    if (!sizing.current) return;
+    sizing.current = null;
+    if (controls) controls.enabled = true;
+    e.target?.releasePointerCapture?.(e.pointerId);
+  };
+
+  const parts = useMemo(() => topperContours(obj, font), [obj, font]);
+
+  /* ⚠️ The offset is a PROPERTY OF THE TEXT, not of the screen. It was a slider that existed whether
+   * or not there was anything to offset; here it belongs to the object it acts on, so two words on
+   * one topper can carry different bands — which the single-object studio could never express. */
+  const backParts = useMemo(() => (
+    obj.offset > 0 && parts ? offsetParts(parts, obj.offset * obj.size) : null
+  ), [obj.kind, obj.offset, obj.size, parts]);
+
+  const geos = useMemo(() => extrude(parts, 0), [parts]);
+  const backGeos = useMemo(() => extrude(backParts, -CARD_THICK), [backParts]);
+  useEffect(() => () => { geos.forEach(g => g.dispose()); backGeos.forEach(g => g.dispose()); },
+    [geos, backGeos]);
+
+  // The selection border traces the object's own bounds — including its backing, because that is
+  // the extent of the thing and what a drag will grab.
+  const box = useMemo(() => {
+    let lo = Infinity, hi = -Infinity, bo = Infinity, to = -Infinity;
+    for (const p of (backParts ?? parts ?? [])) for (const q of p.outer) {
+      if (q.x < lo) lo = q.x; if (q.x > hi) hi = q.x;
+      if (q.y < bo) bo = q.y; if (q.y > to) to = q.y;
+    }
+    return Number.isFinite(lo) ? { w: hi - lo, h: to - bo, cx: (lo + hi) / 2, cy: (bo + to) / 2 } : null;
+  }, [parts]);
+
+  if (!geos.length || !box) return null;
+
+  return (
+    <group position={[obj.x, obj.y, layer * LAYER_Z]}>
+      {backGeos.map((g, i) => (
+        <mesh key={`b${i}`} geometry={g} castShadow receiveShadow
+          onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+          <meshStandardMaterial color={asRendered(obj.offsetColour)} roughness={0.86} metalness={0} />
+        </mesh>
+      ))}
+      {geos.map((g, i) => (
+        <mesh key={i} geometry={g} castShadow receiveShadow
+          onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+          onDoubleClick={(e) => { if (obj.kind === 'text') { e.stopPropagation(); onEdit(obj.id); } }}>
+          <meshStandardMaterial color={asRendered(obj.colour)} roughness={0.86} metalness={0} />
+        </mesh>
+      ))}
+      {/* ⚠️ EDITED WHERE IT IS. The words were also a field in the side panel, which meant typing in
+          one place and watching another — and two controls for one value, either of which could be
+          the one you reach for. A real <input> is laid over the object rather than keystrokes being
+          captured: a caret, selection, undo, IME and a phone keyboard all come free, and none of
+          them can be faked by listening for keydown.
+          Screen-space rather than `transform`, on purpose — this is an editing affordance, not the
+          artwork, so it should stay legible when the card is small or the camera is turned. */}
+      {editing && obj.kind === 'text' && (
+        <Html center zIndexRange={[40, 0]} style={{ pointerEvents: 'auto' }}>
+          <input
+            autoFocus
+            defaultValue={obj.text}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => onChange(obj.id, { text: e.target.value })}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
+            }}
+            onBlur={() => onEdit(null)}
+            style={{
+              minWidth: 120, textAlign: 'center', padding: '6px 10px', borderRadius: 8,
+              border: `2px solid ${SELECTION_COLOR}`, outline: 'none', background: '#fff',
+              fontFamily: "'Quicksand', sans-serif", fontSize: 16, fontWeight: 700, color: '#2C3E33',
+            }}
+          />
+        </Html>
+      )}
+      {selected && (
+        <group position={[box.cx, box.cy, 0]}>
+          {/* THE selection cue, from core — a border and not a tint, because an emissive highlight is
+              additive and corrupts the albedo it is meant to advertise. On a screen for choosing
+              colours that is not a small thing. */}
+          <SelectionBox width={box.w * 1.06} height={box.h * 1.12} depth={CARD_THICK * 3} />
+          {/* A grip on each corner, so the nearest one is always to hand whichever way the piece
+              is sitting. All four do the same thing — the scale is about the centre. */}
+          {[[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => (
+            <mesh key={`${sx}${sy}`}
+              position={[sx * box.w * 0.53, sy * box.h * 0.56, CARD_THICK * 2]}
+              onPointerDown={sizeStart} onPointerMove={sizeMove}
+              onPointerUp={sizeEnd} onPointerCancel={sizeEnd}>
+              <planeGeometry args={[HANDLE, HANDLE]} />
+              <meshBasicMaterial color={SELECTION_COLOR} toneMapped={false} />
+            </mesh>
+          ))}
+        </group>
+      )}
+    </group>
+  );
+}
+
+/* ── The properties of whatever is selected ──────────────────────────────────────────────────────
+ *
+ * ⚠️ IT ONLY EXISTS WHEN SOMETHING IS SELECTED, and that is the point of the whole rebuild. The card
+ * cutout studio showed every control at all times — the offset slider with nothing to offset, the
+ * insertion depth with no stick — and a control that cannot act is one the reader has to rule out
+ * before finding the one that can (INVARIANTS #12). Here a control's presence IS the answer to
+ * "does this apply".
+ *
+ * ⚠️ And it sits BESIDE the canvas, never over it: the whole reason for the composition model is
+ * that you watch the thing change as you change it (INVARIANTS #11).
+ */
+function Row({ label, children }) {
+  return (
+    <label style={{ display: 'block', marginBottom: 12 }}>
+      <span style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#3D5A44', marginBottom: 5 }}>
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function Slide({ label, value, min, max, step, onChange, fmt }) {
+  return (
+    <label style={{ display: 'block', marginBottom: 12 }}>
+      <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#3D5A44' }}>{label}</span>
+        <span style={{ fontSize: 11.5, color: '#6B7C70', fontVariantNumeric: 'tabular-nums' }}>
+          {fmt ? fmt(value) : value}
+        </span>
+      </span>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        style={{ width: '100%', accentColor: '#3D5A44' }} />
+    </label>
+  );
+}
+
+function Colour({ label, value, onChange, open, onToggle }) {
+  const wrap = useRef(null);
+  /* ⚠️ CLOSES ON A CLICK OUTSIDE IT. Opened, the wheel is 130px of panel sitting between the colour
+   * and everything below it, and the only way out was to find the same swatch again — so it stayed
+   * open and pushed the rest of the controls down the page. Closing on the next click anywhere else
+   * is what every picker does and needs no affordance of its own.
+   * `mousedown`, not `click`: a click that lands on another control should close this AND reach that
+   * control, and waiting for click means the first press is spent shutting the picker. */
+  useEffect(() => {
+    if (!open) return;
+    const away = (e) => { if (wrap.current && !wrap.current.contains(e.target)) onToggle(); };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open, onToggle]);
+
+  return (
+    <div ref={wrap} style={{ marginBottom: 10 }}>
+      <button type="button" onClick={onToggle}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, minHeight: 42,
+          padding: '0 11px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+          border: '1.5px solid #E2E8E3', background: '#fff' }}>
+        <span style={{ width: 19, height: 19, borderRadius: 5, background: value,
+          border: '1px solid rgba(0,0,0,0.12)' }} />
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#3D5A44' }}>{label}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#8A9A8E' }}>{value}</span>
+      </button>
+      {open && <HexColorPicker color={value} onChange={onChange}
+        style={{ width: '100%', height: 132, marginTop: 8 }} />}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: 9,
+  border: '1.5px solid #E2E8E3', fontFamily: 'inherit', fontSize: 13.5,
+};
+
+/* `embedded` = this is a SECTION of the right-hand column rather than the column itself. The column
+   moved out to the caller when Save arrived, because Save has to outlive the selection: Properties
+   still come and go with what is selected, and a panel that vanished with them would take the Save
+   button with it. */
+function Properties({ obj, onChange, onDelete, embedded = false }) {
+  const [wheel, setWheel] = useState(null);
+  const set = (patch) => onChange(obj.id, patch);
+
+  return (
+    <div className={embedded ? undefined : 'tcProps'}
+      style={{ padding: 16, background: '#fff',
+        borderLeft: embedded ? 'none' : '1px solid #E8EFE9',
+        borderBottom: embedded ? '1px solid #E8EFE9' : 'none' }}>
+      <h2 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, color: '#2C3E33' }}>
+        {obj.kind === 'text' ? 'Text' : (SHAPES.find(x => x.key === obj.family)?.label ?? 'Shape')}
+      </h2>
+
+      {obj.kind === 'text' && (
+        <>
+          {/* ⚠️ NO "Words" FIELD HERE. It used to be one, which meant typing on the right while
+              watching the middle — and two controls for one value, either of which might be the one
+              you reach for. The words are edited on the object; this panel is for everything that is
+              not the words. */}
+          <p style={{ margin: '-4px 0 12px', fontSize: 11, color: '#8A9A8E', lineHeight: 1.4 }}>
+            Double-click the text to edit it.
+          </p>
+          <Row label="Face">
+            <select value={obj.face} onChange={e => set({ face: e.target.value })}
+              style={{ ...inputStyle, background: '#fff' }}>
+              {Object.entries(FACES).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
+            </select>
+          </Row>
+        </>
+      )}
+
+      {obj.kind === 'shape' && (
+        <Row label="Shape">
+          <select value={obj.family} onChange={e => set({ family: e.target.value })}
+            style={{ ...inputStyle, background: '#fff' }}>
+            {SHAPES.map(sh => <option key={sh.key} value={sh.key}>{sh.label}</option>)}
+          </select>
+        </Row>
+      )}
+
+      <Slide label="Size" value={obj.size} min={0.25} max={2.6} step={0.02} onChange={v => set({ size: v })}
+        fmt={v => v.toFixed(2)} />
+
+      <Colour label="Colour" value={obj.colour} onChange={v => set({ colour: v })}
+        open={wheel === 'c'} onToggle={() => setWheel(wheel === 'c' ? null : 'c')} />
+
+      {/* ⚠️ EVERY PIECE CAN HAVE ONE — a shape's outline was missing, and a second hand-placed shape
+          is not the same thing: it has to be centred by eye and comes apart when the first moves. */}
+      <Slide label="Offset" value={obj.offset ?? 0} min={0} max={0.22} step={0.005}
+        onChange={v => set({ offset: v })} fmt={v => (v === 0 ? 'none' : v.toFixed(3))} />
+      {obj.offset > 0 && (
+        <Colour label="Offset colour" value={obj.offsetColour ?? '#FFFFFF'}
+          onChange={v => set({ offsetColour: v })}
+          open={wheel === 'o'} onToggle={() => setWheel(wheel === 'o' ? null : 'o')} />
+      )}
+
+      <button type="button" onClick={() => onDelete(obj.id)}
+        style={{ width: '100%', marginTop: 10, minHeight: 42, borderRadius: 9, cursor: 'pointer',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 800, color: '#8A6320',
+          background: '#FDF3E7', border: '1.5px solid #F0DCC0' }}>
+        Remove
+      </button>
+    </div>
+  );
+}
+
+/* ── Save it to the catalogue ──────────────────────────────────────────────────────────────────
+ *
+ * ⚠️ WITHOUT THIS THE STUDIO IS A MOCK-UP. Rule 3 says so in as many words: a studio whose output can
+ * only be pasted into code is not authoring. Every other generated studio — drip, grass, clouds,
+ * rainbow, letter blocks — has had this; this one shipped without it, so nothing it made could ever
+ * reach a customer.
+ *
+ * ⚠️ `startNew` IS RENDERED WHEREVER SAVE IS, and that pairing is not decoration. Saving rewrites the
+ * address to `?element=<id>` so a reload revises the row instead of cloning it — which then means
+ * somebody authoring a SECOND variant would silently overwrite the first. The two buttons together
+ * are what make "which row am I about to write" answerable. */
+function SaveBlock({ medium, setMedium, editing, saveName, setSaveName, busy, msg, save, startNew }) {
+  const ready = !!saveName.trim();
+  return (
+    <div style={{ padding: 16, marginTop: 'auto' }}>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase',
+        color: '#9AA8A0', marginBottom: 8 }}>
+        {editing ? 'Editing a ready-made' : 'Save as a ready-made'}
+      </div>
+
+      {editing && (
+        <p style={{ margin: '0 0 10px', fontSize: 11.5, lineHeight: 1.5, color: '#5B6B60' }}>
+          Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather than
+          adding another row.
+        </p>
+      )}
+
+      {/* ⚠️ BESIDE the thing it decides, and BEFORE the name field, because it changes what is being
+          saved rather than describing it (INVARIANTS #11). */}
+      <div style={{ marginBottom: 10 }}>
+        <span style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#3D5A44',
+          marginBottom: 6 }}>Made of</span>
+        <div style={{ display: 'grid', gap: 5 }}>
+          {MEDIA.map(m => (
+            <button key={m.key} type="button" onClick={() => setMedium(m.key)}
+              aria-pressed={medium === m.key}
+              style={{ textAlign: 'left', padding: '8px 10px', borderRadius: 9, cursor: 'pointer',
+                fontFamily: 'inherit', lineHeight: 1.3,
+                border: `1.5px solid ${medium === m.key ? '#3D5A44' : '#E2E8E3'}`,
+                background: medium === m.key ? '#EFF4F0' : '#fff' }}>
+              <span style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#2C3E33' }}>
+                {m.label}
+              </span>
+              {m.note && (
+                <span style={{ display: 'block', fontSize: 10.5, color: '#8A9A8E' }}>{m.note}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ⚠️ It is named for what a BAKER will see on the shelf, not for this screen. The field asked
+          for "the element name" once and got answered with the name of the studio, which is exactly
+          the confusion the old wording invited. */}
+      <span style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#3D5A44',
+        marginBottom: 6 }}>Called</span>
+      <input value={saveName} onChange={e => setSaveName(e.target.value)}
+        placeholder="e.g. Happy Birthday on a heart" style={{ ...inputStyle, marginBottom: 8 }} />
+
+      <button type="button" onClick={save} disabled={busy || !ready}
+        style={{ width: '100%', minHeight: 42, borderRadius: 9, fontFamily: 'inherit', fontSize: 12.5,
+          fontWeight: 800, border: 'none', color: '#fff',
+          cursor: busy || !ready ? 'default' : 'pointer',
+          background: busy || !ready ? '#B9C7BC' : '#3D5A44' }}>
+        {busy ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update this element' : 'Save to catalogue')}
+      </button>
+
+      {msg && (
+        <p style={{ margin: '8px 0 0', fontSize: 11.5, lineHeight: 1.5,
+          color: msg.ok ? '#2e7d32' : '#c0392b' }}>{msg.text}</p>
+      )}
+
+      {editing && (
+        <button type="button" onClick={startNew}
+          style={{ width: '100%', marginTop: 6, padding: '7px 0', fontSize: 11.5, borderRadius: 7,
+            border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+            fontFamily: 'inherit', cursor: 'pointer' }}>
+          Start a new element instead
+        </button>
+      )}
+
+      <p style={{ margin: '10px 0 0', fontSize: 11, lineHeight: 1.5, color: '#8A9A8E' }}>
+        This saves a <b>ready-made</b>: a card topper that appears on the shelf under Numbers &amp;
+        Letters, with this canvas as its picture. Tapping it opens the studio with these pieces
+        already on it — a starting point, not a finished thing. The baker retypes the name, changes
+        the colours, and keeps their own version.
+      </p>
+      <p style={{ margin: '8px 0 0', fontSize: 11, lineHeight: 1.5, color: '#8A9A8E' }}>
+        ⚠️ The plain <b>make one from scratch</b> item is not saved here — it is a single element
+        row with an empty canvas, added once in Add Element. Ready-mades are extra doors to the same
+        studio, not a catalogue of every topper anyone might want.
+      </p>
+    </div>
+  );
+}
+
+/* ── The catalogue tile is a PHOTO OF THE PIECE, not a photo of the studio ──────────────────────
+ *
+ * ⚠️ WHAT IS CAPTURED IS THE LIVE CANVAS, so everything the studio draws to help you WORK ends up in
+ * the shop. The first tile this produced was a square of graph paper with a purple selection box
+ * across it and the topper about a quarter of the width — at the 60px a picker card actually is,
+ * that is a grid with a smudge on it.
+ *
+ * Three separate faults, and hiding the grid alone would have fixed only the ugliest:
+ *   1. the grid       — a working surface, not part of the product
+ *   2. the selection  — the box and its handles are UI about what you last touched
+ *   3. the framing    — a composition drawn small, or off to one side, stays that way in the tile
+ *
+ * The third is the one `useElementSave` already has a long note about ("the thumbnail is still
+ * small"), and it cannot be fixed by cropping: the capture takes the middle square, so a piece drawn
+ * near an edge is cropped OUT rather than shrunk. So the camera is moved onto the pieces and zoomed
+ * to fit them, for the one frame that gets photographed, and put back straight after.
+ *
+ * ⚠️ IT RESTORES WHAT IT FOUND. This is the working camera — leaving it zoomed would silently change
+ * where every later drag lands, and the drag maths reads the camera. */
+function ThumbFit({ active, target }) {
+  const { camera } = useThree();
+  const saved = useRef(null);
+
+  useEffect(() => {
+    if (!active) {
+      if (saved.current) {
+        camera.zoom = saved.current.zoom;
+        camera.position.set(...saved.current.pos);
+        camera.updateProjectionMatrix();
+        saved.current = null;
+      }
+      return;
+    }
+    const group = target?.current;
+    if (!group) return;
+    const box = new THREE.Box3().setFromObject(group);
+    if (box.isEmpty()) return;
+
+    saved.current = { zoom: camera.zoom, pos: camera.position.toArray() };
+
+    const size = box.getSize(new THREE.Vector3());
+    const mid = box.getCenter(new THREE.Vector3());
+    /* The SQUARE is what gets uploaded, so the shorter side of the viewport is the one that must
+       hold the piece — fitting to the width would push a tall topper out of the crop. */
+    const visW = (camera.right - camera.left) / camera.zoom;
+    const visH = (camera.top - camera.bottom) / camera.zoom;
+    const fill = Math.max(size.x, size.y);
+    if (!(fill > 0)) return;
+    // 0.8, so the piece is not jammed against the edges of its own card.
+    camera.zoom *= (0.8 * Math.min(visW, visH)) / fill;
+    camera.position.set(mid.x, mid.y, camera.position.z);
+    camera.updateProjectionMatrix();
+  }, [active, camera, target]);
+
+  return null;
+}
+
+/* The picture on a preset button — the real outlines, drawn flat. `presetPaths` is the same function
+   the cake's shapes come from, so it cannot drift from what gets made (INVARIANTS #15). */
+function PresetIcon({ objects, font, size = 46 }) {
+  const built = useMemo(() => presetPaths(objects, font), [objects, font]);
+  if (!built) return null;
+  return (
+    <svg viewBox={built.viewBox} width={size} height={size}
+      style={{ display: 'block', overflow: 'hidden' }} aria-hidden="true">
+      {built.paths.map(p => <path key={p.key} d={p.d} fill={p.colour} fillRule="evenodd" />)}
+    </svg>
+  );
+}
+
+function RailButton({ onClick, title, children, wide = false, compact = false }) {
+  return (
+    <button type="button" onClick={onClick} title={title} aria-label={title}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+        width: wide ? '100%' : 46, minHeight: compact ? 38 : 46, borderRadius: 10, cursor: 'pointer',
+        fontFamily: 'inherit', fontSize: 15, fontWeight: 800, color: '#3D5A44',
+        background: '#fff', border: '1.5px solid #E2E8E3',
+      }}>
+      {children}
+    </button>
+  );
+}
+
+export default function TopperComposer() {
+  const [objects, setObjects] = useState([]);          // ⚠️ EMPTY. Nothing is on the canvas until asked for.
+  const [selectedId, setSelected] = useState(null);
+  const [editingId, setEditing] = useState(null);
+  /* ⚠️ FLAT IS THE WORKING VIEW; 3D IS A LOOK, and they are two different jobs. Composing needs a
+   * surface that does not move: an orbit-able perspective camera means one stray drag skews the grid,
+   * turns the selection box into a parallelogram and makes "is this centred" unanswerable. It also
+   * means objects at different layers are scaled differently by perspective, so a card in front
+   * looks bigger than the same card behind. An ORTHOGRAPHIC camera has neither problem.
+   * Seeing it standing on a cake is still worth having, so it is a deliberate switch rather than
+   * something a mis-aimed drag does to you. */
+  const [view3d, setView3d] = useState(false);
+  const nextId = useRef(1);
+
+  /* ⚠️ FONTS PER OBJECT, loaded once and kept. Two words on one topper can want two faces, so the
+   * font cannot be a property of the screen the way it was in the single-word studio. Held in state
+   * rather than a ref so arrival re-renders — a ref would load the face and never draw it. */
+  const [fonts, setFonts] = useState({ [BLOCK_KEY]: blockFont });
+  const wanted = useMemo(
+    () => [...new Set(objects.filter(o => o.kind === 'text').map(o => o.face))], [objects]);
+  useEffect(() => {
+    let alive = true;
+    for (const key of wanted) {
+      if (fonts[key]) continue;
+      loadTopperFace(key).then(f => alive && setFonts(m => (m[key] ? m : { ...m, [key]: f })))
+        .catch(() => {});
+    }
+    return () => { alive = false; };
+  }, [wanted, fonts]);
+
+  /* ⚠️ THE THUMBNAIL IS WHATEVER THIS BOX SHOWS, so the ref goes on the stage and not on the canvas:
+     `captureThumbnail` looks for a canvas INSIDE the node it is given. */
+  const stageRef = useRef(null);
+  const piecesRef = useRef(null);
+  const [medium, setMedium] = useState('acrylic');
+  /* True only for the handful of frames being photographed — see ThumbFit. */
+  const [capturing, setCapturing] = useState(false);
+
+  /* The same hook every other generated studio uses (INVARIANTS #3). Until this existed the studio
+     could only hand its work to a developer to paste into code, which rule 3 calls a mock-up rather
+     than authoring. */
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
+    /* ⚠️ `topper`, and deliberately NOT `fondant_decor`. `element_types` is how a thing BEHAVES, and
+       a card cutout behaves exactly like the digit already typed this way: generated, standing on
+       the cake top, movable, nothing to upload. What it is MADE of is `medium` above; what it
+       DEPICTS is the category below. Sending it to `fondant_decor` would have put a material in the
+       behaviour table — the thing migration 032 exists to prevent. */
+    typeSlug: 'topper',
+    categorySlug: 'numbers-letters',   // where a customer browses for a name or a number
+    canvasRef: stageRef,
+    buildPayload: () => ({
+      // A card topper goes on the cake top. `allowed_zones` on the ELEMENT is what governs placement
+      // — the type's own zones are only the default offered to an un-promoted upload (073).
+      allowed_zones: ['top_surface'],
+      medium,
+      /* ⚠️ THE ROW CARRIES THE OBJECT LIST, never the built geometry — the same call `baker_garnishes`
+         made. A word is stored as its WORD, so the payload is a hundredth of the size and a later
+         improvement to `topperShapes` or `offsetParts` reaches every row already authored. */
+      placement_config: {
+        procedural: 'card_topper',
+        card_topper: { v: PAYLOAD_VERSION, objects },
+      },
+    }),
+    onHydrate: (el) => {
+      const saved = el.placement_config?.card_topper;
+      if (Array.isArray(saved?.objects) && saved.objects.length) {
+        setObjects(saved.objects);
+        /* ⚠️ ADVANCE THE ID COUNTER PAST WHAT WAS LOADED. It starts at 1, so the first piece added
+           after opening a saved row would otherwise collide with a hydrated one — two objects with
+           one id, and selecting either moves both. */
+        nextId.current = Math.max(0, ...saved.objects.map(o => Number(o.id) || 0)) + 1;
+      }
+      if (el.medium) setMedium(el.medium);
+    },
+  });
+
+  /* ⚠️ TWO FRAMES, NOT ONE. `preserveDrawingBuffer` keeps the LAST frame drawn, so the capture has
+     to happen after the grid has actually gone and the camera has actually moved — asking for the
+     pixels in the same tick photographs the studio exactly as it looked before. Two rAFs is one
+     React commit plus one R3F draw. */
+  async function saveWithCleanTile() {
+    setCapturing(true);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try { await save(); } finally { setCapturing(false); }
+  }
+
+  const add = useCallback((obj) => {
+    const id = nextId.current++;
+    /* Dropped at the middle, which is where the eye already is. Later objects step down and right so
+     * a second one does not land exactly on the first and look like nothing happened. */
+    const n = objects.length;
+    setObjects(o => [...o, { id, x: n * 0.12, y: -n * 0.12, colour: '#F2AEC4', ...obj }]);
+    setSelected(id);
+    /* New text opens for editing with "TEST" selected, so the first keystroke replaces it. Adding a
+     * word and then having to discover how to change it is a step nobody wants. */
+    if (obj.kind === 'text') setEditing(id);
+    return id;
+  }, [objects.length]);
+
+  const addText = () => add({
+    kind: 'text', text: 'TEST', size: 1.2, face: BLOCK_KEY,
+    // A band by default, because a card topper almost always has one and a baker who does not want
+    // it can drag it to none — easier than discovering a control that starts at zero.
+    offset: 0.06, offsetColour: '#FFFFFF',
+  });
+  /* Ids are minted here, so picking the same preset twice cannot make two objects share one. */
+  const usePreset = (pre) => {
+    setObjects(pre.objects.map(o => ({ ...o, id: nextId.current++ })));
+    setSelected(null);
+    setEditing(null);
+  };
+
+  // Offset starts at nothing: an outline appears because somebody asked for one.
+  const addShape = (family) => add({
+    kind: 'shape', family, size: 1.0, colour: '#E9DFF2', offset: 0, offsetColour: '#FFFFFF',
+  });
+
+  const update = useCallback((id, patch) => {
+    setObjects(o => o.map(x => (x.id === id ? { ...x, ...patch } : x)));
+  }, []);
+  const remove = useCallback((id) => {
+    setObjects(o => o.filter(x => x.id !== id));
+    setSelected(s => (s === id ? null : s));
+    setEditing(e => (e === id ? null : e));
+  }, []);
+  const selected = objects.find(o => o.id === selectedId) ?? null;
+
+  return (
+    /* ⚠️ ONE COLUMN ON A PHONE, and built for it now rather than at the port. Three columns —
+     * rail, canvas, properties — is 96 + canvas + 268, which has nothing left at 375px. Stacked, the
+     * rail becomes a strip across the top and the properties a sheet under the canvas, so the canvas
+     * stays visible while a control is touched (INVARIANTS #11): a colour or a size judged with the
+     * thing it changes off-screen is judged blind.
+     * A real media query, because it cannot be written inline — same call as the flower studio. */
+    <div className="tc">
+      <style>{`
+        .tc { display: flex; height: calc(100vh - 56px); overflow: hidden; }
+        .tc > .tcRail { flex: 0 0 112px; display: flex; flex-direction: column; gap: 16; overflow-y: auto; }
+        .tc > .tcStage { flex: 1; min-width: 0; position: relative; }
+        .tc > .tcProps { flex: 0 0 268px; overflow-y: auto; }
+        @media (max-width: 820px) {
+          .tc { flex-direction: column; height: auto; overflow: visible; }
+          .tc > .tcRail {
+            flex: none; flex-direction: row; align-items: flex-start; gap: 14px;
+            overflow-x: auto; border-right: none; border-bottom: 1px solid #E8EFE9;
+          }
+          /* The canvas keeps a definite height of its own — a flex child with nothing to fill
+             collapses to nothing, and R3F will not create a renderer for a zero-height box. */
+          .tc > .tcStage { flex: none; height: 52vh; min-height: 280px; }
+          .tc > .tcProps { flex: none; border-left: none; border-top: 1px solid #E8EFE9; }
+        }
+      `}</style>
+      <div className="tcRail" style={{ padding: 14, borderRight: '1px solid #E8EFE9', background: '#fff' }}>
+        <div>
+          <span style={{ display: 'block', fontSize: 10, fontWeight: 800, letterSpacing: 0.6,
+            textTransform: 'uppercase', color: '#9AA8A0', marginBottom: 7 }}>Text</span>
+          {/* A "T" and nothing else. It is the one mark every editor uses for this, so it needs no
+              label (INVARIANTS #14) — the accessible name carries the words. */}
+          <RailButton onClick={addText} title="Add text" wide>
+            <span style={{ fontSize: 19, fontWeight: 800, lineHeight: 1 }}>T</span>
+          </RailButton>
+        </div>
+
+        <div>
+          <span style={{ display: 'block', fontSize: 10, fontWeight: 800, letterSpacing: 0.6,
+            textTransform: 'uppercase', color: '#9AA8A0', marginBottom: 7 }}>Shapes</span>
+          <div style={{ display: 'grid', gap: 7 }}>
+            {SHAPES.map(sh => (
+              <RailButton key={sh.key} onClick={() => addShape(sh.key)} title={`Add ${sh.label.toLowerCase()}`} wide>
+                <ShapeIcon family={sh.key} />
+              </RailButton>
+            ))}
+          </div>
+        </div>
+
+        {/* The same presets the baker's studio opens with — imported, never a second list. Here they
+            are also the quickest way to author a ready-made: start from one, change the wording,
+            save. Icon only, like the shapes; the name rides on the tooltip. */}
+        <div>
+          <span style={{ display: 'block', fontSize: 10, fontWeight: 800, letterSpacing: 0.6,
+            textTransform: 'uppercase', color: '#9AA8A0', marginBottom: 7 }}>Presets</span>
+          {/* Two columns: six will not stack without the last pair falling below the fold. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+            {TOPPER_PRESETS.map(pre => (
+              <RailButton key={pre.key} onClick={() => usePreset(pre)} title={pre.label} wide compact>
+                <PresetIcon objects={pre.objects} font={blockFont} size={30} />
+              </RailButton>
+            ))}
+          </div>
+        </div>
+
+        {objects.length > 0 && (
+          <button type="button" onClick={() => { setObjects([]); setSelected(null); }}
+            style={{ marginTop: 'auto', minHeight: 40, borderRadius: 9, cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 11.5, fontWeight: 800, color: '#8A6320',
+              background: '#FDF3E7', border: '1.5px solid #F0DCC0' }}>
+            Clear
+          </button>
+        )}
+      </div>
+
+      <div className="tcStage" ref={stageRef}>
+        {/* ⚠️ Keyed on the view, because a Canvas takes its camera ON MOUNT ONLY — remounting is the
+            honest way to change camera type, and the same call ChocolateDripStudio makes. */}
+        <Canvas key={view3d ? '3d' : 'flat'} shadows
+          orthographic={!view3d}
+          camera={view3d ? { position: [0, -1.6, 4.6], fov: 34 } : { position: [0, 0, 6], zoom: 190 }}
+          gl={{ preserveDrawingBuffer: true }} style={{ position: 'absolute', inset: 0 }}>
+          <SceneLights shadows />
+          <SceneEnv />
+          {/* The designer's own ground, imported rather than chosen, so what is judged here is what a
+              cake shows (INVARIANTS #17). */}
+          <SceneBackground colour={DESIGNER_GROUND} />
+          {/* A working surface, and no part of the product — so it is not in the tile. */}
+          {!capturing && <Grid />}
+          {/* A click on nothing clears the selection, which is what every canvas does and what makes
+              the border mean "this one" rather than "the last one you touched". */}
+          <mesh position={[0, 0, -0.05]} onPointerDown={() => { setSelected(null); setEditing(null); }}>
+            <planeGeometry args={[GRID_HALF * 2, GRID_HALF * 2]} />
+            <meshBasicMaterial visible={false} />
+          </mesh>
+          {/* Grouped so the tile framing has one thing to measure — see ThumbFit. */}
+          <group ref={piecesRef}>
+            {objects.map((o, i) => (
+              <Piece key={o.id} obj={o} layer={i} font={fonts[o.face] ?? blockFont}
+                selected={!capturing && o.id === selectedId}
+                editing={!capturing && o.id === editingId}
+                onSelect={setSelected} onMove={update} onEdit={setEditing} onChange={update} />
+            ))}
+          </group>
+          <ThumbFit active={capturing} target={piecesRef} />
+          {/* Only in the 3D look. While composing there is nothing to orbit: the camera is the one
+              thing on this screen that must hold still. */}
+          {view3d && <OrbitControls enablePan={false} makeDefault />}
+        </Canvas>
+
+        <button type="button" onClick={() => setView3d(v => !v)}
+          style={{ position: 'absolute', top: 12, right: 12, minHeight: 34, padding: '0 12px',
+            borderRadius: 9, cursor: 'pointer', fontFamily: "'Quicksand', sans-serif", fontSize: 11.5,
+            fontWeight: 800, color: view3d ? '#fff' : '#3D5A44',
+            background: view3d ? '#3D5A44' : 'rgba(255,255,255,0.92)',
+            border: '1.5px solid #C5D4C8' }}>
+          {view3d ? 'Back to flat' : 'See it in 3D'}
+        </button>
+
+        {objects.length === 0 && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', pointerEvents: 'none' }}>
+            <span style={{ fontSize: 13, color: '#5B6B60', fontFamily: "'Quicksand', sans-serif",
+              fontWeight: 700, background: 'rgba(255,255,255,0.82)', padding: '8px 14px',
+              borderRadius: 9 }}>
+              Pick a preset on the left, or add text or a shape
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ⚠️ The column appears once there is something ON the canvas, not once something is
+          SELECTED. Properties still come and go with the selection — a control that cannot act is
+          one the reader has to rule out first (INVARIANTS #12) — but Save has to stay reachable
+          after you click away from the last piece, or the only way to reach it is to re-select
+          something, which nobody would guess. An empty canvas still shows no column at all. */}
+      {objects.length > 0 && (
+        <div className="tcProps" style={{ background: '#fff', borderLeft: '1px solid #E8EFE9',
+          display: 'flex', flexDirection: 'column' }}>
+          {selected && <Properties obj={selected} onChange={update} onDelete={remove} embedded />}
+          <SaveBlock medium={medium} setMedium={setMedium}
+            editing={editing} saveName={saveName} setSaveName={setSaveName}
+            busy={busy} msg={msg} save={saveWithCleanTile} startNew={startNew} />
+        </div>
+      )}
+    </div>
+  );
+}

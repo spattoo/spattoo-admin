@@ -32,14 +32,29 @@ export async function removeBg(blob) {
   return res.blob(); // returns PNG Blob with transparent background
 }
 
-async function parseError(res) {
+/* The failure, as an Error that still carries the API's own CODE.
+ *
+ * ⚠️ The code used to be dropped here, and that turned a recoverable state into a dead end: POSTing
+ * a decoration guide that already exists answers 409 `GUIDE_EXISTS`, and the screen could only
+ * render that as the sentence "Pass force to rebuild it" — naming an API parameter a person has no
+ * way to pass. A caller that can see the code can offer the rebuild instead of describing it.
+ *
+ * Returns the Error rather than the message, because `new Error(x)` STRINGIFIES x — anything clever
+ * attached to the message is lost the moment a call site wraps it, which is what the first attempt
+ * at this got wrong. Every call site throws what this returns. */
+async function apiError(res) {
   const text = await res.text();
-  try { return JSON.parse(text).error ?? res.statusText; } catch { return res.statusText; }
+  let body = null;
+  try { body = JSON.parse(text); } catch { /* not JSON — statusText is all there is */ }
+  const err = new Error(body?.error ?? res.statusText);
+  err.code = body?.code ?? null;
+  err.status = res.status;
+  return err;
 }
 
 async function get(path) {
   const res = await fetch(`${BASE_URL}${path}`, { headers: await authHeaders() });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -49,7 +64,7 @@ export async function post(path, body) {
     headers: await authHeaders(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -59,7 +74,7 @@ export async function patch(path, body) {
     headers: await authHeaders(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -69,7 +84,7 @@ export async function put(path, body) {
     headers: await authHeaders(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -108,8 +123,12 @@ export async function fetchAllGarnishes() {
 // ⚠️ PUBLICATION. This puts a baker's own drawing in front of every bakery on the platform, and the
 // copy it creates is DETACHED — withdrawing it later means deactivating the catalogue element, not
 // deleting the baker's piece. See the route in spattoo-api for why they are not linked.
+// ⚠️ `/api/admin/…`, moved 2026-09-13 to match the list route above. Publishing is a `catalog:admin`
+// act, and everything under /api/admin is gated once at the mount as well as per-route — this was
+// the one garnish route sitting outside that boundary, on its per-route check alone.
+// The api deploys FIRST: against an older API this path 404s and nothing is published.
 export async function publishGarnish(id, body) {
-  return post(`/api/garnishes/${id}/publish`, body);
+  return post(`/api/admin/garnishes/${id}/publish`, body);
 }
 
 // ── Browsing categories (migration 065) ────────────────────────────────────────
@@ -191,7 +210,7 @@ export async function updateElementType(id, payload) {
     headers: await authHeaders(),
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -375,7 +394,7 @@ export async function updateGlobalElement(id, payload) {
     headers: await authHeaders(),
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -392,7 +411,7 @@ export async function deleteTemplate(id) {
     method: 'DELETE',
     headers: await authHeaders(),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -402,7 +421,7 @@ export async function updateTemplate(id, payload) {
     headers: await authHeaders(),
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -474,7 +493,7 @@ export async function deleteNozzle(id) {
     method: 'DELETE',
     headers: await authHeaders(),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -499,7 +518,7 @@ export async function saveCraftGuide(elementId, payload) {
     headers: await authHeaders(),
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -536,7 +555,7 @@ export async function deleteDecorationGuide(elementId) {
     method: 'DELETE',
     headers: await authHeaders(),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -559,7 +578,7 @@ export async function deleteTag(id) {
     method: 'DELETE',
     headers: await authHeaders(),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -573,7 +592,7 @@ export async function saveElementTags(elementId, tagIds) {
     headers: await authHeaders(),
     body: JSON.stringify({ tagIds }),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -591,7 +610,7 @@ export async function saveTemplateTags(templateId, tagIds) {
     headers: await authHeaders(),
     body: JSON.stringify({ tagIds }),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -605,7 +624,7 @@ export async function saveTemplateAttrs(templateId, attrs) {
     headers: await authHeaders(),
     body: JSON.stringify(attrs),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -632,7 +651,7 @@ export async function setRoleCapabilities(roleKey, capabilities) {
     headers: await authHeaders(),
     body: JSON.stringify({ capabilities }),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
@@ -649,7 +668,7 @@ export async function suggestElementMeta(thumbnailBlob, elementType) {
     headers: { ...await authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ imageBase64: base64, mimeType: thumbnailBlob.type || 'image/png', elementType }),
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await apiError(res);
   return res.json();
 }
 
