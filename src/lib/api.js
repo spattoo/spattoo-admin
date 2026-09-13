@@ -108,8 +108,12 @@ export async function fetchAllGarnishes() {
 // ⚠️ PUBLICATION. This puts a baker's own drawing in front of every bakery on the platform, and the
 // copy it creates is DETACHED — withdrawing it later means deactivating the catalogue element, not
 // deleting the baker's piece. See the route in spattoo-api for why they are not linked.
+// ⚠️ `/api/admin/…`, moved 2026-09-13 to match the list route above. Publishing is a `catalog:admin`
+// act, and everything under /api/admin is gated once at the mount as well as per-route — this was
+// the one garnish route sitting outside that boundary, on its per-route check alone.
+// The api deploys FIRST: against an older API this path 404s and nothing is published.
 export async function publishGarnish(id, body) {
-  return post(`/api/garnishes/${id}/publish`, body);
+  return post(`/api/admin/garnishes/${id}/publish`, body);
 }
 
 // ── Browsing categories (migration 065) ────────────────────────────────────────
