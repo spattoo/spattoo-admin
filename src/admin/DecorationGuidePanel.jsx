@@ -96,7 +96,23 @@ export default function DecorationGuidePanel({ elementId }) {
           : { ok: true, text: 'Generated.' });
       }
     } catch (e) {
-      setMsg({ ok: false, text: e.message });
+      /* ⚠️ GUIDE_EXISTS is not a failure, it is a DISAGREEMENT — the server has a guide and this
+         panel does not think so. It happens whenever the read that populates the panel failed (one
+         did, for a column a migration had not added yet), and it used to surface as "This
+         decoration already has a guide. Pass force to rebuild it": an instruction naming an API
+         parameter nobody on this screen can pass, in front of the one control that would have
+         fixed it, which is hidden precisely because the panel believes there is no guide.
+         So the offer is made here instead. Still confirmed — force replaces a guide somebody may
+         have approved — but reachable, which it was not. */
+      if (e?.code === 'GUIDE_EXISTS') {
+        setMsg({ ok: false, text: 'This decoration already has a guide.' });
+        if (window.confirm('This decoration already has a guide. Replace it with a freshly generated one? The current picture moves to the deleted/ folder.')) {
+          setBusy(false);
+          return build(true);
+        }
+      } else {
+        setMsg({ ok: false, text: e.message });
+      }
     } finally { setBusy(false); }
   }
 
