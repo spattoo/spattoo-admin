@@ -1809,8 +1809,14 @@ export default function ManageElements() {
 
                 </Group>
                 <Group title="The artwork" sub="The file, its thumbnail, and how it is rendered">
+                {/* ── The file and its thumbnail, SIDE BY SIDE ────────────────────────────────
+                    Two halves of one thing, and stacked they ran to ~650px of full-width column for
+                    two small cards and two drop zones. `flex-wrap` rather than a media query: the
+                    pair drops back to stacked when the window cannot give each half a sensible
+                    width, and a GLB's viewer takes the same half without a second rule. */}
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
                 {/* ── Asset file ── */}
-                <div style={s.field}>
+                <div style={{ ...s.field, flex: '1 1 340px', minWidth: 0 }}>
                   <label style={s.label}>Asset File</label>
 
                   {/* Current asset */}
@@ -2022,23 +2028,10 @@ export default function ManageElements() {
                       </span>
                     </label>
                   )}
-                  {!isPipingPattern && !isGlb && (
-                    <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 8 }}
-                      title="Run remove.bg when generating the thumbnail from a replaced image. The asset itself is always uploaded untouched.">
-                      <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={removeBgEnabled}
-                        onChange={e => { const v = e.target.checked; setRemoveBgEnabled(v); if (newAssetFile) processRemoveBg(newAssetFile, v); }} />
-                      <div>
-                        <div style={s.checkLabel}>Remove background</div>
-                        <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                          On by default; affects the auto-generated <b>thumbnail</b> only (the image asset is uploaded untouched here either way). <b>Uncheck for photo-frame overlays</b> and other already-transparent PNGs.
-                        </div>
-                      </div>
-                    </label>
-                  )}
                 </div>
 
                 {/* ── Thumbnail ── */}
-                <div style={s.field}>
+                <div style={{ ...s.field, flex: '1 1 340px', minWidth: 0 }}>
                   <label style={s.label}>Thumbnail</label>
 
                   {/* Show current thumbnail if no replacement yet */}
@@ -2076,7 +2069,25 @@ export default function ManageElements() {
                       {newThumbBlob ? 'Replace thumbnail again…' : 'Replace thumbnail…'}
                     </span>
                   </label>
+                  {/* ⚠️ HERE, not under the asset file where it used to sit. Its own copy says
+                      it "affects the auto-generated THUMBNAIL only (the image asset is uploaded
+                      untouched here either way)" — so it was describing this column while standing
+                      in the other one. */}
+                  {!isPipingPattern && !isGlb && (
+                    <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 8 }}
+                      title="Run remove.bg when generating the thumbnail from a replaced image. The asset itself is always uploaded untouched.">
+                      <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={removeBgEnabled}
+                        onChange={e => { const v = e.target.checked; setRemoveBgEnabled(v); if (newAssetFile) processRemoveBg(newAssetFile, v); }} />
+                      <div>
+                        <div style={s.checkLabel}>Remove background</div>
+                        <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                          On by default; affects the auto-generated <b>thumbnail</b> only (the image asset is uploaded untouched here either way). <b>Uncheck for photo-frame overlays</b> and other already-transparent PNGs.
+                        </div>
+                      </div>
+                    </label>
+                  )}
                 </div>
+                </div>{/* /the file and its thumbnail */}
 
                 {/* ── Raised relief — 2D image stickers only ───────────────────────────────────────
                     PRESENCE of `placement_config.relief` is the whole switch: the designer lifts the flat
