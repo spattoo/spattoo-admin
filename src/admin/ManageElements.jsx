@@ -588,6 +588,18 @@ export default function ManageElements() {
   const [printSat,     setPrintSat]     = useState('');   // print_finish.saturation — chroma boost (1 = the artwork)
   const [printShading, setPrintShading] = useState('');   // print_finish.shading    — how much cake light it takes
   const [printGain,    setPrintGain]    = useState('');   // print_finish.gain       — exposure (1 = the artwork)
+  /* Raised relief (placement_config.relief) — PRESENCE is the switch. The designer lifts a flat sticker
+     into a 3D relief whenever the object is there and renders it flat when it is not; every key inside it
+     has a default in core, so `{}` is already a complete "relief on".
+     Until this, the only way to turn it on was to copy a whole `relief` block out of the Relief Sticker
+     Studio (which has no Save — it emits JSON with a Copy button) or out of ANOTHER ELEMENT. Both bring
+     more than relief: an element's `solidColor` is a hex sampled from ITS artwork, and pasted onto a second
+     picture it paints the cut-out's walls the wrong colour. Reported exactly that way.
+     ⚠️ So this screen NEVER WRITES A COLOUR. Absent `solidColor` is what makes the walls sample the
+     element's own print (core: `(recolor ? null : relief.solidColor) || autoHex`), which is what an author
+     means every time bar one. Pinning a hex is a deliberate override and stays in the studio. */
+  const [reliefOn,    setReliefOn]    = useState(false);   // relief present at all
+  const [reliefSolid, setReliefSolid] = useState(false);   // relief.solid — extruded cut-out vs displaced shell
   const [patternOnly,        setPatternOnly]        = useState(false);
   const [description,      setDescription]      = useState('');
   const [glbRotation,        setGlbRotation]        = useState([0, 0, 0]);
@@ -707,6 +719,7 @@ export default function ManageElements() {
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
     loadPrintFinishFromPc(pc);
+    loadReliefFromPc(pc);
     setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
@@ -869,6 +882,26 @@ export default function ManageElements() {
     setPrintGain(pc.print_finish?.gain != null ? String(pc.print_finish.gain) : '');
     // `emissive` is the LEGACY key from the pre-exposure model; the designer ignores it. Not surfaced.
   }
+  // Reflect placement_config.relief into its two checkboxes (load + JSON-edit sync — one helper, so the
+  // paths can't drift). There is no third control: everything else about a relief is tuned in the studio.
+  function loadReliefFromPc(pc) {
+    setReliefOn(!!pc.relief);
+    setReliefSolid(pc.relief?.solid === true);
+  }
+  /* Merge into the relief object rather than replacing it. A studio-authored `bake` block, a painted
+     `flatMask`, a tuned `lift` — none of those are on this screen, and rebuilding the object from the two
+     things that are would silently throw the rest away. `null` for a key removes it. */
+  function patchRelief(patch) {
+    setPlacementConfig(prev => {
+      let cur = {}; try { cur = JSON.parse(prev); } catch { cur = {}; }
+      const next = { ...(cur.relief ?? {}) };
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === null || v === undefined || v === false || v === '') delete next[k];
+        else next[k] = v;
+      }
+      return JSON.stringify({ ...cur, relief: next }, null, 2);
+    });
+  }
   // Reflect placement_config.cluster into the cluster controls (used by both load + JSON-edit sync).
   function loadClusterFromPc(pc) {
     setCanCluster(!!pc.cluster);
@@ -904,6 +937,7 @@ export default function ManageElements() {
     setHugFill(pc.hug_fill != null ? String(pc.hug_fill) : '');
     loadClusterFromPc(pc);
     loadPrintFinishFromPc(pc);
+    loadReliefFromPc(pc);
     setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
@@ -1145,12 +1179,22 @@ export default function ManageElements() {
   // save creates a NEW element. The user just adds the new image/GLB (+ thumbnail).
   function startClone() {
     setCloneMode(true);
+    /* ⚠️ Drop the source's pinned relief wall colour. `relief.solidColor` is a hex sampled from the
+       SOURCE element's artwork, and a clone is about to be given a different picture — carried over, it
+       paints the new cut-out's sides in the old one's colour, silently and for good. Absent, the walls
+       auto-sample whatever art lands next. This is the one key in placement_config that is derived from
+       the asset rather than authored about it, which is exactly why it cannot travel with the settings.
+       Everything else — lift, bake, mask, finish — is a decision about the SHAPE and carries over. */
+    const pinned = pcVal('relief')?.solidColor;
+    if (pinned) patchRelief({ solidColor: null });
     setNewAssetFile(null);
     setAltAssetFile(null);
     setNewThumbBlob(null);
     setThumbManual(false);
     setName(`${name.trim()} copy`);
-    setMsg({ ok: true, text: 'Cloning — settings carried over. Add the new image/GLB and a thumbnail, then Create clone.' });
+    setMsg({ ok: true, text: pinned
+      ? `Cloning — settings carried over. The relief's pinned wall colour (${pinned}) was dropped, so the sides follow the new image. Add the new image/GLB and a thumbnail, then Create clone.`
+      : 'Cloning — settings carried over. Add the new image/GLB and a thumbnail, then Create clone.' });
   }
 
   function cancelClone() {
@@ -2079,6 +2123,81 @@ export default function ManageElements() {
                     </div>
                   )}
                 </div>
+
+                {/* ── Raised relief — 2D image stickers only ───────────────────────────────────────
+                    PRESENCE of `placement_config.relief` is the whole switch: the designer lifts the flat
+                    sticker into a 3D relief when the object is there and renders it flat when it is not.
+                    Every key inside has a default in core, so the two ticks below are a complete authoring
+                    surface for "is this raised" — the SHAPE of the lift (puff, dome, grain, flat mask) is
+                    tuned in the Relief Sticker Studio and merged in, never rebuilt from here.
+
+                    ⚠️ NO COLOUR CONTROL, deliberately. With `solidColor` absent the cut-out's walls sample
+                    the element's OWN print (core: `(recolor ? null : relief.solidColor) || autoHex`), which
+                    is what an author means every time bar one — so the right way to say "the same colour as
+                    the picture" is to write nothing at all. Before this the only way to turn relief on was
+                    to paste a `relief` block copied out of another element, and that block carries a hex
+                    sampled from ANOTHER PICTURE: reported as a cut-out whose sides came out the wrong
+                    colour. A pinned colour is still shown below so an inherited one is never silent. */}
+                {selectedEl?.image_url && !isGlb && (
+                  <div style={s.field}>
+                    <label style={s.label}>Raised relief <span style={{ fontWeight: 500, color: '#6B8C74' }}>— lift this print off the cake</span></label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+                      <label style={{ ...s.checkRow, alignItems: 'flex-start' }}>
+                        <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={reliefOn}
+                          onChange={e => {
+                            const on = e.target.checked;
+                            setReliefOn(on);
+                            if (!on) { setReliefSolid(false); patchPc({ relief: '' }); return; }
+                            /* A solid cut-out by default. A fondant piece on a cake IS solid — the
+                               displaced shell reads as a thin curved skin from a grazing angle — and it is
+                               what every relief element authored so far turns on. Still a tick, because a
+                               domed shell is a real choice for a soft sculpted look. */
+                            setReliefSolid(true);
+                            patchRelief({ solid: true });
+                          }} />
+                        <div>
+                          <div style={s.checkLabel}>Raised relief</div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            The print is lifted into real 3D — displacement baked from its own silhouette and
+                            luminance. Off = a flat decal. Unticking removes the whole <code>relief</code> block,
+                            studio tuning included.
+                          </div>
+                        </div>
+                      </label>
+                      {reliefOn && (
+                        <label style={{ ...s.checkRow, alignItems: 'flex-start' }}>
+                          <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={reliefSolid}
+                            onChange={e => { const on = e.target.checked; setReliefSolid(on); patchRelief({ solid: on || null }); }} />
+                          <div>
+                            <div style={s.checkLabel}>Solid cut-out</div>
+                            <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                              An extruded slab — printed front, coloured sides, flat back — so it reads solid
+                              edge-on, like real fondant. Off = a single domed shell. The height is the same either way.
+                            </div>
+                          </div>
+                        </label>
+                      )}
+                    </div>
+                    {reliefOn && (
+                      <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 8, lineHeight: 1.5 }}>
+                        {pcVal('relief')?.solidColor ? (
+                          <span style={{ color: '#92400E', fontWeight: 700 }}>
+                            The sides are pinned to <code>{pcVal('relief').solidColor}</code> — a colour sampled from
+                            some other picture if this was copied in.{' '}
+                            <button type="button"
+                              onClick={() => patchRelief({ solidColor: null })}
+                              style={{ ...s.smallBtn, display: 'inline-block', marginTop: 0, padding: '2px 10px' }}>
+                              Use this image&rsquo;s colour
+                            </button>
+                          </span>
+                        ) : (
+                          <>The sides take their colour from <b>this element&rsquo;s own artwork</b>, so a recolour in the
+                          designer follows for free. Tune the lift, dome and grain in the Relief Sticker Studio above.</>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* ── Print finish — 2D image stickers only (these act on the printed decal, not a GLB). ──
                     LEAVE THESE BLANK unless you mean it. The designer renders a print at exactly 1× its
