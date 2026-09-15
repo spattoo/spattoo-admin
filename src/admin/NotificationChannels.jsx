@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchNotificationChannels, saveNotificationChannel } from '../lib/api.js';
+import { fetchNotificationChannels, saveNotificationChannel, sendNotificationChannelTest } from '../lib/api.js';
 
 // ── Notifications: which channels each one goes out on ───────────────────────────────────────────
 // One card per notification type. Email and push switch straight on or off — their text is written
@@ -43,6 +43,9 @@ const s = {
   cancelBtn:  { padding: '9px 18px', borderRadius: 10, border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', fontFamily: font, fontSize: 14, fontWeight: 700, cursor: 'pointer' },
   banner:     ok => ({ padding: '10px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, lineHeight: 1.45, background: ok ? '#E8F5E9' : '#FFF6E5', color: ok ? '#2E7D32' : '#8A5A00', marginBottom: 12 }),
   error:      { padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: '#FFF0F0', color: '#C0392B', marginTop: 10 },
+  ok:         { padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: '#E8F5E9', color: '#2E7D32', marginTop: 10, wordBreak: 'break-word' },
+  testBox:    { marginTop: 18, paddingTop: 14, borderTop: '1px solid #DDE6DF' },
+  testBtn:    busy => ({ padding: '9px 18px', borderRadius: 10, border: '1.5px solid #3D5A44', background: '#fff', color: busy ? '#9BB5A2' : '#3D5A44', fontFamily: font, fontSize: 14, fontWeight: 800, cursor: busy ? 'not-allowed' : 'pointer' }),
 };
 
 // What a channel row becomes when saved: only the fields the API reads.
@@ -81,16 +84,48 @@ function PhoneChannelEditor({ type, channel, providers, onCancel, onSaved }) {
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState(null);
 
+  const [testPhone, setTestPhone]   = useState('');
+  const [testing, setTesting]       = useState(false);
+  const [testResult, setTestResult] = useState(null);   // { ok, text }
+
   const setVar = (i, pair) => setVars(v => v.map((p, j) => (j === i ? pair : p)));
 
-  async function save() {
+  // The template as it stands in the editor — what Save stores and what Send test sends.
+  const configNow = () => (isSms
+    ? { variables: Object.fromEntries(vars.map(([k, field]) => [k.trim(), field])) }
+    : { params: vars.map(([, field]) => field), ...(image ? { image_field: image } : {}) });
+  const duplicateNames = () => {
     const names = vars.map(([k]) => k.trim());
-    if (isSms && new Set(names).size !== names.length) return setError('Two variables have the same name.');
+    return isSms && new Set(names).size !== names.length;
+  };
+
+  // What filled the gaps, in words, so the admin can match it against the message on their phone.
+  const describe = values => (isSms
+    ? Object.entries(values ?? {}).map(([k, v]) => `${k} = ${v}`).join(', ')
+    : [...(values?.params ?? []).map((v, i) => `{{${i + 1}}} = ${v}`), values?.image ? 'an image' : null].filter(Boolean).join(', '));
+
+  async function sendTest() {
+    if (duplicateNames()) return setTestResult({ ok: false, text: 'Two variables have the same name.' });
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await sendNotificationChannelTest(type.id, channel, {
+        phone: testPhone, template_ref: ref.trim() || null, config: configNow(),
+      });
+      const filledWith = describe(r.values);
+      setTestResult({ ok: true, text: `Sent to ${r.to}${filledWith ? ` with ${filledWith}` : ''}. It can take a minute to arrive.` });
+    } catch (err) {
+      setTestResult({ ok: false, text: err.message });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function save() {
+    if (duplicateNames()) return setError('Two variables have the same name.');
     setSaving(true);
     setError(null);
-    const config = isSms
-      ? { variables: Object.fromEntries(vars.map(([k, field]) => [k.trim(), field])) }
-      : { params: vars.map(([, field]) => field), ...(image ? { image_field: image } : {}) };
+    const config = configNow();
     try {
       onSaved(await saveNotificationChannel(type.id, channel, {
         enabled, template_ref: ref.trim() || null, config, fallback_for: fallback ? other : null,
@@ -164,6 +199,23 @@ function PhoneChannelEditor({ type, channel, providers, onCancel, onSaved }) {
       <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
         <button type="button" style={s.saveBtn(saving)} disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
         <button type="button" style={s.cancelBtn} onClick={onCancel}>Cancel</button>
+      </div>
+
+      {/* Beside the template it tests, so a wrong variable is fixed and re-sent without leaving the card. */}
+      <div style={s.testBox}>
+        <label style={{ ...s.label, marginTop: 0 }}>Send a test to your phone</label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input style={{ ...s.input, flex: '1 1 180px', width: 'auto' }} type="tel" inputMode="tel" autoComplete="tel"
+            value={testPhone} onChange={e => setTestPhone(e.target.value)} placeholder="+91 98765 43210" />
+          <button type="button" style={s.testBtn(testing || !testPhone.trim())} disabled={testing || !testPhone.trim()} onClick={sendTest}>
+            {testing ? 'Sending…' : 'Send test'}
+          </button>
+        </div>
+        <div style={s.hint}>
+          Sends a real {LABEL[channel]} message using this editor as it is now (saved or not), filled with the
+          details of the latest real notification.
+        </div>
+        {testResult && <div style={testResult.ok ? s.ok : s.error}>{testResult.text}</div>}
       </div>
     </div>
   );

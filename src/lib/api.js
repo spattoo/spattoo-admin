@@ -411,6 +411,10 @@ export async function fetchNotificationChannels() {
 export async function saveNotificationChannel(typeId, channel, body) {
   return put(`/api/admin/notification-channels/${typeId}/${channel}`, body);
 }
+// Sends a REAL message to one phone, using the editor's template and the latest notification's details.
+export async function sendNotificationChannelTest(typeId, channel, body) {
+  return post(`/api/admin/notification-channels/${typeId}/${channel}/test`, body);
+}
 
 export async function createTemplate(payload) {
   return post('/api/admin/templates', payload);
