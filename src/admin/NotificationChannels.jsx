@@ -399,8 +399,9 @@ export default function NotificationChannels() {
     if (!data.ready) return 'Run migration 095 on this database first';
     if (type.channels[channel]?.enabled) return null;
     if (channel === 'push' && !type.has_push_text) return 'No push text is written for this notification';
-    if (PHONE.has(channel) && type.audience === 'customer' && !data.customer_phone_consent) {
-      return 'Customers have not agreed to SMS or WhatsApp messages yet';
+    // Per channel: SMS about a customer's own order is allowed, WhatsApp waits for their opt-in.
+    if (PHONE.has(channel) && type.audience === 'customer' && !data.customer_channels?.[channel]) {
+      return `Customers have not agreed to ${LABEL[channel]} messages yet`;
     }
     return null;
   }
@@ -498,8 +499,11 @@ export default function NotificationChannels() {
             {bakers.map(renderCard)}
 
             <div style={s.section}>Sent to customers</div>
-            {!data.customer_phone_consent && (
-              <p style={s.note}>SMS and WhatsApp stay off for customers until they can agree to receive them.</p>
+            {!data.customer_channels?.whatsapp && (
+              <p style={s.note}>
+                SMS about a customer's own order can be switched on. WhatsApp stays off for customers until they
+                can agree to receive it.
+              </p>
             )}
             {customers.map(renderCard)}
           </>
