@@ -402,6 +402,16 @@ export async function fetchAdminTemplates() {
   return get('/api/admin/templates');
 }
 
+// ── Notification channels ─────────────────────────────────────────────────────
+// Which channels each notification type goes out on (email, push, SMS, WhatsApp),
+// and the MSG91 template or AiSensy campaign each phone channel uses.
+export async function fetchNotificationChannels() {
+  return get('/api/admin/notification-channels');
+}
+export async function saveNotificationChannel(typeId, channel, body) {
+  return put(`/api/admin/notification-channels/${typeId}/${channel}`, body);
+}
+
 export async function createTemplate(payload) {
   return post('/api/admin/templates', payload);
 }

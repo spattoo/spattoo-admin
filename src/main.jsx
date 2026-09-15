@@ -43,6 +43,7 @@ const ManageFlavours        = lazy(() => import('./admin/ManageFlavours.jsx'));
 const ManagePlans           = lazy(() => import('./admin/ManagePlans.jsx'));
 const ManageTags            = lazy(() => import('./admin/ManageTags.jsx'));
 const ManageNozzles         = lazy(() => import('./admin/ManageNozzles.jsx'));
+const NotificationChannels  = lazy(() => import('./admin/NotificationChannels.jsx'));
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
 const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
@@ -111,6 +112,7 @@ const ROUTES = {
   '/bakers/storefront-usage': StorefrontUsage,
   '/admin/legal':         LegalVersions,
   '/flavours':            ManageFlavours,
+  '/notifications':       NotificationChannels,
   '/plans':               ManagePlans,
   '/pattern-builder':     PatternBuilder,
   '/elements/piping-calibrator': PipingCalibrator,
@@ -210,6 +212,7 @@ const NAV_GROUPS = [
   { title: 'Others', items: [
     { href: '/elements/nozzles', label: 'Nozzle Catalog' },
     { href: '/flavours',         label: 'Cake Flavours' },
+    { href: '/notifications',    label: 'Notifications' },
   ] },
   { title: 'Access', items: [
     { href: '/admin/roles', label: 'Roles & Capabilities' },
