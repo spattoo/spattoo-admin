@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { fetchNotificationChannels, saveNotificationChannel, sendNotificationChannelTest } from '../lib/api.js';
+import {
+  fetchNotificationChannels, saveNotificationChannel, sendNotificationChannelTest,
+  exportNotificationChannels, importNotificationChannels,
+} from '../lib/api.js';
 
 // ── Notifications: which channels each one goes out on ───────────────────────────────────────────
 // One card per notification type. Email and push switch straight on or off — their text is written
@@ -221,6 +224,69 @@ function PhoneChannelEditor({ type, channel, providers, onCancel, onSaved }) {
   );
 }
 
+// ── Importing settings from the other server ────────────────────────────────────────────────────
+// Shown above the cards it will change. The server decides what each row does (preview = a dry run);
+// this only lays it out: what is new, what changes and how, and what is skipped and why.
+const STATUS_WORD = { new: 'New', changed: 'Changes', same: 'Unchanged', skipped: 'Skipped' };
+
+function ImportPreview({ importing, onCopyOnOff, onApply, onClose }) {
+  const { fileName, copyOnOff, preview, busy, error, applied } = importing;
+  const rows = preview?.rows ?? [];
+  const worth = rows.filter(r => r.status !== 'same');
+  const sum = preview?.summary ?? {};
+  const toApply = (sum.new ?? 0) + (sum.changed ?? 0);
+  const from = preview?.source
+    ? `Exported from ${preview.source}${preview.exported_at ? ` on ${new Date(preview.exported_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}.`
+    : null;
+
+  return (
+    <div style={{ ...s.card, borderColor: '#3D5A44' }}>
+      <div style={s.name}>{applied ? 'Imported' : 'Import'} · {fileName}</div>
+      {from && <div style={s.slug}>{from}</div>}
+
+      <label style={{ ...s.check, marginTop: 12 }}>
+        <input type="checkbox" checked={copyOnOff} disabled={busy || applied} onChange={e => onCopyOnOff(e.target.checked)} />
+        Also copy which channels are on or off
+      </label>
+      <div style={s.hint}>
+        Left unticked, each setting arrives with this server's on/off unchanged — a new one arrives off — so
+        you can Send test before switching it on.
+      </div>
+
+      {busy && <div style={{ ...s.note, marginTop: 10 }}>{applied ? 'Importing…' : 'Checking the file…'}</div>}
+      {error && <div style={s.error}>{error}</div>}
+
+      {preview && (
+        <>
+          <div style={{ ...s.summary, marginTop: 12, fontWeight: 800, color: '#2C4433' }}>
+            {applied
+              ? `Imported ${sum.applied ?? 0} setting${sum.applied === 1 ? '' : 's'}${sum.skipped ? ` · ${sum.skipped} skipped` : ''}.`
+              : `${sum.new ?? 0} new · ${sum.changed ?? 0} changed · ${sum.same ?? 0} unchanged · ${sum.skipped ?? 0} skipped`}
+          </div>
+          {worth.map(r => (
+            <div key={`${r.type_slug}:${r.channel}`} style={{ ...s.summary, paddingTop: 6, borderTop: '1px solid #EDF0EC' }}>
+              <b style={{ color: '#2C4433' }}>{r.type_label ?? r.type_slug}</b> · {LABEL[r.channel] ?? r.channel} ·{' '}
+              <span style={{ color: r.status === 'skipped' ? '#C0392B' : '#3D5A44', fontWeight: 800 }}>{STATUS_WORD[r.status]}</span>
+              {r.changes?.length ? ` — ${r.changes.join(', ')}` : ''}
+              {r.reason ? ` — ${r.reason}` : ''}
+              {r.status !== 'skipped' ? ` · ${r.enabled_after ? 'on' : 'off'} after import` : ''}
+            </div>
+          ))}
+        </>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+        {!applied && (
+          <button type="button" style={s.saveBtn(busy || !toApply)} disabled={busy || !toApply} onClick={onApply}>
+            {toApply ? `Import ${toApply} setting${toApply === 1 ? '' : 's'}` : 'Nothing to import'}
+          </button>
+        )}
+        <button type="button" style={s.cancelBtn} onClick={onClose}>{applied ? 'Done' : 'Cancel'}</button>
+      </div>
+    </div>
+  );
+}
+
 // One line under the chips for each phone channel that is on, so what it sends is visible unopened.
 function phoneSummary(channel, row) {
   const n = channel === 'sms' ? Object.keys(row.config?.variables ?? {}).length : (row.config?.params ?? []).length;
@@ -241,6 +307,11 @@ export default function NotificationChannels() {
   const [busy, setBusy]       = useState(null);    // `${typeId}:${channel}` — a toggle saving
   const [cardError, setCardError] = useState({});  // typeId → message, shown on that card
 
+  // Moving these settings to another server. `importing` is the file being imported and its preview:
+  // { bundle, fileName, copyOnOff, preview, busy, error, applied }.
+  const [transferMsg, setTransferMsg] = useState(null);
+  const [importing, setImporting]     = useState(null);
+
   useEffect(() => { load(); }, []);
 
   async function load() {
@@ -248,6 +319,58 @@ export default function NotificationChannels() {
     try { setData(await fetchNotificationChannels()); setLoadError(null); }
     catch (err) { setLoadError(err.message); }
     finally { setLoading(false); }
+  }
+
+  async function exportSettings() {
+    setTransferMsg(null);
+    try {
+      const bundle = await exportNotificationChannels();
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `notification-channels-${bundle.source ?? 'spattoo'}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setTransferMsg({ ok: true, text: `Exported ${bundle.channels.length} channel settings. Import the file on the other server.` });
+    } catch (err) {
+      setTransferMsg({ ok: false, text: err.message });
+    }
+  }
+
+  // Always a dry run first: nothing changes until the admin has seen what will.
+  async function previewImport(bundle, fileName, copyOnOff) {
+    setImporting({ bundle, fileName, copyOnOff, preview: null, busy: true, error: null, applied: false });
+    try {
+      const preview = await importNotificationChannels({ bundle, copyOnOff, apply: false });
+      setImporting({ bundle, fileName, copyOnOff, preview, busy: false, error: null, applied: false });
+    } catch (err) {
+      setImporting({ bundle, fileName, copyOnOff, preview: null, busy: false, error: err.message, applied: false });
+    }
+  }
+
+  async function onImportFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';   // so choosing the same file again still fires
+    if (!file) return;
+    setTransferMsg(null);
+    let bundle;
+    try { bundle = JSON.parse(await file.text()); }
+    catch { return setTransferMsg({ ok: false, text: `${file.name} is not a notification settings file.` }); }
+    previewImport(bundle, file.name, false);
+  }
+
+  async function applyImport() {
+    const { bundle, copyOnOff } = importing;
+    setImporting(s => ({ ...s, busy: true, error: null }));
+    try {
+      const result = await importNotificationChannels({ bundle, copyOnOff, apply: true });
+      // Kept open after applying, so anything skipped still shows its reason.
+      setImporting(s => ({ ...s, preview: result, busy: false, applied: true }));
+      await load();
+    } catch (err) {
+      setImporting(s => ({ ...s, busy: false, error: err.message }));
+    }
   }
 
   function applySaved(saved) {
@@ -331,6 +454,26 @@ export default function NotificationChannels() {
           use templates approved outside Spattoo — add the template here and match its gaps to the
           notification's details.
         </p>
+
+        {data?.ready && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
+            <button type="button" style={s.testBtn(false)} onClick={exportSettings}>Export settings</button>
+            <label style={{ ...s.testBtn(!!importing?.busy), display: 'inline-block' }}>
+              Import settings
+              <input type="file" accept="application/json,.json" hidden disabled={!!importing?.busy} onChange={onImportFile} />
+            </label>
+          </div>
+        )}
+        {data?.ready && (
+          <p style={{ ...s.hint, marginTop: 0, marginBottom: 14 }}>
+            Set templates up once: export them here and import the file on the other server (dev ↔ production).
+          </p>
+        )}
+        {transferMsg && <div style={transferMsg.ok ? s.ok : s.error}>{transferMsg.text}</div>}
+
+        {importing && <ImportPreview importing={importing}
+          onCopyOnOff={checked => previewImport(importing.bundle, importing.fileName, checked)}
+          onApply={applyImport} onClose={() => setImporting(null)} />}
 
         {loading && <div style={s.note}>Loading…</div>}
         {loadError && <div style={s.error}>{loadError}</div>}

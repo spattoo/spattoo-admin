@@ -415,6 +415,14 @@ export async function saveNotificationChannel(typeId, channel, body) {
 export async function sendNotificationChannelTest(typeId, channel, body) {
   return post(`/api/admin/notification-channels/${typeId}/${channel}/test`, body);
 }
+// Moving these settings between dev and production: export here, import on the other server.
+// Import with apply:false only previews what would change.
+export async function exportNotificationChannels() {
+  return get('/api/admin/notification-channels/export');
+}
+export async function importNotificationChannels({ bundle, copyOnOff = false, apply = false }) {
+  return post('/api/admin/notification-channels/import', { bundle, copyOnOff, apply });
+}
 
 export async function createTemplate(payload) {
   return post('/api/admin/templates', payload);
