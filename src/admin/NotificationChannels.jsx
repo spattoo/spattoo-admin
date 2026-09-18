@@ -83,6 +83,7 @@ function PhoneChannelEditor({ type, channel, providers, onCancel, onSaved }) {
     ? Object.entries(row?.config?.variables ?? {})
     : (row?.config?.params ?? []).map((field, i) => [String(i + 1), field]));
   const [image, setImage]       = useState(row?.config?.image_field ?? '');
+  const [button, setButton]     = useState(row?.config?.button_field ?? '');
   const [fallback, setFallback] = useState(row?.fallback_for === other);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState(null);
@@ -96,7 +97,9 @@ function PhoneChannelEditor({ type, channel, providers, onCancel, onSaved }) {
   // The template as it stands in the editor — what Save stores and what Send test sends.
   const configNow = () => (isSms
     ? { variables: Object.fromEntries(vars.map(([k, field]) => [k.trim(), field])) }
-    : { params: vars.map(([, field]) => field), ...(image ? { image_field: image } : {}) });
+    : { params: vars.map(([, field]) => field),
+        ...(image  ? { image_field: image }   : {}),
+        ...(button ? { button_field: button } : {}) });
   const duplicateNames = () => {
     const names = vars.map(([k]) => k.trim());
     return isSms && new Set(names).size !== names.length;
@@ -105,7 +108,9 @@ function PhoneChannelEditor({ type, channel, providers, onCancel, onSaved }) {
   // What filled the gaps, in words, so the admin can match it against the message on their phone.
   const describe = values => (isSms
     ? Object.entries(values ?? {}).map(([k, v]) => `${k} = ${v}`).join(', ')
-    : [...(values?.params ?? []).map((v, i) => `{{${i + 1}}} = ${v}`), values?.image ? 'an image' : null].filter(Boolean).join(', '));
+    : [...(values?.params ?? []).map((v, i) => `{{${i + 1}}} = ${v}`),
+       values?.image ? 'an image' : null,
+       values?.buttonSuffix ? `button → …/${values.buttonSuffix}` : null].filter(Boolean).join(', '));
 
   async function sendTest() {
     if (duplicateNames()) return setTestResult({ ok: false, text: 'Two variables have the same name.' });
@@ -186,8 +191,21 @@ function PhoneChannelEditor({ type, channel, providers, onCancel, onSaved }) {
       {!isSms && (
         <>
           <label style={s.label}>Header image (optional)</label>
-          <FieldPicker fields={type.fields} value={image} onChange={setImage} empty="No image" placeholder="e.g. thumbnailUrl" />
+          <FieldPicker fields={type.fields} value={image} onChange={setImage} empty="No image" placeholder="e.g. pictureUrl" />
           <div style={s.hint}>Only for a template approved with an image header — for example the cake picture.</div>
+
+          <label style={s.label}>Button link (optional)</label>
+          <FieldPicker fields={type.fields} value={button} onChange={setButton} empty="No button" placeholder="e.g. orderId" />
+          {/* ⚠️ THE HALF THAT GETS THIS WRONG. A Meta URL button is a static base plus a variable
+              tail, fixed when the template was approved — `https://www.spattoo.com/o/{{1}}`. This
+              names the field holding the TAIL. Pick `orderLink` and the message sends successfully
+              carrying `…/o/https://www.spattoo.com/o/…`, which nobody here ever sees and every
+              customer finds broken. The server refuses a field ending in "link"; the hint is so it
+              never gets that far. */}
+          <div style={s.hint}>
+            Only the part <b>after</b> the approved link — <code>orderId</code>, not <code>orderLink</code>.
+            The template already holds <code>https://www.spattoo.com/o/</code>.
+          </div>
         </>
       )}
 
@@ -294,6 +312,7 @@ function phoneSummary(channel, row) {
     `${LABEL[channel]}: ${row.template_ref ?? 'no template set'}`,
     `${n} variable${n === 1 ? '' : 's'}`,
     row.config?.image_field ? `image from ${row.config.image_field}` : null,
+    row.config?.button_field ? `button from ${row.config.button_field}` : null,
     row.fallback_for ? `only if ${LABEL[row.fallback_for]} doesn't deliver` : null,
   ];
   return parts.filter(Boolean).join(' · ');
