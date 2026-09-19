@@ -67,7 +67,16 @@ export const Captcha = forwardRef(function Captcha({ onVerify, onExpire, theme =
           appearance: 'interaction-only',
           callback: (token) => onVerifyRef.current(token),
           'expired-callback': () => onExpireRef.current && onExpireRef.current(),
-          'error-callback': () => onExpireRef.current && onExpireRef.current(),
+          /* ⚠️ THE ERROR CODE WAS BEING THROWN AWAY. Cloudflare's client-side-rendering doc gives the
+             signature as `function (errorCode)`, and all three copies of this component took no
+             argument — so a captcha that would not pass left a dead widget, a dead button and
+             nothing anywhere saying why. `600*` is "bot behaviour detected", `110200` a hostname not
+             on the widget's allowlist, `400020` a bad sitekey. Mirror of spattoo-core's
+             src/auth/Captcha.jsx, which carries the full note. */
+          'error-callback': (errorCode) => {
+            console.warn(`[captcha] turnstile error ${String(errorCode ?? '') || '(no code)'}`);
+            onExpireRef.current && onExpireRef.current();
+          },
         });
       })
       .catch(() => {
