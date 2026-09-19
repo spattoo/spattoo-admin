@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { fetchNozzles, createNozzle, updateNozzle, deleteNozzle, bulkCreateNozzles } from '../lib/api.js';
+import { fetchNozzles, createNozzle, updateNozzle, deleteNozzle, bulkCreateNozzles,
+         uploadNozzleImage } from '../lib/api.js';
 
 // Parse pasted bulk rows. One nozzle per line, fields split by TAB or `|`:
 //   brand | number | name | category | common(y/n) | description
@@ -49,6 +50,27 @@ const s = {
   catBadge: { display: 'inline-block', padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 700, letterSpacing: 0.3, background: '#EAF1F4', color: '#3A5563' },
   brandTag: { display: 'inline-block', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800, background: '#F4F8F5', color: '#3D5A44', border: '1px solid #C5D4C8' },
 
+  // ⚠️ 72px, not the 46 this started at (copied from ElementCategories, where the pictures are
+  // collages that survive being small). A nozzle drawing is a fine star or a thin slit, and at 46px
+  // a six-point and an eight-point tip were the same faint scratch — the tile was the limit, not the
+  // drawing. Measured across the whole catalogue at both sizes before changing it.
+  picCol: { display: 'flex', flexDirection: 'column', alignItems: 'center', width: 88, flexShrink: 0, gap: 2 },
+  pic:    (has) => ({
+    width: 72, height: 72, borderRadius: 8, cursor: 'pointer', overflow: 'hidden', background: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border: has ? '1.5px solid #C5D4C8' : '1.5px dashed #C5D4C8',
+  }),
+  // `contain`, never `cover`. A nozzle is a tall cone photographed against a plain background, and
+  // cropping it to a square is how you end up with a picture of the middle of a cone — with the tip,
+  // the one thing the picture exists to show, cut off.
+  picImg:  { width: '100%', height: '100%', objectFit: 'contain', padding: 3, boxSizing: 'border-box' },
+  picNote: { fontSize: 8.5, fontWeight: 800, color: '#8aa091', letterSpacing: 0.2 },
+  approve: (on) => ({
+    background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit',
+    fontSize: 9, fontWeight: 800, letterSpacing: 0.2, color: on ? '#3D5A44' : '#B06E12',
+  }),
+  clearPic: { background: 'none', border: 'none', padding: 0, fontSize: 9, fontWeight: 700, color: '#B42318', cursor: 'pointer', fontFamily: 'inherit' },
+
   form:  { width: 320, flexShrink: 0, background: '#fff', borderRadius: 16, border: '1.5px solid #C5D4C8', padding: 24 },
   formTitle: { fontSize: 14, fontWeight: 800, color: '#2C4433', marginBottom: 20 },
   field: { marginBottom: 16 },
@@ -69,6 +91,48 @@ const s = {
 
 const EMPTY = { brand: 'Wilton', number: '', name: '', category: 'open_star', description: '', is_common: false, sort_order: 0, is_active: true };
 
+/* The nozzle's own photograph, and whether anyone has confirmed you can see the tip in it.
+ *
+ * The tile IS the file picker. A separate "Choose file" button beside a picture reads as a second,
+ * unrelated control, and there is only one thing to do here.
+ *
+ * ⚠️ The approval sits directly UNDER the picture rather than in a column of its own. What is being
+ * approved is not the nozzle, it is this image — so the tick has to be tapped while looking at the
+ * thing it vouches for. In a separate column it would be a claim about a picture off to the left.
+ *
+ * Deliberately no picture in the side form: the form edits the nozzle's FACTS, and a photo is judged
+ * against the other photos in the list, not against a text field.
+ */
+function NozzlePicture({ nozzle, busy, onPick, onClear, onToggleApproved }) {
+  const src = nozzle.image_url;
+  const approved = !!nozzle.image_approved;
+
+  return (
+    <div style={s.picCol}>
+      <label style={s.pic(!!src)} title={src ? 'Replace this photo' : 'Add a photo of this nozzle and its tip'}>
+        {src
+          ? <img src={src} alt="" style={s.picImg} loading="lazy" decoding="async" />
+          : <span style={{ fontSize: 16, color: '#C5D4C8', fontWeight: 800 }}>+</span>}
+        {/* Clearing `value` after each pick so choosing the SAME file again still fires onChange —
+            which is exactly what happens when a photo is re-cropped and re-picked to replace a bad one. */}
+        <input type="file" accept="image/*" disabled={busy} style={{ display: 'none' }}
+               onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; onPick(f); }} />
+      </label>
+      {src ? (
+        <>
+          <button style={s.approve(approved)} disabled={busy} onClick={onToggleApproved}
+                  title={approved
+                    ? 'Withdraw approval — it stops being shown outside admin'
+                    : 'Confirm the nozzle and its tip are clearly visible'}>
+            {busy ? '…' : approved ? 'Approved' : 'Approve'}
+          </button>
+          <button style={s.clearPic} disabled={busy} onClick={onClear} title="Remove this photo">remove</button>
+        </>
+      ) : <span style={s.picNote}>no photo</span>}
+    </div>
+  );
+}
+
 export default function ManageNozzles() {
   const [nozzles,   setNozzles]   = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -77,6 +141,9 @@ export default function ManageNozzles() {
   const [saving,    setSaving]    = useState(false);
   const [msg,       setMsg]       = useState(null);
   const [filter,    setFilter]    = useState('all');
+  // Which row's picture is mid-flight. Per row, not per screen: uploading one photo must not freeze
+  // the other 120, and a catalogue gets filled in by working down the list.
+  const [busyId,    setBusyId]    = useState(null);
 
   // Bulk paste importer
   const [bulkOpen,   setBulkOpen]   = useState(false);
@@ -94,6 +161,62 @@ export default function ManageNozzles() {
     try { setNozzles(await fetchNozzles()); }
     catch (err) { console.error(err); }
     finally { setLoading(false); }
+  }
+
+  function patchLocal(id, fields) {
+    setNozzles(ns => ns.map(n => (n.id === id ? { ...n, ...fields } : n)));
+  }
+
+  /* Upload FIRST, then save the key — deliberately in that order.
+   *
+   * A failed save then leaves an unreferenced object in the bucket, which costs a few kilobytes and
+   * nothing else. The other order leaves a ROW pointing at an object that may never arrive, which is
+   * a broken picture in the catalogue with no way to tell it apart from one that simply has none.
+   *
+   * The server clears any existing approval when the key changes, so a replaced photo always comes
+   * back needing a fresh look; `image_approved` is read back from the response rather than assumed.
+   */
+  async function pickImage(n, file) {
+    if (!file) return;
+    setBusyId(n.id);
+    setMsg(null);
+    try {
+      const key = await uploadNozzleImage(file);
+      const saved = await updateNozzle(n.id, { image_key: key });
+      patchLocal(n.id, { image_key: saved.image_key, image_url: saved.image_url, image_approved: saved.image_approved });
+    } catch (err) {
+      setMsg({ ok: false, text: err.message });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // `null`, explicitly — "absent from the body" and "cleared" are different requests to the API.
+  async function clearImage(n) {
+    setBusyId(n.id);
+    try {
+      await updateNozzle(n.id, { image_key: null });
+      patchLocal(n.id, { image_key: null, image_url: null, image_approved: false });
+    } catch (err) {
+      setMsg({ ok: false, text: err.message });
+      load();   // reload, so the screen stops showing a photo that did not go away
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function toggleApproved(n) {
+    setBusyId(n.id);
+    setMsg(null);
+    try {
+      const saved = await updateNozzle(n.id, { image_approved: !n.image_approved });
+      patchLocal(n.id, { image_approved: saved.image_approved, image_approved_at: saved.image_approved_at });
+    } catch (err) {
+      setMsg({ ok: false, text: err.message });
+      load();
+    } finally {
+      setBusyId(null);
+    }
   }
 
   function startEdit(n) {
@@ -274,6 +397,7 @@ export default function ManageNozzles() {
               <table style={s.table}>
                 <thead>
                   <tr>
+                    <th style={s.th}>Image</th>
                     <th style={s.th}>Brand</th>
                     <th style={s.th}>No.</th>
                     <th style={s.th}>Name</th>
@@ -285,6 +409,14 @@ export default function ManageNozzles() {
                 <tbody>
                   {displayed.map(n => (
                     <tr key={n.id} style={{ background: editingId === n.id ? '#F4F8F5' : (n.is_active ? undefined : '#FBF7F4'), opacity: n.is_active ? 1 : 0.6 }}>
+                      <td style={s.td}>
+                        <NozzlePicture
+                          nozzle={n}
+                          busy={busyId === n.id}
+                          onPick={f => pickImage(n, f)}
+                          onClear={() => clearImage(n)}
+                          onToggleApproved={() => toggleApproved(n)} />
+                      </td>
                       <td style={s.td}><span style={s.brandTag}>{n.brand}</span></td>
                       <td style={{ ...s.td, fontWeight: 800 }}>
                         {n.is_common && <span title="Common go-to tip" style={{ color: '#E8A33D', marginRight: 4 }}>★</span>}
@@ -300,7 +432,7 @@ export default function ManageNozzles() {
                     </tr>
                   ))}
                   {displayed.length === 0 && (
-                    <tr><td colSpan={6} style={{ ...s.td, textAlign: 'center', color: '#9BB5A2' }}>No nozzles</td></tr>
+                    <tr><td colSpan={7} style={{ ...s.td, textAlign: 'center', color: '#9BB5A2' }}>No nozzles</td></tr>
                   )}
                 </tbody>
               </table>

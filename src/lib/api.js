@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import { encodeWebp } from '@spattoo/designer';
+import { encodeWebp, compressImage } from '@spattoo/designer';
 
 // Trailing slash stripped, because every caller below writes `${BASE_URL}/api/…`. Configured as
 // "https://api.spattoo.com/" that builds "…com//api/…", which is a different path to the router and
@@ -402,6 +402,28 @@ export async function fetchAdminTemplates() {
   return get('/api/admin/templates');
 }
 
+// ── Notification channels ─────────────────────────────────────────────────────
+// Which channels each notification type goes out on (email, push, SMS, WhatsApp),
+// and the MSG91 template or AiSensy campaign each phone channel uses.
+export async function fetchNotificationChannels() {
+  return get('/api/admin/notification-channels');
+}
+export async function saveNotificationChannel(typeId, channel, body) {
+  return put(`/api/admin/notification-channels/${typeId}/${channel}`, body);
+}
+// Sends a REAL message to one phone, using the editor's template and the latest notification's details.
+export async function sendNotificationChannelTest(typeId, channel, body) {
+  return post(`/api/admin/notification-channels/${typeId}/${channel}/test`, body);
+}
+// Moving these settings between dev and production: export here, import on the other server.
+// Import with apply:false only previews what would change.
+export async function exportNotificationChannels() {
+  return get('/api/admin/notification-channels/export');
+}
+export async function importNotificationChannels({ bundle, copyOnOff = false, apply = false }) {
+  return post('/api/admin/notification-channels/import', { bundle, copyOnOff, apply });
+}
+
 export async function createTemplate(payload) {
   return post('/api/admin/templates', payload);
 }
@@ -486,6 +508,22 @@ export async function bulkCreateNozzles(rows) {
 
 export async function updateNozzle(id, payload) {
   return patch(`/api/admin/nozzles/${id}`, payload);
+}
+
+// A photograph of the nozzle and its tip, for the catalogue (migration 096). Returns the R2 key to
+// send back as `image_key`.
+//
+// DOWNSCALED FIRST, which the other thumbnail wrappers do not do. These come straight off a phone or
+// a supplier's site at 3000-4000px, and `uploadThumbnail` alone re-encodes to WebP at the ORIGINAL
+// size — a megabyte or more per nozzle, 121 of them, for a picture shown a few hundred pixels wide.
+// 800px is the measured floor for the thing the picture exists to show: at 640 the teeth of a small
+// open star start to close up, and below that the approval question ("can you see the tip?") stops
+// being answerable from the image we stored.
+//
+// compressImage returns WebP, so encodeWebp inside uploadThumbnail passes it through untouched —
+// two existing helpers composed, no third encoding path.
+export async function uploadNozzleImage(file) {
+  return uploadThumbnail('nozzles/images', await compressImage(file, { maxEdge: 800 }));
 }
 
 export async function deleteNozzle(id) {
