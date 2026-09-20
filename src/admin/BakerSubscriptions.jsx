@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { get, post } from '../lib/api.js';
+import { get, post, fetchBakerMessageCredits, grantBakerMessageCredits } from '../lib/api.js';
 
 const STATUS_META = {
   active:    { label: 'Active',    color: '#065F46', bg: '#D1FAE5' },
@@ -360,6 +360,8 @@ function ManagePanel({ bakerId, onClose, onSaved }) {
               <SubscriptionForm plans={plans} periods={periods} form={form} setForm={setForm} saving={saving} error={error} success={success} onSave={handleSave} submitLabel="Update Subscription" />
             </div>
 
+            <MessageCreditsCard bakerId={bakerId} />
+
             {/* Event history */}
             {data.events?.length > 0 && (
               <div style={{ background: '#fff', borderRadius: 14, padding: 18, border: '1.5px solid #E8EFE9' }}>
@@ -390,6 +392,161 @@ function ManagePanel({ bakerId, onClose, onSaved }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Message credits ───────────────────────────────────────────────────────────
+// A baker buys these in packs and each SMS/WhatsApp update to a customer spends one; email and push
+// stay free. This card is the only way we can put credits into a balance ourselves — goodwill after
+// a bad week, a promise made on a support call, a nudge for a baker who has never switched a paid
+// update on.
+//
+// ⚠️ WHATSAPP, NOT "SMS OR WHATSAPP". The ledger's `channel` column allows both and the packs are
+// priced on the SMS rate, but no CUSTOMER notification type has an sms channel row — the only three
+// are baker-facing and switched off pending DLT approval — so SMS cannot spend one of these today.
+//
+// ⚠️ THE WELCOME GRANT IS NOT THIS. New paying bakers get a one-time gift whose SIZE is a plan
+// entitlement — `welcome_message_credits`, edited per plan under Subscription Plans, once per
+// bakery ever. Changing that number is not a way to give somebody credits today, and this is not a
+// way to change what new bakers get.
+
+const KIND_LABEL = {
+  purchase:      'Bought',
+  welcome:       'Welcome credits',
+  complimentary: 'Complimentary',
+  adjustment:    'Adjustment',
+  refund:        'Refund',
+  debit:         'Sent',
+};
+
+function LedgerRow({ row }) {
+  const gain = (row.messages ?? 0) > 0;
+  // A debit names the notification and the channel it went out on, because "where did my messages
+  // go" is the question the ledger exists to answer. A gift names the admin's reason instead.
+  const detail = row.kind === 'debit'
+    ? [row.type_slug, row.channel].filter(Boolean).join(' · ')
+    : (row.note ?? row.pack_key ?? '');
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 0', borderTop: '1px solid #F4F8F5' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#2C4433' }}>{KIND_LABEL[row.kind] ?? row.kind}</div>
+        {detail && <div style={{ fontSize: 11, color: '#999', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</div>}
+      </div>
+      <div style={{ fontSize: 10, color: '#bbb', flexShrink: 0 }}>{fmt(row.created_at)}</div>
+      <div style={{ fontSize: 13, fontWeight: 800, color: gain ? '#065F46' : '#B45309', flexShrink: 0, width: 46, textAlign: 'right' }}>
+        {gain ? '+' : ''}{row.messages}
+      </div>
+    </div>
+  );
+}
+
+// Exported so it can be driven on its own against a stubbed API — the panel it lives in needs an
+// admin login and a real baker, and neither is a reason to leave the card unlooked-at.
+export function MessageCreditsCard({ bakerId }) {
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [amount,  setAmount]  = useState('');
+  const [note,    setNote]    = useState('');
+  const [saving,  setSaving]  = useState(false);
+  const [error,   setError]   = useState(null);
+  const [given,   setGiven]   = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    // Its own card, its own load: a balance the server could not produce must not take the
+    // subscription panel down with it — the reason somebody opened this screen is usually the plan.
+    try { setData(await fetchBakerMessageCredits(bakerId)); }
+    catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [bakerId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const n = Number(amount);
+  // ⚠️ THE SAME THREE CONDITIONS THE SERVER ENFORCES, restated here only to keep the button honest
+  // about whether pressing it can work. The server is the one that decides — a form is not a rule.
+  const valid = Number.isInteger(n) && n >= 1 && n <= 5000 && note.trim().length >= 3;
+
+  async function give() {
+    setSaving(true); setError(null); setGiven(null);
+    try {
+      const res = await grantBakerMessageCredits(bakerId, { messages: n, note: note.trim() });
+      setGiven(res.messages);
+      setAmount(''); setNote('');
+      await load();
+    } catch (e) {
+      // 403 here is a capability, not a mistake: `billing:discount` is the grant that lets somebody
+      // spend our money, and "Forbidden" alone reads like a bug in the screen.
+      setError(e.status === 403
+        ? 'You can see this balance but not add to it — that needs the "Issue discounts" capability.'
+        : e.message);
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 14, padding: 18, border: '1.5px solid #E8EFE9' }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: '#9BB5A2', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>Message Credits</div>
+
+      {loading && <div style={{ fontSize: 13, color: '#9BB5A2' }}>Loading…</div>}
+
+      {!loading && data && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#2C4433', lineHeight: 1 }}>{data.balance}</div>
+            <div style={{ fontSize: 13, color: '#888', fontWeight: 600 }}>credits left</div>
+          </div>
+          <div style={{ fontSize: 11, color: '#aaa', marginBottom: 16 }}>
+            Each WhatsApp update to one of their customers spends one. Email and push cost nothing.
+          </div>
+
+          {/* Amount and reason on one line — the reason is not optional, so it is not a second step */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+            <div style={{ width: 96, flexShrink: 0 }}>
+              <label style={lbl} htmlFor="mc-amount">Give</label>
+              <input id="mc-amount" type="number" min={1} max={5000} step={1} value={amount}
+                onChange={e => setAmount(e.target.value)} placeholder="25" style={inp} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <label style={lbl} htmlFor="mc-note">Reason (required)</label>
+              <input id="mc-note" value={note} onChange={e => setNote(e.target.value)}
+                placeholder="e.g. goodwill after the 14th outage" maxLength={200} style={inp} />
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: '#aaa', margin: '6px 0 12px' }}>
+            The reason is for us — it is never shown to the baker, and it is the only record of why
+            these were given. The baker is emailed that the credits landed and that they are free.
+          </div>
+
+          <button
+            onClick={give} disabled={!valid || saving}
+            style={{
+              width: '100%', padding: '11px 12px', borderRadius: 10, border: 'none',
+              cursor: (!valid || saving) ? 'default' : 'pointer',
+              background: (!valid || saving) ? '#E8EFE9' : '#2C4433',
+              color: (!valid || saving) ? '#9BB5A2' : '#fff',
+              fontSize: 13, fontWeight: 800, fontFamily: 'inherit',
+            }}>
+            {saving ? 'Giving…' : valid ? `Give ${n} complimentary credits` : 'Give complimentary credits'}
+          </button>
+
+          {error && <div style={{ fontSize: 12, color: '#B91C1C', marginTop: 10 }}>{error}</div>}
+          {given != null && (
+            <div style={{ fontSize: 12, color: '#065F46', marginTop: 10 }}>
+              Gave {given} credits. The balance above is the new one, and the baker has been emailed.
+            </div>
+          )}
+
+          {data.recent?.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: '#9BB5A2', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>Recent</div>
+              {data.recent.map((r, i) => <LedgerRow key={r.id ?? i} row={r} />)}
+            </div>
+          )}
+        </>
+      )}
+
+      {!loading && !data && error && <div style={{ fontSize: 12, color: '#B91C1C' }}>{error}</div>}
     </div>
   );
 }
