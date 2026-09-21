@@ -108,6 +108,16 @@ export async function fetchDietaryRequirements() {
   return get('/api/dietary-requirements');
 }
 
+// What a decoration can be MADE OF, and what X-Ray may offer for each (migration 101).
+//
+// ⚠️ FETCHED, NEVER HARDCODED. This dropdown used to carry its own list, and two of its options —
+// "Modelling chocolate" and "Edible paper" — were values the database rejected, so choosing either
+// failed on save. The list, the column's constraint and the policy in the API had drifted into
+// three different vocabularies with nothing comparing them.
+export async function fetchDecorationMediums() {
+  return get('/api/decoration-mediums');
+}
+
 export async function fetchElementTypes() {
   return get('/api/element-types');
 }
