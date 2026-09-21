@@ -5,6 +5,7 @@ import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
   fetchAdminElementTypes, fetchAdminElementCategories, createElementCategory,
+  fetchDecorationMediums,
   fetchAllElements, fetchParentElements,
   uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
 } from '../lib/api.js';
@@ -550,6 +551,24 @@ export default function ManageElements() {
   // art), so this is material only — and it decides what X-Ray offers: fondant gets a modelling
   // guide AND printing, a printed sheet gets only printing, acrylic gets neither.
   const [medium,           setMedium]           = useState('');
+  /* ⚠️ FETCHED, NOT HARDCODED. This picker held its own list and two of its options —
+     "Modelling chocolate" and "Edible paper" — were values the database rejected outright, so an
+     admin choosing either got a failed save for a choice we offered them. The column's constraint,
+     the API's policy and this list had become three vocabularies with nothing comparing them.
+     Migration 101 made it a table; this reads it, so adding isomalt is a row and not a deploy. */
+  const [mediums,          setMediums]          = useState([]);
+
+
+  // Catalogue vocabulary, loaded once. An empty list is not an error — it renders the picker with
+  // only "Not stated", which is the honest state when the API is unreachable, rather than a set of
+  // options that may no longer exist.
+  useEffect(() => {
+    let alive = true;
+    fetchDecorationMediums()
+      .then(rows => { if (alive) setMediums(Array.isArray(rows) ? rows : []); })
+      .catch(err => console.warn('[elements] could not load decoration mediums:', err?.message ?? err));
+    return () => { alive = false; };
+  }, []);
   const [isActive,         setIsActive]         = useState(true);
 
   // Pattern thumbnail regeneration (piping_pattern elements have no GLB to capture from —
@@ -1778,11 +1797,18 @@ export default function ManageElements() {
                     <select value={medium} onChange={e => setMedium(e.target.value)}
                       style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2F4A38' }}>
                       <option value="">Not stated — X-Ray offers both</option>
-                      <option value="fondant">Fondant / gumpaste — guide + print</option>
-                      <option value="chocolate">Modelling chocolate — print only for now</option>
-                      <option value="edible_paper">Edible paper (printed sheet) — print only</option>
-                      <option value="acrylic">Acrylic / non-edible — neither</option>
-                      <option value="other">Other</option>
+                      {/* The label says what X-Ray will DO with the choice, because that is the
+                          consequence an admin is actually picking — and it is derived from the same
+                          two booleans the policy reads, so it cannot describe something else. */}
+                      {mediums.map(m => (
+                        <option key={m.key} value={m.key}>
+                          {m.label}{' — '}
+                          {m.can_model && m.can_print ? 'guide + print'
+                            : m.can_model ? 'guide only'
+                            : m.can_print ? 'print only'
+                            : 'neither'}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}

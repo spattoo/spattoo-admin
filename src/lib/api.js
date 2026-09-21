@@ -108,6 +108,16 @@ export async function fetchDietaryRequirements() {
   return get('/api/dietary-requirements');
 }
 
+// What a decoration can be MADE OF, and what X-Ray may offer for each (migration 101).
+//
+// ⚠️ FETCHED, NEVER HARDCODED. This dropdown used to carry its own list, and two of its options —
+// "Modelling chocolate" and "Edible paper" — were values the database rejected, so choosing either
+// failed on save. The list, the column's constraint and the policy in the API had drifted into
+// three different vocabularies with nothing comparing them.
+export async function fetchDecorationMediums() {
+  return get('/api/decoration-mediums');
+}
+
 export async function fetchElementTypes() {
   return get('/api/element-types');
 }
@@ -453,6 +463,22 @@ export async function createBaker(payload) {
 
 export async function fetchAdminBakers() {
   return get('/api/admin/bakers');
+}
+
+// ── Message credits for one baker ─────────────────────────────────────────────
+// What Settings → Customer updates spends: a baker buys these in packs, and each SMS or WhatsApp
+// update to their customer debits one. The ledger is the source of truth and the balance is a SUM
+// of it, never a stored column — so the number that comes back here is the same arithmetic the
+// baker's own screen does.
+export async function fetchBakerMessageCredits(bakerId) {
+  return get(`/api/admin/bakers/${bakerId}/message-credits`);
+}
+
+// Give a baker message credits, free. Requires `billing:discount` on the server — a capability
+// `admin_staff` does not hold — so this rejects with 403 for an admin who can see the balance but
+// is not meant to spend money. The reason is REQUIRED: it is the only record of why they were given.
+export async function grantBakerMessageCredits(bakerId, { messages, note }) {
+  return post(`/api/admin/bakers/${bakerId}/message-credits`, { messages, note });
 }
 
 // Storefront visits per baker over a window, from our OWN counter (storefront_views) rather than
