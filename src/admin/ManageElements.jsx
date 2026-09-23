@@ -1806,7 +1806,11 @@ export default function ManageElements() {
                           {m.can_model && m.can_print ? 'guide + print'
                             : m.can_model ? 'guide only'
                             : m.can_print ? 'print only'
-                            : 'neither'}
+                            /* ⚠️ SAY THE ABSENCE, DO NOT NAME IT. "neither" is the only one of the
+                               four that describes what is missing instead of what you get, and it
+                               made an admin ask what it was neither OF. Spelling it out costs six
+                               characters and answers the question in the option itself. */
+                            : 'no guide, no print'}
                         </option>
                       ))}
                     </select>
