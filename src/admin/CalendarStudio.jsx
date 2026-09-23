@@ -5,6 +5,7 @@ import { fetchElementTypes, uploadThumbnail, createGlobalElement } from '../lib/
 // designer and the X-Ray print sheet are wired, they call these too.
 import {
   CALENDAR_DEFAULTS, composeCalendar, resolveDate, daysInMonth, CALENDAR_MONTH_NAMES,
+  calendarSheet,
 } from '@spattoo/designer';
 
 // ── Calendar Studio ────────────────────────────────────────────────────────────────────────────
@@ -119,6 +120,13 @@ export default function CalendarStudio() {
           // Lies flat on the lid; a calendar is not a plaque that stands.
           top_surface: 'hug',
           r: 1,
+          /* ⚠️ FIT TO THE CAKE, NOT TO A NUMBER — placement.js surfaceFit. Without this the calendar
+           * seeds at STICKER_SIZE (0.28 world units) and renders as a postage stamp in the middle of
+           * the lid; measured on a real render before it was added. `calendarSheet` derives the extent
+           * from what the renderer actually paints (the disc's inset, or the paper, or the grid rect),
+           * so the studio cannot come to disagree with the cake about how big a calendar is. An
+           * invented 0.92 hung the printed sheet off the edge. */
+          sheet: calendarSheet(cfg),
           calendar: {
             layout: cfg.layout,
             medium: cfg.medium,
