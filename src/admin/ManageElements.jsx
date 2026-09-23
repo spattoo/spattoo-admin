@@ -545,7 +545,7 @@ export default function ManageElements() {
   const [isParent,         setIsParent]         = useState(false);
   const [parentId,         setParentId]         = useState('');
   const [parentOptions,    setParentOptions]    = useState([]);
-  const [capabilities,     setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
+  const [capabilities,     setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false, stick: false });
   const [defaultColor,     setDefaultColor]     = useState('#F0DEB8');
   // WHAT IT IS MADE OF. Technique already lives in the element TYPE (Cream Piping vs Palette knife
   // art), so this is material only — and it decides what X-Ray offers: fondant gets a modelling
@@ -607,6 +607,9 @@ export default function ManageElements() {
   const [placementScaleMin,   setPlacementScaleMin]   = useState('');   // placement_config.scale.min
   const [placementScaleMax,   setPlacementScaleMax]   = useState('');   // placement_config.scale.max
   const [placementScaleStep,  setPlacementScaleStep]  = useState('');   // placement_config.scale.step
+  // placement_config.stick.bury — how much of the pick goes in when a baker first turns it on.
+  // A FRACTION, so resizing the element never changes how deep it is pushed (see elementStick.js).
+  const [stickBury,          setStickBury]          = useState('');
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
   const [scatterCount,       setScatterCount]       = useState('');   // placement_config.scatter_count (blank = designer default 12)
@@ -741,7 +744,7 @@ export default function ManageElements() {
     setApplicableZones(el.allowed_zones ?? []);
     setIsParent(!el.parent_id);
     setParentId(el.parent_id ?? '');
-    setCapabilities(el.allowed_actions ?? { resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false });
+    setCapabilities(el.allowed_actions ?? { resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false, stick: false });
     setDefaultColor(el.default_color ?? '#F0DEB8');
     setMedium(el.medium ?? '');
     setPreviewColor(el.default_color ?? '#f5e6c8');   // seed pattern-thumbnail cream from default
@@ -765,6 +768,7 @@ export default function ManageElements() {
     setGlbMetalness(pc.metalness ?? 0.15);
     loadZonesFromPc(pc, el.allowed_zones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
+    setStickBury(pc.stick?.bury != null ? String(pc.stick.bury) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -983,6 +987,7 @@ export default function ManageElements() {
   function syncStructuredFromPc(pc) {
     loadZonesFromPc(pc, applicableZones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
+    setStickBury(pc.stick?.bury != null ? String(pc.stick.bury) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -2323,6 +2328,19 @@ export default function ManageElements() {
                           placeholder="e.g. 2.5 — leave blank for auto"
                           onChange={e => { setPlacementScale(e.target.value); patchPc({ r: numPatch(e.target.value) }); }} />
                       </div>
+                      {/* ⚠️ SHOWN ONLY WHEN THE STICK IS OFFERED. A depth for a pick nobody can add
+                          is a number that does nothing, and a form full of those is how an admin
+                          stops believing the form. Ticking "Can add a stick" reveals it. */}
+                      {capabilities.stick && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Stick depth</span>
+                          <input type="number" min="0" max="1" step="0.05"
+                            style={{ ...s.input, flex: 1 }}
+                            value={stickBury}
+                            placeholder="0–1 — how much of the pick goes in (blank = 0.5)"
+                            onChange={e => { setStickBury(e.target.value); patchPc({ stick: e.target.value === '' ? '' : { bury: numPatch(e.target.value) } }); }} />
+                        </div>
+                      )}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Size range</span>
                         <input type="number" min="0.1" step="0.1"
@@ -2543,6 +2561,11 @@ export default function ManageElements() {
                       { key: 'delete',    label: 'Deletable',        hint: 'Always on — a customer can remove anything from their cake. Kept as a field so the rule stays visible and could be revisited, but it is not a choice.', fixed: true },
                       { key: 'move',      label: 'Movable',          hint: 'Nudge ◀▶▲▼ position on the cake' },
                       { key: 'tilt',      label: 'Tiltable',         hint: 'Lean / rotate slightly in the designer' },
+                      /* ⚠️ "CAN ADD a stick", not "comes on one". The capability offers the pick; the
+                         baker decides per placement, and the depth dial appears beside the toggle in
+                         the designer. Until now a stick existed only inside the topper studios, so a
+                         library element — a fondant heart, say — could never have one. */
+                      { key: 'stick',     label: 'Can add a stick',  hint: 'Baker can put this on a pick and push it into the cake — top, or sideways through the wall. They choose how far in it goes; the starting depth is below.' },
                     /* `fixed`: ticked and not clickable — every element is deletable, and the
                        designer stopped honouring `delete: false`. See AddElement for the reasoning. */
                     ].map(({ key, label, hint, fixed }) => (
