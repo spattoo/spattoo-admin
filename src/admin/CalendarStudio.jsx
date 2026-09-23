@@ -49,8 +49,6 @@ export default function CalendarStudio() {
   const [typeId, setTypeId] = useState('');
   const [cfg, setCfg]       = useState({ ...CALENDAR_DEFAULTS });
   const [busy, setBusy]     = useState(null);
-  // Both shapes offered by default — the case this feature exists for.
-  const [offerLayouts, setOfferLayouts] = useState({ grid: true, round: true });
   const [msg, setMsg]       = useState(null);
   /* The last colour the operator picked, kept while the background is switched OFF. Without it,
      `paper: null` loses the choice and re-ticking silently falls back to the default — so the swatch
@@ -107,11 +105,6 @@ export default function CalendarStudio() {
       const thumbBlob = await new Promise(res => thumbCanvas.toBlob(res, 'image/png'));
       const thumbKey = await uploadThumbnail('elements/thumbnails', thumbBlob);
 
-      /* Both shapes unless the operator deliberately narrows it. Offering both is the case the
-         feature exists for; a one-shape calendar is the exception and has to be chosen. */
-      const offered = LAYOUTS.map(l => l.value).filter(v => offerLayouts[v]);
-      if (!offered.length) { setMsg({ ok: false, text: 'Offer at least one shape.' }); setBusy(null); return; }
-
       await createGlobalElement({
         name: name.trim(),
         description: null,
@@ -135,16 +128,11 @@ export default function CalendarStudio() {
            * invented 0.92 hung the printed sheet off the edge. */
           sheet: calendarSheet(cfg),
           calendar: {
-            /* ⚠️ `layouts`, PLURAL — what this calendar OFFERS, not what it is. Sandeep: "round or
-             * grid should be an option, not a separate control", and not two catalogue rows either,
-             * because the shape "is an internal setting which user would know only after looking
-             * into the control". So one element names its shapes and the customer picks on the cake.
-             *
-             * The first entry is the default, exactly as `modes[0]` is for a pose. A calendar saved
-             * with a single `layout` (everything before this) still reads correctly and still grows
-             * no chooser — see calendarLayouts. */
-            layouts: offered,
-            layout: offered[0],
+            /* ⚠️ WHERE THE CUSTOMER STARTS, not what this calendar IS. There is ONE calendar
+             * element and both shapes are always offered on the cake — Sandeep: "its only one. ring
+             * vs grid is just an option." This also picks which shape the baked thumbnail shows,
+             * since a picker tile can only be one picture. */
+            layout: cfg.layout,
             medium: cfg.medium,
             ink: cfg.ink,
             accent: cfg.accent,
@@ -201,19 +189,10 @@ export default function CalendarStudio() {
             {elementTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
 
-          {/* ⚠️ WHICH SHAPES THIS CALENDAR OFFERS — the customer picks between them on the cake.
-              The dropdown below still chooses what the PREVIEW and the baked thumbnail show, because
-              a picker tile can only be one picture; it is not what the customer is limited to. */}
-          <label style={s.label}>Shapes offered</label>
-          {LAYOUTS.map(l => (
-            <label key={l.value} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 6 }}>
-              <input type="checkbox" checked={!!offerLayouts[l.value]}
-                     onChange={e => setOfferLayouts(p => ({ ...p, [l.value]: e.target.checked }))} />
-              <span style={{ fontSize: 13, lineHeight: 1.4 }}>{l.label}</span>
-            </label>
-          ))}
-
-          <label style={s.label}>Preview / thumbnail shape</label>
+          {/* ⚠️ NOT WHAT THE CUSTOMER IS LIMITED TO. Both shapes are always offered on the cake;
+              this picks the one the preview and the baked thumbnail show, and the one a freshly
+              placed calendar opens on. A picker tile can only be one picture. */}
+          <label style={s.label}>Starting shape</label>
           <select style={s.select} value={cfg.layout} onChange={e => set('layout', e.target.value)}>
             {LAYOUTS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
