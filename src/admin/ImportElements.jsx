@@ -29,9 +29,11 @@ export default function ImportElements() {
   // label stayed "Dry run" and the screen gave no sign anything was happening.
   const [mode, setMode] = useState(null);   // 'dry' | 'import' | null
   const [err, setErr] = useState(null);
+  // The rows behind a 409, so "reconcile by hand" names what to reconcile.
+  const [collisions, setCollisions] = useState(null);
 
   function reset() {
-    setPlan(null); setResult(null); setErr(null);
+    setPlan(null); setResult(null); setErr(null); setCollisions(null);
   }
 
   async function onFile(e) {
@@ -51,7 +53,7 @@ export default function ImportElements() {
 
   async function run(dryRun) {
     if (!bundle) return;
-    setBusy(true); setMode(dryRun ? 'dry' : 'import'); setErr(null);
+    setBusy(true); setMode(dryRun ? 'dry' : 'import'); setErr(null); setCollisions(null);
     try {
       const res = await importElements(bundle, { dryRun });
       if (dryRun) { setPlan(res.plan); setResult(null); }
@@ -66,7 +68,13 @@ export default function ImportElements() {
     } catch (e) {
       // A 409 is the vocabulary collision — same slug, different id. It is the one failure a human
       // has to resolve, so it is shown as-is rather than flattened into "import failed".
+      //
+      // ⚠️ AND WITH THE ROWS, which the sentence alone leaves out. "Reconcile by hand" is not an
+      // instruction until you know WHICH table and WHICH slug — a production import was refused and
+      // the only way to find out was to read the bundle and guess. The route has always returned
+      // `collisions`; nothing was showing it.
       setErr(e?.message ?? 'Import failed');
+      setCollisions(Array.isArray(e?.body?.collisions) ? e.body.collisions : null);
     } finally {
       setBusy(false); setMode(null);
     }
@@ -97,6 +105,20 @@ export default function ImportElements() {
       {fileName && <div style={s.fileName}>{fileName}</div>}
 
       {err && <div style={s.err}>{err}</div>}
+
+      {/* ⚠️ THE TABLE AND THE SLUG, not just the sentence. A refused production import told somebody
+          to reconcile by hand and named nothing — the only way to find out which vocabulary clashed
+          was to open the JSON and guess. The ids are truncated because what matters is THAT they
+          differ, and the full pair is one click away in either database. */}
+      {collisions?.length > 0 && (
+        <div style={{ ...s.card, borderColor: '#E5C2C2', marginTop: -6 }}>
+          <div style={s.cardTitle}>What clashed</div>
+          {collisions.map((c, i) => (
+            <Row key={i} k={`${c.table} · ${c.slug}`}
+                 v={`here ${String(c.here ?? '').slice(0, 8)} · bundle ${String(c.incoming ?? '').slice(0, 8)}`} />
+          ))}
+        </div>
+      )}
 
       {bundle && (
         <div style={s.card}>
