@@ -80,6 +80,12 @@ export default function ImportElements() {
     }
   }
 
+  /* "N new, M reused" — or "updated", for an API that still says so. A vocabulary matched by SLUG is
+     REUSED: the row here is bound to, never rewritten, because a label an admin edited is theirs. */
+  const countLine = (p) => (p?.reused != null
+    ? `${p.create} new, ${p.reused} reused`
+    : `${p?.create ?? 0} new, ${p?.update ?? 0} updated`);
+
   const counts = bundle && {
     templates: bundle.cake_templates?.length ?? 0,
     elements: bundle.elements?.length ?? 0,
@@ -181,7 +187,12 @@ export default function ImportElements() {
               rows with what they already contain.
             </div>
           )}
-          <Row k="Element types" v={`${plan.element_types.create} new, ${plan.element_types.update} updated`} />
+          {/* `reused`, not `updated`, and the fallback is not decoration: element types and tags stopped
+              carrying ids — they are matched by slug now, like categories — so the route reports
+              `reused` where it used to report `update`. A screen reading the old key printed
+              "0 new, undefined updated" against a prod API that had already moved. Both keys are read
+              so an older API still renders, since these two deploy separately. */}
+          <Row k="Element types" v={countLine(plan.element_types)} />
           {/* `reused`, not `updated`: a category arrives WITHOUT an id and is matched by slug, so an
               existing one is joined rather than rewritten. Guarded because an older backend's plan
               has no such key. */}
@@ -198,7 +209,7 @@ export default function ImportElements() {
           {plan.cake_shapes && (
             <Row k="Cake shapes" v={`${plan.cake_shapes.create} new, ${plan.cake_shapes.reused} reused`} />
           )}
-          <Row k="Tags"          v={`${plan.tags.create} new, ${plan.tags.update} updated`} />
+          <Row k="Tags"          v={countLine(plan.tags)} />
           <Row k="Elements"      v={`${plan.elements.create} new, ${plan.elements.update} updated`} />
           {plan.cake_templates && (
             <Row k="Templates"   v={`${plan.cake_templates.create} new, ${plan.cake_templates.update} updated`} />
