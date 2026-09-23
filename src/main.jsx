@@ -78,6 +78,7 @@ const AcrylicTopperStudio   = lazy(() => import('./admin/AcrylicTopperStudio.jsx
 const CakeShapeStudio       = lazy(() => import('./admin/CakeShapeStudio.jsx'));
 const IsomaltStudio         = lazy(() => import('./admin/IsomaltStudio.jsx'));
 const TopperSwapStudio      = lazy(() => import('./admin/TopperSwapStudio.jsx'));
+const CalendarStudio        = lazy(() => import('./admin/CalendarStudio.jsx'));
 const EditorsIndex          = lazy(() => import('./admin/EditorsIndex.jsx'));
 const ROUTES = {
   '/editors':                     EditorsIndex,
@@ -121,6 +122,7 @@ const ROUTES = {
   '/elements/folded-sticker':    ButterflyStudio,
   '/elements/photo-frame':       PhotoFrameStudio,
   '/elements/text-topper':       TextTopperStudio,
+  '/elements/calendar':          CalendarStudio,
   '/elements/acrylic-topper':    AcrylicTopperStudio,
   '/elements/topper-swap':       TopperSwapStudio,
   '/elements/cake-shapes':       CakeShapeStudio,
@@ -195,6 +197,7 @@ const NAV_GROUPS = [
     { href: '/elements/folded-sticker', label: 'Folded Butterfly' },
     { href: '/elements/photo-frame',    label: 'Photo Frame Studio' },
     { href: '/elements/text-topper',    label: 'Text Topper Studio' },
+    { href: '/elements/calendar',       label: 'Calendar Studio' },
     { href: '/elements/acrylic-topper', label: 'Acrylic Topper Studio' },
     { href: '/elements/topper-swap',    label: 'Topper Swap Studio' },
     { href: '/elements/cake-shapes',    label: 'Cake Shape Studio' },
