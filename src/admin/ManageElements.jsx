@@ -1778,10 +1778,19 @@ export default function ManageElements() {
                   </div>
                 </div>
 
-                {/* ── Made of ──
-                    MATERIAL only. How it is worked is already the element TYPE — 'Cream Piping'
-                    and 'Palette knife art' are the same material, and that is exactly why this
-                    column does not carry technique.
+                {/* ── Made with ──
+                    ⚠️ IT WAS "MADE OF", AND MATERIAL ONLY. The rule was migration 032's: how a
+                    decoration is worked is the element TYPE — 'Cream Piping' and 'Palette knife
+                    art' are the same material — so this column carried no technique.
+                    Cream is the exception that broke it. Both creams are buttercream, and the two
+                    crafts have opposite answers: piping is covered by the nozzle guide, palette
+                    knife needs a build sheet. A list that could not tell them apart sent an admin
+                    looking for an option that was not there. Sandeep: *"lets just change 'Made of'
+                    to 'Made with', so it can cover technique also."* (migration 107)
+                    Every other material is still just a material, and an element whose TYPE names
+                    its technique — palette_knife_art — is answered by the type; `decorationPolicy`
+                    never reads the medium for those. This matters for the FLAT PLACEABLES, where
+                    the type says "sticker" and only this can say what the thing actually is.
 
                     It decides WHAT X-RAY OFFERS, which is why it is worth setting even though it
                     is optional: fondant gets both a modelling guide and printing at actual size
@@ -1793,7 +1802,7 @@ export default function ManageElements() {
                     not hand-made, which costs at most one generation. */}
                 {!isPipingConfig && (
                   <div style={s.field}>
-                    <label style={s.label}>Made of</label>
+                    <label style={s.label}>Made with</label>
                     <select value={medium} onChange={e => setMedium(e.target.value)}
                       style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2F4A38' }}>
                       <option value="">Not stated — X-Ray offers both</option>
