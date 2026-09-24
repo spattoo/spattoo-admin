@@ -610,6 +610,11 @@ export default function ManageElements() {
   // placement_config.stick.bury — how much of the pick goes in when a baker first turns it on.
   // A FRACTION, so resizing the element never changes how deep it is pushed (see elementStick.js).
   const [stickBury,          setStickBury]          = useState('');
+  // placement_config.stick.length / .thickness — multipliers on the rod the designer derives from
+  // the element's own measured box. See spattoo-core geometry/elementStick.js for why they are
+  // multipliers and not lengths, and for the defaults a blank field falls back to.
+  const [stickLength,        setStickLength]        = useState('');
+  const [stickThickness,     setStickThickness]     = useState('');
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
   const [scatterCount,       setScatterCount]       = useState('');   // placement_config.scatter_count (blank = designer default 12)
@@ -769,6 +774,8 @@ export default function ManageElements() {
     loadZonesFromPc(pc, el.allowed_zones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
     setStickBury(pc.stick?.bury != null ? String(pc.stick.bury) : '');
+    setStickLength(pc.stick?.length != null ? String(pc.stick.length) : '');
+    setStickThickness(pc.stick?.thickness != null ? String(pc.stick.thickness) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -851,6 +858,20 @@ export default function ManageElements() {
       return JSON.stringify(cur, null, 2);
     });
   }
+  /* ⚠️ `stick` IS A SUB-OBJECT, SO IT MERGES. `patchPc({ stick: { bury } })` REPLACES the whole key,
+     which was harmless while depth was the only number in it and is a data-loser now that length and
+     thickness live there too: typing in one field would silently drop the other two. This reads what
+     is already in the JSON, changes one field, and removes the key entirely once nothing is left —
+     so an element that authors nothing carries no empty `stick: {}`. */
+  function patchStick(field, value) {
+    let cur = {};
+    try { cur = JSON.parse(placementConfig)?.stick ?? {}; } catch { cur = {}; }
+    const next = { ...cur };
+    if (value === '' || value == null) delete next[field];
+    else next[field] = parseFloat(value);
+    patchPc({ stick: Object.keys(next).length ? next : '' });
+  }
+
   // The read side of patchPc, for a control that renders straight from the JSON rather than from a
   // mirrored piece of state. Tolerates mid-type invalid JSON by answering undefined.
   function pcVal(key) {
@@ -988,6 +1009,8 @@ export default function ManageElements() {
     loadZonesFromPc(pc, applicableZones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
     setStickBury(pc.stick?.bury != null ? String(pc.stick.bury) : '');
+    setStickLength(pc.stick?.length != null ? String(pc.stick.length) : '');
+    setStickThickness(pc.stick?.thickness != null ? String(pc.stick.thickness) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -2338,7 +2361,29 @@ export default function ManageElements() {
                             style={{ ...s.input, flex: 1 }}
                             value={stickBury}
                             placeholder="0–1 — how much of the pick goes in (blank = 0.5)"
-                            onChange={e => { setStickBury(e.target.value); patchPc({ stick: e.target.value === '' ? '' : { bury: numPatch(e.target.value) } }); }} />
+                            onChange={e => { setStickBury(e.target.value); patchStick('bury', e.target.value); }} />
+                        </div>
+                      )}
+                      {/* ⚠️ MULTIPLIERS, NOT LENGTHS — the designer sizes the rod from the element's
+                          own measured box so it survives a resize, and these scale that answer. A
+                          millimetre figure here would be a world dimension that is wrong on the next
+                          cake size. Blank = the defaults, which are NOT 1: a card topper's
+                          proportions on a small solid element give a stub too short to reach the
+                          icing and a rod too fine to see. Reported from dev on the fondant heart —
+                          "stick is floating", "its too thin now". */}
+                      {capabilities.stick && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Stick size</span>
+                          <input type="number" min="0.25" max="6" step="0.2"
+                            style={{ ...s.input, flex: 1 }}
+                            value={stickLength}
+                            placeholder="long — × the default (blank = 2.2)"
+                            onChange={e => { setStickLength(e.target.value); patchStick('length', e.target.value); }} />
+                          <input type="number" min="0.25" max="6" step="0.2"
+                            style={{ ...s.input, flex: 1 }}
+                            value={stickThickness}
+                            placeholder="thick — × the default (blank = 2.6)"
+                            onChange={e => { setStickThickness(e.target.value); patchStick('thickness', e.target.value); }} />
                         </div>
                       )}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
