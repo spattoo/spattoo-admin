@@ -208,7 +208,7 @@ function TemplateForm({ onSaved, onCancel }) {
   const [weight, setWeight]           = useState('');
   const [minAge, setMinAge]           = useState('');
   const [maxAge, setMaxAge]           = useState('');
-  const [occasionTags, setOccasionTags] = useState([]);
+  const [allTags, setAllTags]         = useState([]);
   const [selectedTagIds, setSelectedTagIds] = useState(new Set());
   const [thumbBlob, setThumbBlob]     = useState(null);
   const [capturing, setCapturing]     = useState(false);
@@ -216,8 +216,11 @@ function TemplateForm({ onSaved, onCancel }) {
   const [msg, setMsg]                 = useState(null);
   const canvasRef                     = useRef();
 
+  // ⚠️ THE WHOLE VOCABULARY, not `.filter(t => t.category === 'occasion')`. A template tagged only
+  // with occasions at birth needs a second pass through the editor on its card to get anything else
+  // — per template, by hand — which is the cost that makes an untagged catalogue permanent.
   useEffect(() => {
-    fetchAllTags().then(tags => setOccasionTags(tags.filter(t => t.category === 'occasion')));
+    fetchAllTags().then(setAllTags).catch(() => setAllTags([]));
   }, []);
 
   // Keep tierColors length in sync with tierCount
@@ -381,22 +384,21 @@ function TemplateForm({ onSaved, onCancel }) {
         </div>
       </div>
 
-      {occasionTags.length > 0 && (
+      {/* Every group the vocabulary has, not occasions alone — the SAME picker the editor on each
+          card uses, so a template can be filed under emotion, relationship, style or colour at the
+          moment it is created rather than in a second pass afterwards. */}
+      {allTags.length > 0 && (
         <div style={s.field}>
-          <label style={s.label}>Occasions</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {occasionTags.map(tag => {
-              const selected = selectedTagIds.has(tag.id);
-              return (
-                <button key={tag.id} type="button"
-                  style={{ padding: '5px 14px', borderRadius: 20, border: `1.5px solid ${selected ? '#3D5A44' : '#C5D4C8'}`, background: selected ? '#E8EDE9' : '#fff', color: selected ? '#2C4433' : '#6B8C74', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'Quicksand', sans-serif" }}
-                  onClick={() => setSelectedTagIds(prev => { const next = new Set(prev); selected ? next.delete(tag.id) : next.add(tag.id); return next; })}
-                >
-                  {tag.name}
-                </button>
-              );
+          <label style={s.label}>Tags</label>
+          <TagChipPicker
+            allTags={allTags}
+            chosen={selectedTagIds}
+            onToggle={id => setSelectedTagIds(prev => {
+              const next = new Set(prev);
+              next.has(id) ? next.delete(id) : next.add(id);
+              return next;
             })}
-          </div>
+          />
         </div>
       )}
 
@@ -554,6 +556,61 @@ function TemplateThumbnailEditor({ template, onClose, onSaved }) {
   );
 }
 
+/* ── THE grouped chip picker, with two callers ───────────────────────────────────────────────────
+ *
+ * This screen had two tag pickers. The editor below grouped by `t.category ?? 'other'` and rendered
+ * every group it found; the create form filtered to `category === 'occasion'` and drew a flat row.
+ * Same data, same `saveTemplateTags(id, [...ids])` call at the end of both — only the picker
+ * differed, and only one of them was right.
+ *
+ * ⚠️ WHICH MATTERS BECAUSE A TEMPLATE IS TAGGED AT BIRTH OR BY HAND LATER. With the create form
+ * offering occasions alone, every new template needed a second pass through the editor on its card
+ * to get an emotion — per template, forever. Migration 109 would have landed a vocabulary that the
+ * screen creating the catalogue could not apply.
+ *
+ * ⚠️ NO CATEGORY FILTER, DELIBERATELY. An "intent categories" subset would be a fifth hardcoded list
+ * of categories, after core's TMPL_CATS, core's save modal, this form, and ManageTags' CATEGORIES.
+ * It renders what the tags carry, so a category added in admin appears here with no code change.
+ */
+function TagChipPicker({ allTags, chosen, onToggle }) {
+  const groups = useMemo(() => {
+    const by = new Map();
+    for (const t of allTags) {
+      const k = t.category ?? 'other';
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push(t);
+    }
+    return [...by.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [allTags]);
+
+  return (
+    <>
+      {groups.map(([category, tags]) => (
+        <div key={category} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#6B8C74', marginBottom: 5 }}>
+            {category.replace(/_/g, ' ')}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {tags.map(tag => {
+              const on = chosen.has(tag.id);
+              return (
+                <button key={tag.id} type="button"
+                  style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    fontFamily: "'Quicksand', sans-serif",
+                    border: `1.5px solid ${on ? '#3D5A44' : '#C5D4C8'}`,
+                    background: on ? '#E8EDE9' : '#fff', color: on ? '#2C4433' : '#6B8C74' }}
+                  onClick={() => onToggle(tag.id)}>
+                  {tag.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
   const [chosen, setChosen] = useState(null);   // null = still loading
   const [busy, setBusy] = useState(false);
@@ -572,16 +629,6 @@ function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
     return () => { cancelled = true; };
   }, [template.id]);
 
-  const groups = useMemo(() => {
-    const by = new Map();
-    for (const t of allTags) {
-      const k = t.category ?? 'other';
-      if (!by.has(k)) by.set(k, []);
-      by.get(k).push(t);
-    }
-    return [...by.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [allTags]);
-
   async function save() {
     setBusy(true); setErr(null);
     try {
@@ -596,32 +643,15 @@ function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
 
   return (
     <div style={{ marginTop: 10, padding: 12, background: '#F4F8F5', borderRadius: 10 }}>
-      {groups.map(([category, tags]) => (
-        <div key={category} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#6B8C74', marginBottom: 5 }}>
-            {category.replace(/_/g, ' ')}
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {tags.map(tag => {
-              const on = chosen.has(tag.id);
-              return (
-                <button key={tag.id} type="button"
-                  style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    fontFamily: "'Quicksand', sans-serif",
-                    border: `1.5px solid ${on ? '#3D5A44' : '#C5D4C8'}`,
-                    background: on ? '#E8EDE9' : '#fff', color: on ? '#2C4433' : '#6B8C74' }}
-                  onClick={() => setChosen(prev => {
-                    const next = new Set(prev);
-                    on ? next.delete(tag.id) : next.add(tag.id);
-                    return next;
-                  })}>
-                  {tag.name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+      <TagChipPicker
+        allTags={allTags}
+        chosen={chosen}
+        onToggle={id => setChosen(prev => {
+          const next = new Set(prev);
+          next.has(id) ? next.delete(id) : next.add(id);
+          return next;
+        })}
+      />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
         <button style={s.btn()} onClick={save} disabled={busy}>
           {busy ? 'Saving…' : `Save ${chosen.size} tag${chosen.size === 1 ? '' : 's'}`}
@@ -640,8 +670,8 @@ export default function ManageTemplates() {
   // and several open at once is a wall.
   const [tagEditFor, setTagEditFor] = useState(null);
   const [thumbEditFor, setThumbEditFor] = useState(null);
-  // The whole vocabulary, once. The create form fetches it too and keeps only occasions; this needs
-  // all seven groups, because occasions are the ones a template most often already has.
+  // The whole vocabulary, once for the screen. The create form fetches it separately for its own
+  // lifetime — it mounts and unmounts with the form — and both now feed the same TagChipPicker.
   const [allTags, setAllTags] = useState([]);
   // How many tags each template carries, so an untagged one is visible without opening it. Tags are
   // what the storefront filters on, so "0" is not a cosmetic gap — it is a template no facet finds.
