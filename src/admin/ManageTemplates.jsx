@@ -3,7 +3,8 @@ import { Canvas } from '@react-three/fiber';
 import { useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import * as THREE from 'three';
-import { captureThumbnailBlob, thumbnailFromImage } from '@spattoo/designer';
+import { captureThumbnailBlob, thumbnailFromImage,
+         REQUIRED_TAG_CATEGORIES, missingRequiredCategories, requiredTagMessage, ageRangeProblem } from '@spattoo/designer';
 import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, fetchTemplateTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
 } from '../lib/api.js';
 
@@ -258,6 +259,16 @@ function TemplateForm({ onSaved, onCancel }) {
 
   async function handleSave() {
     if (!name.trim()) { setMsg({ ok: false, text: 'Name is required.' }); return; }
+    /* ── Who this design suits, required here TOO ─────────────────────────────────────────────────
+       The same rule as the baker's save modal, from the same module — `@spattoo/designer`
+       shared/tagRequirements.js. A catalogue template authored here is the one most likely to be
+       filtered by a stranger, so it is the last place that should be allowed to skip the question.
+       ⚠️ ONE named list, two callers. `=== 'gender'` written out here would be a second answer to
+       "which categories are required", which is the coupling removed from `CATEGORIES` above. */
+    const ageProblem = ageRangeProblem(minAge, maxAge);
+    if (ageProblem) { setMsg({ ok: false, text: ageProblem }); return; }
+    const missingCategories = missingRequiredCategories(allTags, selectedTagIds);
+    if (missingCategories.length) { setMsg({ ok: false, text: requiredTagMessage(missingCategories) }); return; }
     setSaving(true); setMsg(null);
     try {
       let thumbnailKey = null;
@@ -375,7 +386,7 @@ function TemplateForm({ onSaved, onCancel }) {
           {/* "Suits ages" — a property of the DESIGN (cake_template_attrs.min_age/max_age), never
               of a customer. Same wording as the designer's filter and its save-as-template form, so
               one fact reads the same everywhere a baker meets it. */}
-          <label style={s.label}>Suits ages (years)</label>
+          <label style={s.label}>Suits ages (years) *</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input style={{ ...s.input, width: '50%' }} type="number" min="0" step="1" placeholder="Min" value={minAge} onChange={e => setMinAge(e.target.value)} />
             <span style={{ color: '#6B8C74', fontWeight: 700 }}>–</span>
@@ -588,7 +599,7 @@ function TagChipPicker({ allTags, chosen, onToggle }) {
       {groups.map(([category, tags]) => (
         <div key={category} style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#6B8C74', marginBottom: 5 }}>
-            {category.replace(/_/g, ' ')}
+            {category.replace(/_/g, ' ')}{REQUIRED_TAG_CATEGORIES.includes(category) ? ' *' : ''}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {tags.map(tag => {
