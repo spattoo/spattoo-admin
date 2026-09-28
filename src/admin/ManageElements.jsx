@@ -2442,10 +2442,10 @@ export default function ManageElements() {
                           {/* ⚠️ 1–14, NOT THE STICK'S 0.25–6. The tuned default is 6, so a control
                               capped there could only ever shorten a wire — see WIRE_LENGTH in
                               spattoo-core geometry/elementWire.js. */}
-                          <input type="number" min="1" max="14" step="0.5"
+                          <input type="number" min="1" max="9" step="0.5"
                             style={{ ...s.input, flex: 1 }}
                             value={wireLength}
-                            placeholder="long — × the element's height (blank = 6)"
+                            placeholder="long — × the element's height (blank = 4)"
                             onChange={e => { setWireLength(e.target.value); patchWire('length', e.target.value); }} />
                           <input type="number" min="0.25" max="6" step="0.2"
                             style={{ ...s.input, flex: 1 }}
