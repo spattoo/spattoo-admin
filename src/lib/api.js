@@ -49,6 +49,11 @@ async function apiError(res) {
   const err = new Error(body?.error ?? res.statusText);
   err.code = body?.code ?? null;
   err.status = res.status;
+  /* ⚠️ THE REST OF THE BODY SURVIVES. A route that answers with a sentence AND the rows behind it —
+     bundle import's `collisions`, say — had the rows thrown away here, so the screen could show
+     "reconcile by hand" and not WHAT to reconcile. Attached rather than parsed per-caller, so any
+     route that returns detail can show it. */
+  err.body = body ?? null;
   return err;
 }
 

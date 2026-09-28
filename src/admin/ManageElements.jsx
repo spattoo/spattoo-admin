@@ -545,7 +545,7 @@ export default function ManageElements() {
   const [isParent,         setIsParent]         = useState(false);
   const [parentId,         setParentId]         = useState('');
   const [parentOptions,    setParentOptions]    = useState([]);
-  const [capabilities,     setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false, stick: false });
+  const [capabilities,     setCapabilities]     = useState({ resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false, stick: false, wire: false });
   const [defaultColor,     setDefaultColor]     = useState('#F0DEB8');
   // WHAT IT IS MADE OF. Technique already lives in the element TYPE (Cream Piping vs Palette knife
   // art), so this is material only — and it decides what X-Ray offers: fondant gets a modelling
@@ -610,6 +610,20 @@ export default function ManageElements() {
   // placement_config.stick.bury — how much of the pick goes in when a baker first turns it on.
   // A FRACTION, so resizing the element never changes how deep it is pushed (see elementStick.js).
   const [stickBury,          setStickBury]          = useState('');
+  // placement_config.stick.length / .thickness — multipliers on the rod the designer derives from
+  // the element's own measured box. See spattoo-core geometry/elementStick.js for why they are
+  // multipliers and not lengths, and for the defaults a blank field falls back to.
+  const [stickLength,        setStickLength]        = useState('');
+  const [stickThickness,     setStickThickness]     = useState('');
+  /* placement_config.wire.* — the bendable stem a butterfly floats on. A separate capability from
+     the pick rather than a mode of it, because the two are alternatives a row chooses between: an
+     element offering both would ask a customer a question with no good answer. See
+     spattoo-core geometry/elementWire.js for what each number does and how it was tuned. */
+  const [wireBury,           setWireBury]           = useState('');
+  const [wireLength,         setWireLength]         = useState('');
+  const [wireThickness,      setWireThickness]      = useState('');
+  const [wireBend,           setWireBend]           = useState('');
+  const [wireSweep,          setWireSweep]          = useState('');
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
   const [scatterCount,       setScatterCount]       = useState('');   // placement_config.scatter_count (blank = designer default 12)
@@ -744,7 +758,7 @@ export default function ManageElements() {
     setApplicableZones(el.allowed_zones ?? []);
     setIsParent(!el.parent_id);
     setParentId(el.parent_id ?? '');
-    setCapabilities(el.allowed_actions ?? { resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false, stick: false });
+    setCapabilities(el.allowed_actions ?? { resize: true, duplicate: true, color: false, delete: true, move: false, tilt: false, stick: false, wire: false });
     setDefaultColor(el.default_color ?? '#F0DEB8');
     setMedium(el.medium ?? '');
     setPreviewColor(el.default_color ?? '#f5e6c8');   // seed pattern-thumbnail cream from default
@@ -769,6 +783,13 @@ export default function ManageElements() {
     loadZonesFromPc(pc, el.allowed_zones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
     setStickBury(pc.stick?.bury != null ? String(pc.stick.bury) : '');
+    setStickLength(pc.stick?.length != null ? String(pc.stick.length) : '');
+    setStickThickness(pc.stick?.thickness != null ? String(pc.stick.thickness) : '');
+    setWireBury(pc.wire?.bury != null ? String(pc.wire.bury) : '');
+    setWireLength(pc.wire?.length != null ? String(pc.wire.length) : '');
+    setWireThickness(pc.wire?.thickness != null ? String(pc.wire.thickness) : '');
+    setWireBend(pc.wire?.bend != null ? String(pc.wire.bend) : '');
+    setWireSweep(pc.wire?.sweep != null ? String(pc.wire.sweep) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -851,6 +872,30 @@ export default function ManageElements() {
       return JSON.stringify(cur, null, 2);
     });
   }
+  /* ⚠️ `stick` IS A SUB-OBJECT, SO IT MERGES. `patchPc({ stick: { bury } })` REPLACES the whole key,
+     which was harmless while depth was the only number in it and is a data-loser now that length and
+     thickness live there too: typing in one field would silently drop the other two. This reads what
+     is already in the JSON, changes one field, and removes the key entirely once nothing is left —
+     so an element that authors nothing carries no empty `stick: {}`. */
+  function patchStick(field, value) {
+    let cur = {};
+    try { cur = JSON.parse(placementConfig)?.stick ?? {}; } catch { cur = {}; }
+    const next = { ...cur };
+    if (value === '' || value == null) delete next[field];
+    else next[field] = parseFloat(value);
+    patchPc({ stick: Object.keys(next).length ? next : '' });
+  }
+  /* The wire's twin of the above, and it merges for the same reason: five numbers live under this
+     key, so replacing the whole object would drop four of them every time one is typed. */
+  function patchWire(field, value) {
+    let cur = {};
+    try { cur = JSON.parse(placementConfig)?.wire ?? {}; } catch { cur = {}; }
+    const next = { ...cur };
+    if (value === '' || value == null) delete next[field];
+    else next[field] = parseFloat(value);
+    patchPc({ wire: Object.keys(next).length ? next : '' });
+  }
+
   // The read side of patchPc, for a control that renders straight from the JSON rather than from a
   // mirrored piece of state. Tolerates mid-type invalid JSON by answering undefined.
   function pcVal(key) {
@@ -988,6 +1033,13 @@ export default function ManageElements() {
     loadZonesFromPc(pc, applicableZones);
     setPlacementScale(pc.r != null ? String(pc.r) : '');
     setStickBury(pc.stick?.bury != null ? String(pc.stick.bury) : '');
+    setStickLength(pc.stick?.length != null ? String(pc.stick.length) : '');
+    setStickThickness(pc.stick?.thickness != null ? String(pc.stick.thickness) : '');
+    setWireBury(pc.wire?.bury != null ? String(pc.wire.bury) : '');
+    setWireLength(pc.wire?.length != null ? String(pc.wire.length) : '');
+    setWireThickness(pc.wire?.thickness != null ? String(pc.wire.thickness) : '');
+    setWireBend(pc.wire?.bend != null ? String(pc.wire.bend) : '');
+    setWireSweep(pc.wire?.sweep != null ? String(pc.wire.sweep) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -2338,7 +2390,89 @@ export default function ManageElements() {
                             style={{ ...s.input, flex: 1 }}
                             value={stickBury}
                             placeholder="0–1 — how much of the pick goes in (blank = 0.5)"
-                            onChange={e => { setStickBury(e.target.value); patchPc({ stick: e.target.value === '' ? '' : { bury: numPatch(e.target.value) } }); }} />
+                            onChange={e => { setStickBury(e.target.value); patchStick('bury', e.target.value); }} />
+                        </div>
+                      )}
+                      {/* ⚠️ MULTIPLIERS, NOT LENGTHS — the designer sizes the rod from the element's
+                          own measured box so it survives a resize, and these scale that answer. A
+                          millimetre figure here would be a world dimension that is wrong on the next
+                          cake size. Blank = the defaults, which are NOT 1: a card topper's
+                          proportions on a small solid element give a stub too short to reach the
+                          icing and a rod too fine to see. Reported from dev on the fondant heart —
+                          "stick is floating", "its too thin now". */}
+                      {capabilities.stick && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Stick size</span>
+                          <input type="number" min="0.25" max="6" step="0.2"
+                            style={{ ...s.input, flex: 1 }}
+                            value={stickLength}
+                            placeholder="long — × the default (blank = 2.2)"
+                            onChange={e => { setStickLength(e.target.value); patchStick('length', e.target.value); }} />
+                          <input type="number" min="0.25" max="6" step="0.2"
+                            style={{ ...s.input, flex: 1 }}
+                            value={stickThickness}
+                            placeholder="thick — × the default (blank = 2.6)"
+                            onChange={e => { setStickThickness(e.target.value); patchStick('thickness', e.target.value); }} />
+                        </div>
+                      )}
+
+                      {/* ⚠️ THE SAME SHAPE AS THE STICK'S FIELDS ABOVE, AND HIDDEN THE SAME WAY. A
+                          number for a wire nobody can add is a number that does nothing, and a form
+                          full of those is how an admin stops believing the form.
+
+                          ⚠️ EVERY ONE IS A MULTIPLE OF THE ELEMENT'S OWN SIZE, never a millimetre.
+                          The designer measures the piece and scales from that, so a wire stays
+                          proportional through a resize; a world figure typed here would be wrong on
+                          the next cake. spattoo-core geometry/elementWire.js carries the reasoning
+                          and the defaults, all of which were chosen against a render in
+                          dev/element-wire.html rather than guessed. */}
+                      {capabilities.wire && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Wire depth</span>
+                          <input type="number" min="0" max="1" step="0.05"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireBury}
+                            placeholder="0–1 — how much of the wire goes in (blank = 0.5)"
+                            onChange={e => { setWireBury(e.target.value); patchWire('bury', e.target.value); }} />
+                        </div>
+                      )}
+                      {capabilities.wire && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Wire size</span>
+                          {/* ⚠️ 1–14, NOT THE STICK'S 0.25–6. The tuned default is 6, so a control
+                              capped there could only ever shorten a wire — see WIRE_LENGTH in
+                              spattoo-core geometry/elementWire.js. */}
+                          <input type="number" min="1" max="9" step="0.5"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireLength}
+                            placeholder="long — × the element's height (blank = 4)"
+                            onChange={e => { setWireLength(e.target.value); patchWire('length', e.target.value); }} />
+                          <input type="number" min="0.25" max="6" step="0.2"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireThickness}
+                            placeholder="thick — × florist gauge (blank = 2.5)"
+                            onChange={e => { setWireThickness(e.target.value); patchWire('thickness', e.target.value); }} />
+                        </div>
+                      )}
+                      {/* ⚠️ THE BEND IS THE WHOLE POINT, NOT A GARNISH ON IT. At 0 the wire is a
+                          straight white rod and reads as a pin; the curve is the only thing that
+                          says "florist wire", because that is the only thing that shape is. Below
+                          about 0.2 it barely registers at the size a piece is actually seen.
+                          `sweep` only chooses which way the bow points — varying it between
+                          elements is what stops a swarm of butterflies looking like a row of pins. */}
+                      {capabilities.wire && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Wire bend</span>
+                          <input type="number" min="0" max="0.5" step="0.02"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireBend}
+                            placeholder="0–0.5 — how much it curves (blank = 0.35)"
+                            onChange={e => { setWireBend(e.target.value); patchWire('bend', e.target.value); }} />
+                          <input type="number" min="0" max="360" step="15"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireSweep}
+                            placeholder="0–360° — which way it bows (blank = 35)"
+                            onChange={e => { setWireSweep(e.target.value); patchWire('sweep', e.target.value); }} />
                         </div>
                       )}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -2566,6 +2700,17 @@ export default function ManageElements() {
                          the designer. Until now a stick existed only inside the topper studios, so a
                          library element — a fondant heart, say — could never have one. */
                       { key: 'stick',     label: 'Can add a stick',  hint: 'Baker can put this on a pick and push it into the cake — top, or sideways through the wall. They choose how far in it goes; the starting depth is below.' },
+                      /* ⚠️ A WIRE IS NOT A LONGER STICK, which is why it is a second capability and
+                         not a mode of the first. A pick is straight and holds a piece UP; a wire
+                         bows and holds it OUT, floating clear of the icing — butterflies hovering
+                         off a cake on white florist wire. The bow is the whole difference: a white
+                         rod at that thickness reads as a pin. See spattoo-core
+                         geometry/elementWire.js.
+
+                         ⚠️ AND THEY ARE ALTERNATIVES. An element offering both puts a question to
+                         the customer with no good answer, so tick one: a fondant heart takes a
+                         pick, a butterfly takes a wire. */
+                      { key: 'wire',      label: 'Can add a wire',   hint: 'Baker can float this on a thin bendable wire, the way butterflies hover off a cake. Pick one or the other, not both — a stick holds it up, a wire holds it out.' },
                     /* `fixed`: ticked and not clickable — every element is deletable, and the
                        designer stopped honouring `delete: false`. See AddElement for the reasoning. */
                     ].map(({ key, label, hint, fixed }) => (
@@ -2590,6 +2735,18 @@ export default function ManageElements() {
                       </label>
                     ))}
                   </div>
+                  {/* ⚠️ SAID OUT LOUD, BECAUSE THE RENDERER RESOLVES IT SILENTLY. A stick and a wire
+                      both answer "what holds this piece off the icing", so an element carrying both
+                      would be drawn on two supports at once. The designer prefers the wire — it is
+                      the more specific statement — and picks the argument without telling anybody.
+                      A hint in a checkbox label is read once, when the box is ticked; this is read
+                      at the moment the mistake exists. */}
+                  {capabilities.stick && capabilities.wire && (
+                    <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: '#FEF3C7',
+                                  fontSize: 12, fontWeight: 700, color: '#92400E' }}>
+                      Both a stick and a wire are on. A baker only ever gets the wire — untick one.
+                    </div>
+                  )}
                   {/* Recolourable area — generic; appears only when colour-changeable AND a 2D image. */}
                   {capabilities.color && selectedEl?.image_url && !isGlb && (
                     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed #C5D4C8' }}>

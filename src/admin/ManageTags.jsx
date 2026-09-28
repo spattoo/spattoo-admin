@@ -1,7 +1,17 @@
 import { useState, useEffect } from 'react';
 import { fetchAllTags, createTag, updateTag, deleteTag } from '../lib/api.js';
 
-const CATEGORIES = ['occasion', 'style', 'color', 'material', 'theme', 'age_group', 'gender'];
+// ⚠️ THIS LIST IS WHAT ADMIN CAN AUTHOR, and it has to match the tags_category_check constraint.
+// Migration 109 widened that CHECK to admit `emotion` and `relationship`; without the two strings
+// here the rows exist and are unmanageable — no way to add a fifteenth emotion, fix a label, or even
+// filter the table to see them. See plans/catalogue-findability.md.
+//
+// ⚠️ It is the FOURTH copy of "the categories we support" in a product whose categories are
+// DB-authored: core's TMPL_CATS, core's save modal, ManageTemplates' create form, and this. The
+// other three can simply read the categories the tags actually carry — TemplateTagEditor and
+// FilterPanel already do. This one cannot: it offers categories for a tag that does not exist yet,
+// so it has nothing to read them from. This is the one honest copy.
+const CATEGORIES = ['occasion', 'style', 'color', 'material', 'theme', 'age_group', 'gender', 'emotion', 'relationship'];
 
 const s = {
   page:  { minHeight: '100vh', background: '#EDEAE2', fontFamily: "'Quicksand', sans-serif", padding: '40px 32px' },
@@ -54,6 +64,10 @@ const CAT_COLORS = {
   theme:     { bg: '#E3F2FD', fg: '#1565C0' },
   age_group: { bg: '#FFF8E1', fg: '#F57F17' },
   gender:    { bg: '#F3E5F5', fg: '#6A1B9A' },
+  // 109's two. `badge()` already falls back to grey for an unknown category, so these are not
+  // load-bearing — they only stop the newest vocabulary being the one that looks unfinished.
+  emotion:      { bg: '#FFEBEE', fg: '#C62828' },
+  relationship: { bg: '#E0F2F1', fg: '#00695C' },
 };
 
 const EMPTY = { name: '', slug: '', category: 'occasion', ai_assignable: false, sort_order: 0 };

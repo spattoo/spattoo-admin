@@ -28,7 +28,12 @@ import {
 const S = 1024;          // the baked asset/thumbnail frame
 const PREVIEW = 460;     // what the operator looks at — same frame the Text Topper Studio uses
 const CAL_ZONES = ['top_surface'];
-const CAL_ACTIONS = { resize: true, duplicate: false, color: false, gradient: false, delete: true, move: true, tilt: false };
+/* ⚠️ `color: true` UNLOCKS ALL THREE of a calendar's colours — the numbers (`ink`), the month name
+ * and ring (`accent`), and the background (`paper`). One flag, Sandeep's call: "color: true unlocks
+ * all three." A calendar has no single `color` the way a decal does, so the designer reads this flag
+ * and offers the three named ones instead of the generic wheel.
+ * `gradient` stays off: a gradient means nothing on piped gel or printed ink. */
+const CAL_ACTIONS = { resize: true, duplicate: false, color: true, gradient: false, delete: true, move: true, tilt: false };
 
 const LAYOUTS = [
   { value: 'grid',  label: 'Grid — a rectangular month, piped or printed straight onto the lid' },
