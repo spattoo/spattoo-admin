@@ -2450,7 +2450,7 @@ export default function ManageElements() {
                           <input type="number" min="0.25" max="6" step="0.2"
                             style={{ ...s.input, flex: 1 }}
                             value={wireThickness}
-                            placeholder="thick — × florist gauge (blank = 1)"
+                            placeholder="thick — × florist gauge (blank = 2.5)"
                             onChange={e => { setWireThickness(e.target.value); patchWire('thickness', e.target.value); }} />
                         </div>
                       )}
