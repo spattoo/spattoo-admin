@@ -623,6 +623,8 @@ export default function ManageElements() {
   const [wireLength,         setWireLength]         = useState('');
   const [wireThickness,      setWireThickness]      = useState('');
   const [wireBend,           setWireBend]           = useState('');
+  const [wireWaves,          setWireWaves]          = useState('');
+  const [wireTwist,          setWireTwist]          = useState('');
   const [wireSweep,          setWireSweep]          = useState('');
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
@@ -789,6 +791,8 @@ export default function ManageElements() {
     setWireLength(pc.wire?.length != null ? String(pc.wire.length) : '');
     setWireThickness(pc.wire?.thickness != null ? String(pc.wire.thickness) : '');
     setWireBend(pc.wire?.bend != null ? String(pc.wire.bend) : '');
+    setWireWaves(pc.wire?.waves != null ? String(pc.wire.waves) : '');
+    setWireTwist(pc.wire?.twist != null ? String(pc.wire.twist) : '');
     setWireSweep(pc.wire?.sweep != null ? String(pc.wire.sweep) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
@@ -1039,6 +1043,8 @@ export default function ManageElements() {
     setWireLength(pc.wire?.length != null ? String(pc.wire.length) : '');
     setWireThickness(pc.wire?.thickness != null ? String(pc.wire.thickness) : '');
     setWireBend(pc.wire?.bend != null ? String(pc.wire.bend) : '');
+    setWireWaves(pc.wire?.waves != null ? String(pc.wire.waves) : '');
+    setWireTwist(pc.wire?.twist != null ? String(pc.wire.twist) : '');
     setWireSweep(pc.wire?.sweep != null ? String(pc.wire.sweep) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
@@ -2468,6 +2474,21 @@ export default function ManageElements() {
                             value={wireBend}
                             placeholder="0–0.5 — how much it curves (blank = 0.35)"
                             onChange={e => { setWireBend(e.target.value); patchWire('bend', e.target.value); }} />
+                          <input type="number" min="1" max="4" step="1"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireWaves}
+                            placeholder="kinks — 1 a C, 2 an S, 3 a zigzag (blank = 2)"
+                            onChange={e => { setWireWaves(e.target.value); patchWire('waves', e.target.value); }} />
+                          <input type="number" min="0" max="180" step="5"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireTwist}
+                            placeholder="twist° — how far the bow turns (blank = 25)"
+                            onChange={e => { setWireTwist(e.target.value); patchWire('twist', e.target.value); }} />
+                        </div>
+                      )}
+                      {capabilities.wire && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Wire turn</span>
                           <input type="number" min="0" max="360" step="15"
                             style={{ ...s.input, flex: 1 }}
                             value={wireSweep}
