@@ -8,7 +8,7 @@ import * as THREE from 'three';
  * with a note saying it "ports to spattoo-core verbatim"; that is the pattern this one does not
  * follow, because the geometry already exists in core with its own tests. */
 import {
-  buildTopSurface, CAVITY_DEFAULTS, SPIRAL_DEFAULTS, SizeDial,
+  buildTopSurface, CAVITY_DEFAULTS, SPIRAL_DEFAULTS, SPIRAL_RISE, SizeDial,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
 } from '@spattoo/designer';
 
@@ -69,11 +69,11 @@ function Switch({ on, onChange, label, hint, disabled = false }) {
   );
 }
 
-function Tier({ shape, rim, spiral, lip, turns, seed, colour }) {
+function Tier({ shape, rim, spiral, lip, turns, rise, seed, colour }) {
   const surface = useMemo(() => buildTopSurface(shape, BOTTOM_H, {
     cavity: rim ? { ...CAVITY_DEFAULTS, lip, seed } : null,
-    spiral: spiral ? { ...SPIRAL_DEFAULTS, turns, seed: seed + 511 } : null,
-  }), [shape, rim, spiral, lip, turns, seed]);
+    spiral: spiral ? { ...SPIRAL_DEFAULTS, turns, rise, seed: seed + 511 } : null,
+  }), [shape, rim, spiral, lip, turns, rise, seed]);
   useEffect(() => () => surface?.dispose(), [surface]);
 
   const body = useMemo(() => (shape.kind === 'rect'
@@ -104,6 +104,7 @@ export default function TopEdgeStudio() {
   const [spiral, setSpiral] = useState(true);
   const [lip, setLip] = useState(CAVITY_DEFAULTS.lip);
   const [turns, setTurns] = useState(SPIRAL_DEFAULTS.turns);
+  const [rise, setRise] = useState(SPIRAL_DEFAULTS.rise);
   /* A fresh number, not the next one. "Seed 8 after seed 7" invites the idea that they are ordered
      and that somewhere further along is a better one; they are just different hands. */
   const [seed, setSeed] = useState(CAVITY_DEFAULTS.seed);
@@ -151,6 +152,20 @@ export default function TopEdgeStudio() {
             <div style={{ fontSize: 11, color: '#8a8a8a' }}>rings from the middle out</div>
           </div>
         </div>
+        {/* ⚠️ A NARROW RANGE ON PURPOSE, and the ends are core's, not this screen's. Sandeep:
+            *"usually there wont be too high spirals, so the range would be small. but adjustable."*
+            SPIRAL_RISE comes from the same sweep that chose the default — under its floor the ridge
+            is invisible, over its ceiling it stops reading as a knife mark. A dial that can reach a
+            setting no cake has is not more useful, it is a way to get a worse cake. */}
+        <div style={{ ...row, opacity: spiral && round ? 1 : 0.35,
+                      pointerEvents: spiral && round ? 'auto' : 'none' }}>
+          <SizeDial size={rise} min={SPIRAL_RISE.min} max={SPIRAL_RISE.max} step={SPIRAL_RISE.step}
+                    onChange={setRise} fmt={v => `${Math.round(v * 1000) / 10}`} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#2C4433' }}>Height</div>
+            <div style={{ fontSize: 11, color: '#8a8a8a' }}>how proud the coil stands</div>
+          </div>
+        </div>
 
         <div style={cap}>Both</div>
         {/* ⚠️ HEIGHT IS A DIAL AND IRREGULARITY IS A BUTTON, and the asymmetry is the point. Height
@@ -189,7 +204,7 @@ export default function TopEdgeStudio() {
         </label>
 
         <p style={{ fontSize: 10.5, color: '#b29aa2', lineHeight: 1.5, marginTop: 14 }}>
-          Width, crest, swells, wobble and the spiral&rsquo;s depth and groove width were each chosen
+          Width, crest, swells, wobble and the spiral&rsquo;s groove width were each chosen
           against the reference photographs — they are what make it read as cream rather than as a
           moulding, and they belong to an admin row rather than to a baker.
         </p>
@@ -219,7 +234,7 @@ export default function TopEdgeStudio() {
             <meshStandardMaterial color="#d9b44a" metalness={0.5} roughness={0.4} />
           </mesh>
           <Tier shape={shape} rim={rim} spiral={spiral && round} lip={lip} turns={turns}
-                seed={seed} colour={colour} />
+                rise={rise} seed={seed} colour={colour} />
         </Canvas>
       </div>
     </div>
