@@ -652,6 +652,11 @@ export default function ManageElements() {
   const [fullRingConfig, setFullRingConfig] = useState({});   // per ring-zone { rim, board } — mirrors top_/bottom_ring_finish==='element'
   // Folded sticker (2D) + pixel-recolour region — config-driven capabilities (see spattoo-core).
   const [foldable,      setFoldable]      = useState(false);
+  /* ⚠️ STORED INVERTED — `placement_config.billboard: false` is the only value ever written, and
+     absent means ON. Every 2D element that already exists turns to face the viewer, so a flag whose
+     ABSENCE meant "does not" would silently re-pose the whole catalogue on the next save. The
+     checkbox therefore reads as "always faces the viewer" and un-ticking is what gets recorded. */
+  const [faceCamera,    setFaceCamera]    = useState(true);
   const [foldAngle,     setFoldAngle]     = useState('');
   const [spineSplit,    setSpineSplit]    = useState('');
   const [recolorMethod, setRecolorMethod] = useState('opaque');
@@ -811,6 +816,7 @@ export default function ManageElements() {
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
+    setFaceCamera(pc.billboard !== false);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -1063,6 +1069,7 @@ export default function ManageElements() {
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
+    setFaceCamera(pc.billboard !== false);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -2660,6 +2667,28 @@ export default function ManageElements() {
                           row above (PlacementZoneRow, gated by zoneShowsInsert). No global block. */}
                       {selectedEl?.image_url && !isGlb && (
                         <>
+                          {/* ⚠️ A PLACEMENT PROPERTY, NOT A CAPABILITY, so it lives here beside the
+                              fold rather than in the Capabilities list. Capabilities say what a
+                              CUSTOMER may do; this says how the piece stands.
+
+                              ⚠️ IT IS ABOUT RESTING FACING, NOT ABOUT THE TILT CONTROLS — which is
+                              a correction to what this comment first said. The billboard applies YAW
+                              ONLY, so Tilt, Roll and Spin all compose on top of it either way;
+                              sweeping spin with the flag on and off produces identical frames. What
+                              it decides is where a piece looks when nobody has turned it: on, every
+                              butterfly swivels to keep facing the viewer as the cake turns, where
+                              the reference photographs show a swarm facing every which way. */}
+                          <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}>
+                            <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={faceCamera}
+                              onChange={e => { const on = e.target.checked; setFaceCamera(on);
+                                patchPc({ billboard: on ? '' : false }); }} />
+                            <div>
+                              <div style={s.checkLabel}>Always faces the viewer</div>
+                              <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                                On (the default) the decal turns with the camera so its artwork is never seen edge-on — right for a flat sticker. Turn it OFF for a piece that should keep the facing it was placed with, like a butterfly on a wire, so a swarm faces every which way instead of all swivelling to follow the viewer.
+                              </div>
+                            </div>
+                          </label>
                           <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}>
                             <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={foldable}
                               onChange={e => { const on = e.target.checked; setFoldable(on);
