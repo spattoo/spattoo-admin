@@ -74,6 +74,7 @@ const BackgroundRemover     = lazy(() => import('./admin/BackgroundRemover.jsx')
 const LusterDustStudio      = lazy(() => import('./admin/LusterDustStudio.jsx'));
 const MaterialStyles        = lazy(() => import('./admin/MaterialStyles.jsx'));
 const ReliefStickerStudio   = lazy(() => import('./admin/ReliefStickerStudio.jsx'));
+const ManeStudio            = lazy(() => import('./admin/ManeStudio.jsx'));
 const TextTopperStudio      = lazy(() => import('./admin/TextTopperStudio.jsx'));
 const AcrylicTopperStudio   = lazy(() => import('./admin/AcrylicTopperStudio.jsx'));
 const CakeShapeStudio       = lazy(() => import('./admin/CakeShapeStudio.jsx'));
@@ -89,6 +90,7 @@ const ROUTES = {
   '/elements/luster-dust':        LusterDustStudio,
   '/elements/material-styles':    MaterialStyles,
   '/elements/relief-sticker':     ReliefStickerStudio,
+  '/elements/mane':               ManeStudio,
   '/elements/isomalt':            IsomaltStudio,
   '/templates/create':    CreateTemplate,
   '/templates/design':    DesignTemplate,
@@ -205,6 +207,7 @@ const NAV_GROUPS = [
     { href: '/elements/topper-swap',    label: 'Topper Swap Studio' },
     { href: '/elements/cake-shapes',    label: 'Cake Shape Studio' },
     { href: '/elements/relief-sticker', label: 'Relief Sticker Studio' },
+    { href: '/elements/mane',           label: 'Mane Studio' },
     { href: '/elements/isomalt',        label: 'Isomalt Studio' },
     { href: '/elements/recolor-tester', label: 'Recolour Tester' },
     { href: '/pattern-builder',         label: 'Pattern Builder' },
