@@ -626,6 +626,7 @@ export default function ManageElements() {
   const [wireWaves,          setWireWaves]          = useState('');
   const [wireTwist,          setWireTwist]          = useState('');
   const [wireSweep,          setWireSweep]          = useState('');
+  const [wireAngle,          setWireAngle]          = useState('');
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
   const [scatterCount,       setScatterCount]       = useState('');   // placement_config.scatter_count (blank = designer default 12)
@@ -799,6 +800,7 @@ export default function ManageElements() {
     setWireWaves(pc.wire?.waves != null ? String(pc.wire.waves) : '');
     setWireTwist(pc.wire?.twist != null ? String(pc.wire.twist) : '');
     setWireSweep(pc.wire?.sweep != null ? String(pc.wire.sweep) : '');
+    setWireAngle(pc.wire?.angle != null ? String(pc.wire.angle) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -1052,6 +1054,7 @@ export default function ManageElements() {
     setWireWaves(pc.wire?.waves != null ? String(pc.wire.waves) : '');
     setWireTwist(pc.wire?.twist != null ? String(pc.wire.twist) : '');
     setWireSweep(pc.wire?.sweep != null ? String(pc.wire.sweep) : '');
+    setWireAngle(pc.wire?.angle != null ? String(pc.wire.angle) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -2501,6 +2504,23 @@ export default function ManageElements() {
                             value={wireSweep}
                             placeholder="0–360° — which way it bows (blank = 35)"
                             onChange={e => { setWireSweep(e.target.value); patchWire('sweep', e.target.value); }} />
+                        </div>
+                      )}
+                      {/* ⚠️ WALL PIECES ONLY, and the designer hides the matching dial elsewhere for
+                          the same reason: a stem in the top surface goes straight down because that
+                          is the only way into a horizontal surface, and a rim wire leans back over
+                          its own lip. This is the angle a butterfly pushed into the SIDE climbs at.
+                          Two hard-coded values failed before it became a number anyone could set —
+                          horizontal, then 31°, which still read flat because the angle only acts on
+                          the part of the wire outside the cake. */}
+                      {capabilities.wire && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Wire angle</span>
+                          <input type="number" min="20" max="75" step="5"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireAngle}
+                            placeholder="20–75° — how steeply a SIDE wire climbs (blank = 45)"
+                            onChange={e => { setWireAngle(e.target.value); patchWire('angle', e.target.value); }} />
                         </div>
                       )}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
