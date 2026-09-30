@@ -260,14 +260,49 @@ function Swatch({ value, onChange, label }) {
   );
 }
 
-function TipPicker({ value, onChange }) {
+/* ── PICKING A TIP: THUMBNAILS, NOT A DROPDOWN ───────────────────────────────────────────────────
+ *
+ * Sandeep: *"in the studio, we should not have a dropdown (like in admin) for piping selection. it
+ * should be the thumbnails."*
+ *
+ * ⚠️ AND A NOZZLE ALREADY KNOWS HOW TO DRAW ITSELF. Every tip in `NOZZLES` carries the 2D
+ * cross-section the sweep is built from — `[x, y]` pairs on roughly a unit circle — which is
+ * literally the shape of the opening you pipe through, and how a tip is pictured on the packet. So a
+ * thumbnail is that array as an SVG polygon: no render, no canvas, no asset, nothing to generate or
+ * cache. Nineteen of them cost nineteen `<polygon>` elements.
+ *
+ * ⚠️ ONE FIXED viewBox, NOT EACH SCALED TO FILL ITS BOX, and that is the whole argument for
+ * thumbnails over a dropdown. The wall tips are SQUASHED — `rose12w` measures x ±0.55 against y ±1.0
+ * where `star5` is x ±1.0 — because they are pressed against a side rather than standing off a top.
+ * Normalising each to fill would hide exactly the difference a baker is choosing between, and the
+ * dropdown hid it behind a word. At a common scale the squashed ones look squashed.
+ *
+ * ⚠️ FILLED IN THE COLOUR ON THE NOZZLE, so the grid previews what the next click will lay down
+ * rather than showing nineteen grey shapes.
+ */
+function TipThumbs({ value, onChange, colour }) {
   return (
-    <select value={value} onChange={e => onChange(e.target.value)}
-      style={{ width: '100%', padding: '9px 10px', borderRadius: 9, minHeight: 40, marginBottom: 12,
-               border: '1.5px solid #D8D3CA', background: '#fff', fontFamily: 'inherit',
-               fontSize: 12.5, fontWeight: 700, color: '#2C4433', cursor: 'pointer' }}>
-      {NOZZLES.map(n => <option key={n.key} value={n.key}>{n.label} — {n.hint}</option>)}
-    </select>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(52px, 1fr))',
+                  gap: 6, marginBottom: 10 }}>
+      {NOZZLES.map(n => {
+        const active = n.key === value;
+        /* SVG's y runs DOWN and the profile's runs up, so y is negated — without it every
+           asymmetric tip is drawn mirrored, which on a lobed star is invisible and on a squashed
+           wall tip is a lie about which way it spreads. */
+        const pts = n.profile.map(([x, y]) => `${x.toFixed(3)},${(-y).toFixed(3)}`).join(' ');
+        return (
+          <button key={n.key} type="button" onClick={() => onChange(n.key)} aria-pressed={active}
+            title={`${n.label} — ${n.hint}`}
+            style={{ padding: 4, borderRadius: 9, cursor: 'pointer', lineHeight: 0,
+                     border: `1.5px solid ${active ? '#2C4433' : '#D8D3CA'}`,
+                     background: active ? '#EEF2EF' : '#fff' }}>
+            <svg viewBox="-1.12 -1.12 2.24 2.24" style={{ width: '100%', aspectRatio: '1 / 1', display: 'block' }}>
+              <polygon points={pts} fill={colour} stroke="#00000022" strokeWidth={0.03} />
+            </svg>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -479,7 +514,14 @@ export default function ManeStudio() {
         ) : (
           <>
         <div style={cap}>On the nozzle</div>
-        <TipPicker value={tip} onChange={setTip} />
+        <TipThumbs value={tip} onChange={setTip} colour={colour} />
+        {/* The chosen tip NAMED below the grid. Nineteen labels in the grid would drown the shapes,
+            and a shape with no name is unsearchable — a baker asking for "1M" has to be able to find
+            it. Hover gives the rest. */}
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#2C4433', marginBottom: 12 }}>
+          {NOZZLE_BY_KEY[tip]?.label ?? tip}
+          <span style={{ fontWeight: 600, color: '#8a8a8a' }}> — {NOZZLE_BY_KEY[tip]?.hint}</span>
+        </div>
         <Swatch value={colour} onChange={setColour} label="Colour" />
         <div style={row}>
           <SizeDial size={thickness} min={0.03} max={0.22} step={0.005} onChange={setThickness}
