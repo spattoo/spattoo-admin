@@ -13,6 +13,8 @@ import {
   finishToMaterial,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
 } from '@spattoo/designer';
+import { fetchElementTypes, fetchAdminElementCategories, uploadThumbnail, createGlobalElement }
+  from '../lib/api.js';
 
 /* ── A cream pattern, composed by hand — PROOF OF CONCEPT ────────────────────────────────────────
  *
@@ -367,6 +369,134 @@ export default function ManeStudio() {
      listener acts on it. `makeDefault` publishes it; a ref is how the designer reaches it too. */
   const orbit = useRef(null);
 
+  /* ── Saving the row that puts the studio in Decorations ──────────────────────────────────────
+   *
+   * Sandeep: *"keep save to db button in the admin studio. take the screenshot of the piping from
+   * there."*
+   *
+   * ⚠️ THE ROW IS THE DOOR. The designer reaches a studio through
+   * `PROCEDURAL_TOOLS[placement_config.procedural]`, so `cream_pattern` in core is only the handler
+   * — without an elements row carrying that key there is nothing in Decorations to tap. Add Element
+   * can author one, but its tile would then be a stock picture; this button bakes the tile from real
+   * piped cream, which is the point of doing it from here.
+   *
+   * ⚠️ AND THE KEY IS TYPED NOWHERE. It is a constant, because a mistyped generator key produces an
+   * element that sits in the picker and does nothing when tapped — Add Element's own warning. */
+  const PROCEDURAL_KEY = 'cream_pattern';
+  const shotRef = useRef(null);
+  const [types, setTypes] = useState([]);
+  const [cats, setCats] = useState([]);
+  const [typeId, setTypeId] = useState('');
+  const [catId, setCatId] = useState('');
+  const [rowName, setRowName] = useState('Cream pattern studio');
+  const [busy, setBusy] = useState(null);
+  const [msg, setMsg] = useState(null);
+  /* ⚠️ A DELIBERATE THUMBNAIL VIEW, NOT AN AUTOMATED GRAB. `preserveDrawingBuffer` (already set on
+     the Canvas) fixes a BLANK capture; it does nothing for an EMPTY-LOOKING one, and CloudStudio
+     records why that distinction matters — "those pixels differ, they just all differ by nothing
+     anybody can see". A 60px tile of a whole cake with a small run of cream on it is unreadable, and
+     white cream on a pale cake is unreadable at any size. So this frames the PIPING, and you look at
+     it before saving: what is on screen is exactly what gets stored. */
+  const [thumbView, setThumbView] = useState(false);
+
+  /* ── Where the thumbnail camera goes ─────────────────────────────────────────────────────────
+   *
+   * ⚠️ DERIVED FROM THE PIECES, NOT A FIXED POSITION. A run can be anywhere on a wall 1.2 in radius
+   * and 1.45 tall, so any hardcoded eye would frame whatever I happened to pipe while writing this
+   * and miss everything else. Centroid for where to look, the spread of the points for how far back
+   * to stand — the same shape CloudStudio's `shot` memo has, and for the same reason: the tile is a
+   * picture of the DECORATION, not of a cake with something small on it.
+   *
+   * ⚠️ PULLED BACK BY THE SPREAD, WITH A FLOOR. At fov 34 the frame covers `2·d·tan(17°)` ≈ 0.61·d,
+   * so d ≈ span/0.61 fits the run edge to edge; ×1.5 leaves margin, and the 0.55 floor stops a
+   * SINGLE piece — span 0 — putting the camera inside the cream.
+   *
+   * ⚠️ OFF THE WALL'S OWN NORMAL, so a run on the side is seen face-on rather than edge-on. The
+   * centroid's x/z direction IS that normal on a cylinder, which is the one thing a flat plate
+   * would not have given us.
+   */
+  const shot = useMemo(() => {
+    if (!blobs.length) return { centre: [0, BOARD_H + BOTTOM_H * 0.55, 0], eye: [0, TOP_Y * 0.62, 3.6] };
+    const pts = blobs.map(b => b.point);
+    const c = pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1], a[2] + p[2]], [0, 0, 0]).map(v => v / pts.length);
+    const span = Math.max(
+      ...pts.map(p => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2])), 0.001) * 2;
+    /* ⚠️ THE FLOOR IS ON THE FRAME, NOT ON THE DISTANCE, and flooring the distance was wrong in a
+       way the arithmetic showed straight away. `dist = max(0.55, …)` held the camera 0.55 back for
+       anything small, and at fov 34 that frames only 0.34 world units — NARROWER than a 0.20 run, so
+       a short one came out cropped, and a single piece sat in a frame barely wider than itself.
+       Flooring the SPAN keeps the 1.5x margin at every size: a lone piece gets a 0.25-wide subject
+       in a 0.61 frame, and a long run is unchanged. */
+    const dist = (Math.max(span, 0.25) / 0.611) * 1.5;
+    const radial = Math.hypot(c[0], c[2]) || 1e-6;
+    const nx = c[0] / radial, nz = c[2] / radial;      // outward normal at the centroid
+    return { centre: c, eye: [c[0] + nx * dist, c[1] + dist * 0.25, c[2] + nz * dist] };
+  }, [blobs]);
+
+  useEffect(() => { fetchElementTypes().then(setTypes).catch(() => setTypes([])); }, []);
+  useEffect(() => { fetchAdminElementCategories().then(setCats).catch(() => setCats([])); }, []);
+  /* ⚠️ NEVER `cream_piping`, AND I PICKED IT FIRST BECAUSE IT SOUNDED RIGHT.
+   *
+   * A row typed `cream_piping` NEVER REACHES `PROCEDURAL_TOOLS`. The decorations grid filters that
+   * slug out along with `piping_pattern` and `drip` (CakeDesigner: the `et.slug !== 'cream_piping'`
+   * filter), because those rows are collected into `creamPipingEls` and opened as a PIPING RING
+   * CARD instead — zone tiles, COLOR / SIZE / RADIAL. So `tapPlaceElement` is never called, the
+   * `procedural` key on the row is never read, and the studio never opens. Sandeep saw exactly that:
+   * a "Cream pattern studio" card showing a BOARD tile and three ring dials.
+   *
+   * It looked like the obvious home for a piping studio. What decides the type is not what the
+   * element is ABOUT, it is which routing that type puts the row through — the same trap as picking
+   * a doc by its title. Every working studio row proves the point: card_topper and rainbow are
+   * `topper`, chocolate_garnish is `scattered_decor`, and the harness fixture that opened this very
+   * studio correctly is `topper`.
+   *
+   * Picked from the list rather than hardcoded so a renamed or re-minted type does not file it
+   * somewhere odd, and it falls back to the first type that is NOT one of the three the grid drops.
+   */
+  useEffect(() => {
+    if (!typeId && types.length) {
+      const routable = types.filter(t => !['cream_piping', 'piping_pattern', 'drip'].includes(t.slug));
+      setTypeId(routable.find(t => t.slug === 'topper')?.id ?? routable[0]?.id ?? '');
+    }
+  }, [types, typeId]);
+
+  async function saveRow() {
+    if (!rowName.trim()) return setMsg({ ok: false, text: 'Name it first.' });
+    if (!typeId)         return setMsg({ ok: false, text: 'Pick an element type.' });
+    if (!blobs.length)   return setMsg({ ok: false, text: 'Pipe something — the tile is a picture of real cream.' });
+    if (!thumbView)      return setMsg({ ok: false, text: 'Switch to the thumbnail view first, so you can see what gets stored.' });
+    setBusy('Saving…'); setMsg(null);
+    try {
+      /* The same idiom CakeShapeStudio, GenerateShape and GenerateModel use: the canvas lives inside
+         a wrapper ref, so reach it rather than holding a second reference to the GL context. */
+      const canvas = shotRef.current?.querySelector('canvas');
+      if (!canvas) throw new Error('No canvas to capture.');
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      if (!blob) throw new Error('The capture came back empty.');
+      const thumbKey = await uploadThumbnail('elements/thumbnails', blob);
+      await createGlobalElement({
+        name: rowName.trim(),
+        description: 'Pipe a block, then repeat it on the cake',
+        element_type_id: typeId,
+        ...(catId ? { category_id: catId } : {}),
+        parent_id: null,
+        /* No artwork: the studio IS the element. Nullable in the schema, and the POST guard requires
+           only name + element_type_id. */
+        image_url: null,
+        thumbnail_url: thumbKey,
+        file_size: null,
+        allowed_zones: ['top_surface', 'side'],
+        allowed_actions: { move: true, delete: true, resize: true, color: true },
+        placement_config: { procedural: PROCEDURAL_KEY },
+      });
+      setMsg({ ok: true, text: `Saved. "${rowName.trim()}" now opens the cream pattern studio from Decorations.` });
+    } catch (e) {
+      setMsg({ ok: false, text: e.message || 'Could not save the row.' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   /* The direction to grow a piece seated on existing cream. `grow` is the underlying piece's own
      stored normal, carried on its mesh — absent on the cake, whose face normal is already the right
      answer, so this falls back to it and the wall keeps behaving exactly as it did. */
@@ -604,6 +734,48 @@ export default function ManeStudio() {
                   ? 'stacked pieces face the same way'
                   : 'each grows off the rib it landed on'} />
 
+        <div style={cap}>Save the catalogue row</div>
+        <p style={{ fontSize: 10.5, color: '#8a8a8a', lineHeight: 1.5, margin: '0 0 10px' }}>
+          Creates the elements row that puts the <b>cream pattern studio</b> in Decorations. The tile
+          is a picture of the cream you piped here — switch to the thumbnail view and frame it first.
+        </p>
+        <Toggle on={thumbView} onChange={setThumbView}
+                label={thumbView ? 'Thumbnail view — this is the tile' : 'Set up the thumbnail'}
+                hint={thumbView ? 'framed on the piping, not the cake' : 'frame the piping for its tile'} />
+        <input value={rowName} onChange={e => setRowName(e.target.value)} placeholder="Name on the tile"
+          style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 9,
+                   minHeight: 40, marginBottom: 8, border: '1.5px solid #D8D3CA',
+                   fontFamily: 'inherit', fontSize: 13, color: '#2C4433' }} />
+        <select value={typeId} onChange={e => setTypeId(e.target.value)}
+          style={{ width: '100%', padding: '9px 10px', borderRadius: 9, minHeight: 40, marginBottom: 8,
+                   border: '1.5px solid #D8D3CA', background: '#fff', fontFamily: 'inherit',
+                   fontSize: 12.5, fontWeight: 700, color: '#2C4433' }}>
+          <option value="">Element type…</option>
+          {/* ⚠️ THE THREE PIPING TYPES ARE NOT OFFERED. A row typed cream_piping, piping_pattern or
+              drip is filtered out of the decorations grid and opened as a piping RING card, so it
+              never reaches PROCEDURAL_TOOLS and the studio never opens. Leaving them in the list
+              would let the next person make exactly the row that has to be deleted again. */}
+          {types.filter(t => !['cream_piping', 'piping_pattern', 'drip'].includes(t.slug))
+                .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        {/* Optional on the POST, but a tile with no category has no grid to appear in. */}
+        <select value={catId} onChange={e => setCatId(e.target.value)}
+          style={{ width: '100%', padding: '9px 10px', borderRadius: 9, minHeight: 40, marginBottom: 8,
+                   border: '1.5px solid #D8D3CA', background: '#fff', fontFamily: 'inherit',
+                   fontSize: 12.5, fontWeight: 700, color: '#2C4433' }}>
+          <option value="">Category… (optional, but a tile needs a grid)</option>
+          {cats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <button type="button" onClick={saveRow} disabled={!!busy}
+          style={{ ...btn, width: '100%', border: 'none', background: '#2C4433', color: '#fff',
+                   opacity: busy ? 0.5 : 1 }}>
+          {busy ?? 'Save to the catalogue'}
+        </button>
+        {msg && (
+          <div style={{ marginTop: 8, fontSize: 11.5, fontWeight: 700, lineHeight: 1.45,
+                        color: msg.ok ? '#2C7A4B' : '#c0392b' }}>{msg.text}</div>
+        )}
+
         <p style={{ fontSize: 10.5, color: '#b29aa2', lineHeight: 1.5, marginTop: 14 }}>
           Drag across the shoulder and the run climbs from the side onto the top — the seat comes
           from whatever the pointer hits, so a diagonal run IS the cross in the reference. A real
@@ -612,12 +784,22 @@ export default function ManeStudio() {
         </p>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+      {/* ⚠️ THE REF IS ON THE WRAPPER, and without it the save button is a lie: `saveRow` reaches the
+          canvas with `shotRef.current?.querySelector('canvas')` — the idiom CakeShapeStudio,
+          GenerateShape and GenerateModel all use — so an unattached ref makes every press fail on
+          "No canvas to capture". Declared and never attached is not a thing a build or a parse can
+          object to. */}
+      <div ref={shotRef} style={{ flex: 1, minWidth: 0, position: 'relative' }}>
         {/* ⚠️ `shadows`, because the designer's canvas has it and SceneLights only casts when asked.
             A blob standing off a wall is judged by the shadow it throws onto that wall as much as by
             its own shading — without one it reads as a sticker. */}
-        <Canvas shadows key={raking ? 'raking' : 'front'}
-          camera={raking
+        {/* ⚠️ `thumbView` IS IN THE KEY, or the camera never moves. R3F reads `camera` once, at
+            mount — changing the prop on a live canvas does nothing, which is why `raking` was
+            already keyed. A toggle that relabels itself and reframes nothing would be worse than no
+            toggle: it claims to show what gets stored. */}
+        <Canvas shadows key={`${raking ? 'raking' : 'front'}-${thumbView ? 'thumb' : 'scene'}`}
+          camera={thumbView ? { position: shot.eye, fov: 34 }
+                : raking
             ? { position: [2.5, TOP_Y * 0.95, 2.6], fov: 34 }
             : { position: [0, TOP_Y * 0.62, 3.6], fov: 34 }}
           gl={{ preserveDrawingBuffer: true }} style={{ position: 'absolute', inset: 0 }}>
@@ -639,7 +821,7 @@ export default function ManeStudio() {
               restored on a window-level pointerup, so a drag released off the cake cannot leave the
               camera stuck. */}
           <OrbitControls ref={orbit} enablePan={false} makeDefault
-                         target={[0, BOARD_H + BOTTOM_H * 0.55, 0]} />
+                         target={thumbView ? shot.centre : [0, BOARD_H + BOTTOM_H * 0.55, 0]} />
           <mesh position={[0, BOARD_H / 2, 0]} receiveShadow castShadow>
             <cylinderGeometry args={[BOARD_R, BOARD_R, BOARD_H, 72]} />
             <meshStandardMaterial color="#d9b44a" metalness={0.5} roughness={0.4} />
