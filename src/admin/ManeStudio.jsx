@@ -10,6 +10,7 @@ import * as THREE from 'three';
  * keep (INVARIANTS #15). A pattern is N of core's blobs, never a second renderer. */
 import {
   buildPipingHeap, NOZZLES, NOZZLE_BY_KEY, DEFAULT_NOZZLE, mediumOf, SizeDial,
+  finishToMaterial,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
 } from '@spattoo/designer';
 
@@ -111,11 +112,68 @@ function seat(point, normal, bury = 0) {
   return new THREE.Vector3().copy(point).addScaledVector(normal, -b);
 }
 
-function Blob({ point, normal, nozzle, thickness, heapHeight, colour, softness, bury, strokeId }) {
-  const geo = useMemo(() => {
-    const p = seat(new THREE.Vector3().fromArray(point), new THREE.Vector3().fromArray(normal), bury);
-    return buildPipingHeap(p, new THREE.Vector3().fromArray(normal), nozzle, thickness, heapHeight);
-  }, [point, normal, nozzle, thickness, heapHeight, bury]);
+/* ── WHAT A PIECE CAN BE ─────────────────────────────────────────────────────────────────────────
+ *
+ * Sandeep: *"sometimes we add sprikles or other decorations on the piping… lets add pearls as pieces
+ * in the studio."*
+ *
+ * ⚠️ A TABLE KEYED BY `kind`, NEVER A BRANCH ON A NAME (INVARIANTS #1). This is the same shape
+ * core's own `MEDIA` uses for cream-vs-chocolate: the piece carries a key, the table answers what
+ * that key means, and a third kind — a sugar flower, a leaf, a GLB stamp from the catalogue — is a
+ * ROW here rather than an edit to the composer. That matters more than it looks: the whole direction
+ * settled with Sandeep is GLB-first with procedural alongside, and `kind` is the seam both arrive
+ * through. A composer written with `if (pearl)` in it would have to be reopened for every one.
+ *
+ * ⚠️ A PEARL IS A SPHERE, and that is not laziness — it is what a pearl is. There is no shared
+ * "pearl builder" to reuse: the ball cluster packs GLB spheres from the catalogue, and
+ * `fondantParts.js` has a `ball` entry but it belongs to the fondant-modelling table, not to
+ * decorations. So the geometry is generated here and the FINISH is imported, because that half does
+ * have one home: `finishToMaterial` is the metallic↔matte curve the cluster's own Finish control
+ * writes, so a pearl in a pattern and a pearl in a cluster catch the light identically.
+ *
+ * ⚠️ BOTH KINDS SEAT THROUGH THE SAME RAYCAST. A pearl lands on cream or on cake depending only on
+ * what the ray struck — which is the whole of "sometimes we add sprinkles on the piping". Nothing in
+ * the seating code knows a pearl from a rosette.
+ */
+const PIECE_KINDS = {
+  nozzle: {
+    label: 'Rosette',
+    hint: 'piped cream, from a tip',
+    build: ({ point, normal, nozzle, thickness, heapHeight, bury }) => {
+      const p = seat(new THREE.Vector3().fromArray(point), new THREE.Vector3().fromArray(normal), bury);
+      return buildPipingHeap(p, new THREE.Vector3().fromArray(normal), nozzle, thickness, heapHeight);
+    },
+    /* Cream, from core's medium table — the identical curve the cake shades its piping with. */
+    material: ({ colour, softness }) => ({
+      side: THREE.DoubleSide,
+      ...mediumOf('cream').material({ softness }, colour),
+    }),
+  },
+  pearl: {
+    label: 'Pearl',
+    hint: 'a hard ball tucked between',
+    /* ⚠️ SEATED BY ITS CENTRE, not its base. A heap grows FROM its seat ALONG the normal; a sphere
+       sits half-buried in whatever it was pressed into, which is what a real dragee does — so the
+       centre goes one radius out and `bury` then presses it back in. Getting this wrong is the
+       floating-heap bug again in a different shape. */
+    build: ({ point, normal, thickness, bury }) => {
+      const n = new THREE.Vector3().fromArray(normal);
+      const c = new THREE.Vector3().fromArray(point).addScaledVector(n, thickness - bury);
+      return new THREE.SphereGeometry(thickness, 24, 18).translate(c.x, c.y, c.z);
+    },
+    material: ({ colour, finish }) => ({
+      color: colour,
+      ...finishToMaterial(finish ?? 0),
+    }),
+  },
+};
+
+function Blob(piece) {
+  const { point, normal, kind = 'nozzle', strokeId } = piece;
+  const spec = PIECE_KINDS[kind] ?? PIECE_KINDS.nozzle;
+  const geo = useMemo(() => spec.build(piece),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [kind, point, normal, piece.nozzle, piece.thickness, piece.heapHeight, piece.bury]);
   useEffect(() => () => geo?.dispose(), [geo]);
   if (!geo) return null;
   /* ⚠️ `strokeId` RIDES ON THE MESH so the hit handler can tell a piece from THIS stroke apart from
@@ -135,10 +193,9 @@ function Blob({ point, normal, nozzle, thickness, heapHeight, colour, softness, 
    * is what caught both — nothing about it is visible by reading the diff. */
   return (
     <mesh geometry={geo} castShadow receiveShadow userData={{ strokeId, grow: normal }}>
-      {/* DoubleSide for the same reason CreamPen uses it: the fan caps stay lit whatever the
-          winding, and cream is opaque. The props come from core's medium table, so this blob is
-          shaded by the identical curve the cake shades its piping with. */}
-      <meshPhysicalMaterial side={THREE.DoubleSide} {...mediumOf('cream').material({ softness }, colour)} />
+      {/* The material comes from the KIND's own entry — cream's sheen curve for a rosette, the
+          metallic↔matte pairing for a pearl. Both are core's, neither is hand-rolled here. */}
+      <meshPhysicalMaterial {...spec.material(piece)} />
     </mesh>
   );
 }
@@ -236,8 +293,17 @@ function Toggle({ on, onChange, label, hint }) {
 export default function ManeStudio() {
   /* What is on the nozzle RIGHT NOW. Every blob records the tip, colour and size it was piped with,
      so changing these mid-pattern is how one pattern comes to hold several nozzles. */
+  /* Which kind of piece the next click or drag lays down. A pattern holds a mix — that is the point
+     — so this is "what is in my hand now", exactly like the tip and the colour beside it. */
+  const [kind, setKind] = useState('nozzle');
   const [tip, setTip] = useState(NOZZLE_BY_KEY.rose8w ? 'rose8w' : DEFAULT_NOZZLE);
   const [thickness, setThickness] = useState(0.09);
+  /* A pearl's own size and finish. SEPARATE from the rosette's, because a pearl tucked between
+     rosettes is a fraction of their size and switching kinds should not make you re-dial it every
+     time. 0 is the metallic end of core's own scale — a gold dragee, the reference photograph's. */
+  const [pearlSize, setPearlSize] = useState(0.028);
+  const [pearlFinish, setPearlFinish] = useState(0);
+  const [pearlColour, setPearlColour] = useState('#D9B44A');
   const [heapHeight, setHeapHeight] = useState(0.9);   // HEAP_HEIGHT_PER_DIAMETER
   const [softness, setSoftness] = useState(0.7);       // the cream medium's own default
   const [colour, setColour] = useState('#E85A9B');
@@ -279,18 +345,21 @@ export default function ManeStudio() {
      against the real previous one, not against a stale render's copy. */
   const run = useRef({ id: null, last: null, carry: 0 });
 
-  const step = Math.max(spacing * 2 * thickness, 1e-3);
+  /* The walk step follows whatever is in hand: a run of pearls is a run of small things, so it steps
+     by the PEARL's diameter. Using the rosette's would scatter them a rosette apart. */
+  const step = Math.max(spacing * 2 * (kind === 'pearl' ? pearlSize : thickness), 1e-3);
 
   /* ⚠️ EVERY FIELD THE RENDERER READS IS RECORDED HERE — `bury` included, and leaving it out is what
      blanked the screen. A piece remembers the tip, colour, size AND press it was piped with, which
      is what lets one pattern hold several nozzles; a field the renderer wants but the record omits
      arrives as `undefined` and, in vector maths, as NaN. */
   const addBlob = useCallback((point, normal, strokeId) => {
-    setBlobs(prev => [...prev, {
-      point: point.toArray(), normal: normal.toArray(),
-      nozzle: tip, thickness, heapHeight, colour, softness, bury, strokeId,
-    }]);
-  }, [tip, thickness, heapHeight, colour, softness, bury]);
+    setBlobs(prev => [...prev, kind === 'pearl'
+      ? { kind, point: point.toArray(), normal: normal.toArray(),
+          thickness: pearlSize, colour: pearlColour, finish: pearlFinish, bury, strokeId }
+      : { kind, point: point.toArray(), normal: normal.toArray(),
+          nozzle: tip, thickness, heapHeight, colour, softness, bury, strokeId }]);
+  }, [kind, tip, thickness, heapHeight, colour, softness, bury, pearlSize, pearlColour, pearlFinish]);
 
   /* CLICK — one blob, exactly where the pointer hit. This is proof 1, and it is also the whole of
      the pen's "tap" behaviour: a press that does not travel is a pipe-and-lift. */
@@ -366,6 +435,49 @@ export default function ManeStudio() {
           that belongs with the wiring into the baker&rsquo;s designer.
         </p>
 
+        {/* ⚠️ WHAT IS IN YOUR HAND, chosen before you place. Two buttons rather than a dropdown
+            because there are two and both matter — a dropdown hides half the vocabulary behind a
+            tap, and the whole point of this row is that a pattern mixes kinds. */}
+        <div style={cap}>In hand</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          {Object.entries(PIECE_KINDS).map(([k, spec]) => (
+            <button key={k} type="button" onClick={() => setKind(k)} aria-pressed={kind === k}
+              style={{ ...btn, padding: '9px 10px', textAlign: 'left',
+                       border: `1.5px solid ${kind === k ? '#2C4433' : '#D8D3CA'}`,
+                       background: kind === k ? '#2C4433' : '#fff',
+                       color: kind === k ? '#fff' : '#2C4433' }}>
+              <span style={{ display: 'block', fontSize: 13, fontWeight: 800 }}>{spec.label}</span>
+              <span style={{ display: 'block', fontSize: 10, fontWeight: 600,
+                             color: kind === k ? '#C9D6CE' : '#8a8a8a' }}>{spec.hint}</span>
+            </button>
+          ))}
+        </div>
+
+        {kind === 'pearl' ? (
+          <>
+            <div style={cap}>The pearl</div>
+            <div style={row}>
+              <SizeDial size={pearlSize} min={0.01} max={0.07} step={0.002} onChange={setPearlSize}
+                        fmt={v => `${Math.round(v * 1000)}`} />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#2C4433' }}>Size</div>
+                <div style={{ fontSize: 11, color: '#8a8a8a' }}>a fraction of a rosette</div>
+              </div>
+            </div>
+            <div style={row}>
+              {/* Core's own metallic↔matte scale, 0 = metallic. The same curve the ball cluster's
+                  Finish control writes, so a pearl here and a pearl there catch light alike. */}
+              <SizeDial size={pearlFinish} min={0} max={1} step={0.05} onChange={setPearlFinish}
+                        fmt={v => (v < 0.25 ? 'metal' : v > 0.75 ? 'matte' : `${Math.round(v * 100)}`)} />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#2C4433' }}>Finish</div>
+                <div style={{ fontSize: 11, color: '#8a8a8a' }}>metallic &rarr; matte</div>
+              </div>
+            </div>
+            <Swatch value={pearlColour} onChange={setPearlColour} label="Colour" />
+          </>
+        ) : (
+          <>
         <div style={cap}>On the nozzle</div>
         <TipPicker value={tip} onChange={setTip} />
         <Swatch value={colour} onChange={setColour} label="Colour" />
@@ -405,6 +517,15 @@ export default function ManeStudio() {
             <div style={{ fontSize: 11, color: '#8a8a8a' }}>glossy &rarr; matte</div>
           </div>
         </div>
+          </>
+        )}
+
+        {/* ⚠️ OUTSIDE THE TERNARY, BECAUSE BOTH KINDS READ IT. `bury` is used by the rosette builder
+            (the heap's base) AND by the pearl's (its centre goes one radius out, then presses back
+            in by this much). Left inside the rosette branch it was unreachable the moment a pearl
+            was in hand — a value that still governed how the pearl seated, with no way to see or
+            change it. That is the same shape as the floating seat and the NaN: a control and the
+            thing it controls quietly disagreeing. */}
         <div style={row}>
           {/* Measured: at size 0.11 an unburied base already sits 0.0825 inside the wall — the
               profile's own back-reach. This presses it in further, the way a hand does. */}
@@ -412,7 +533,7 @@ export default function ManeStudio() {
                     fmt={v => (v === 0 ? 'on' : `${Math.round(v * 1000) / 10}`)} />
           <div>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#2C4433' }}>Pressed in</div>
-            <div style={{ fontSize: 11, color: '#8a8a8a' }}>how hard it meets the cake</div>
+            <div style={{ fontSize: 11, color: '#8a8a8a' }}>how hard it meets what it lands on</div>
           </div>
         </div>
 
