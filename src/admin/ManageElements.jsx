@@ -9,6 +9,8 @@ import {
   fetchAllElements, fetchParentElements,
   uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
 } from '../lib/api.js';
+/* The wire's bounds, from the one place that defines them — see the note on the Wire angle field. */
+import { WIRE_ANGLE, ELEMENT_WIRE_DEFAULTS } from '@spattoo/designer';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
 import DecorationGuidePanel from './DecorationGuidePanel.jsx';
@@ -2516,10 +2518,17 @@ export default function ManageElements() {
                       {capabilities.wire && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
                           <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Wire angle</span>
-                          <input type="number" min="20" max="75" step="5"
+                          {/* ⚠️ THE BOUNDS COME FROM CORE, AND THIS FIELD IS WHY. They were typed out
+                              here as 20–75 to match the dial, and then the dial moved: core's ceiling
+                              went to 88° and this form went on offering 75 and saying so in its own
+                              placeholder. Sandeep, after the change shipped: *"but butterfly angle is
+                              still shows only till 75 degrees."* A range repeated on a second surface
+                              is a copy that will be wrong eventually; `WIRE_ANGLE` is the one
+                              definition and the placeholder is built from it. */}
+                          <input type="number" min={WIRE_ANGLE.min} max={WIRE_ANGLE.max} step={WIRE_ANGLE.step}
                             style={{ ...s.input, flex: 1 }}
                             value={wireAngle}
-                            placeholder="20–75° — how steeply a SIDE wire climbs (blank = 45)"
+                            placeholder={`${WIRE_ANGLE.min}–${WIRE_ANGLE.max}° — how steeply a SIDE wire climbs (blank = ${ELEMENT_WIRE_DEFAULTS.angle})`}
                             onChange={e => { setWireAngle(e.target.value); patchWire('angle', e.target.value); }} />
                         </div>
                       )}
