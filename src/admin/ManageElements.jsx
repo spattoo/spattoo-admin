@@ -9,6 +9,8 @@ import {
   fetchAllElements, fetchParentElements,
   uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
 } from '../lib/api.js';
+/* The wire's bounds, from the one place that defines them — see the note on the Wire angle field. */
+import { WIRE_ANGLE, ELEMENT_WIRE_DEFAULTS } from '@spattoo/designer';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
 import DecorationGuidePanel from './DecorationGuidePanel.jsx';
@@ -623,7 +625,10 @@ export default function ManageElements() {
   const [wireLength,         setWireLength]         = useState('');
   const [wireThickness,      setWireThickness]      = useState('');
   const [wireBend,           setWireBend]           = useState('');
+  const [wireWaves,          setWireWaves]          = useState('');
+  const [wireTwist,          setWireTwist]          = useState('');
   const [wireSweep,          setWireSweep]          = useState('');
+  const [wireAngle,          setWireAngle]          = useState('');
   const [singlePerSlot,      setSinglePerSlot]      = useState(false);
   const [canScatter,         setCanScatter]         = useState(false);
   const [scatterCount,       setScatterCount]       = useState('');   // placement_config.scatter_count (blank = designer default 12)
@@ -650,6 +655,11 @@ export default function ManageElements() {
   const [fullRingConfig, setFullRingConfig] = useState({});   // per ring-zone { rim, board } — mirrors top_/bottom_ring_finish==='element'
   // Folded sticker (2D) + pixel-recolour region — config-driven capabilities (see spattoo-core).
   const [foldable,      setFoldable]      = useState(false);
+  /* ⚠️ STORED INVERTED — `placement_config.billboard: false` is the only value ever written, and
+     absent means ON. Every 2D element that already exists turns to face the viewer, so a flag whose
+     ABSENCE meant "does not" would silently re-pose the whole catalogue on the next save. The
+     checkbox therefore reads as "always faces the viewer" and un-ticking is what gets recorded. */
+  const [faceCamera,    setFaceCamera]    = useState(true);
   const [foldAngle,     setFoldAngle]     = useState('');
   const [spineSplit,    setSpineSplit]    = useState('');
   const [recolorMethod, setRecolorMethod] = useState('opaque');
@@ -789,7 +799,10 @@ export default function ManageElements() {
     setWireLength(pc.wire?.length != null ? String(pc.wire.length) : '');
     setWireThickness(pc.wire?.thickness != null ? String(pc.wire.thickness) : '');
     setWireBend(pc.wire?.bend != null ? String(pc.wire.bend) : '');
+    setWireWaves(pc.wire?.waves != null ? String(pc.wire.waves) : '');
+    setWireTwist(pc.wire?.twist != null ? String(pc.wire.twist) : '');
     setWireSweep(pc.wire?.sweep != null ? String(pc.wire.sweep) : '');
+    setWireAngle(pc.wire?.angle != null ? String(pc.wire.angle) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -807,6 +820,7 @@ export default function ManageElements() {
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
+    setFaceCamera(pc.billboard !== false);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -1039,7 +1053,10 @@ export default function ManageElements() {
     setWireLength(pc.wire?.length != null ? String(pc.wire.length) : '');
     setWireThickness(pc.wire?.thickness != null ? String(pc.wire.thickness) : '');
     setWireBend(pc.wire?.bend != null ? String(pc.wire.bend) : '');
+    setWireWaves(pc.wire?.waves != null ? String(pc.wire.waves) : '');
+    setWireTwist(pc.wire?.twist != null ? String(pc.wire.twist) : '');
     setWireSweep(pc.wire?.sweep != null ? String(pc.wire.sweep) : '');
+    setWireAngle(pc.wire?.angle != null ? String(pc.wire.angle) : '');
     setPlacementScaleMin(pc.scale?.min != null ? String(pc.scale.min) : '');
     setPlacementScaleMax(pc.scale?.max != null ? String(pc.scale.max) : '');
     setPlacementScaleStep(pc.scale?.step != null ? String(pc.scale.step) : '');
@@ -1057,6 +1074,7 @@ export default function ManageElements() {
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
+    setFaceCamera(pc.billboard !== false);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -2468,11 +2486,50 @@ export default function ManageElements() {
                             value={wireBend}
                             placeholder="0–0.5 — how much it curves (blank = 0.35)"
                             onChange={e => { setWireBend(e.target.value); patchWire('bend', e.target.value); }} />
+                          <input type="number" min="1" max="4" step="1"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireWaves}
+                            placeholder="kinks — 1 a C, 2 an S, 3 a zigzag (blank = 2)"
+                            onChange={e => { setWireWaves(e.target.value); patchWire('waves', e.target.value); }} />
+                          <input type="number" min="0" max="180" step="5"
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireTwist}
+                            placeholder="twist° — how far the bow turns (blank = 25)"
+                            onChange={e => { setWireTwist(e.target.value); patchWire('twist', e.target.value); }} />
+                        </div>
+                      )}
+                      {capabilities.wire && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Wire turn</span>
                           <input type="number" min="0" max="360" step="15"
                             style={{ ...s.input, flex: 1 }}
                             value={wireSweep}
                             placeholder="0–360° — which way it bows (blank = 35)"
                             onChange={e => { setWireSweep(e.target.value); patchWire('sweep', e.target.value); }} />
+                        </div>
+                      )}
+                      {/* ⚠️ WALL PIECES ONLY, and the designer hides the matching dial elsewhere for
+                          the same reason: a stem in the top surface goes straight down because that
+                          is the only way into a horizontal surface, and a rim wire leans back over
+                          its own lip. This is the angle a butterfly pushed into the SIDE climbs at.
+                          Two hard-coded values failed before it became a number anyone could set —
+                          horizontal, then 31°, which still read flat because the angle only acts on
+                          the part of the wire outside the cake. */}
+                      {capabilities.wire && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Wire angle</span>
+                          {/* ⚠️ THE BOUNDS COME FROM CORE, AND THIS FIELD IS WHY. They were typed out
+                              here as 20–75 to match the dial, and then the dial moved: core's ceiling
+                              went to 88° and this form went on offering 75 and saying so in its own
+                              placeholder. Sandeep, after the change shipped: *"but butterfly angle is
+                              still shows only till 75 degrees."* A range repeated on a second surface
+                              is a copy that will be wrong eventually; `WIRE_ANGLE` is the one
+                              definition and the placeholder is built from it. */}
+                          <input type="number" min={WIRE_ANGLE.min} max={WIRE_ANGLE.max} step={WIRE_ANGLE.step}
+                            style={{ ...s.input, flex: 1 }}
+                            value={wireAngle}
+                            placeholder={`${WIRE_ANGLE.min}–${WIRE_ANGLE.max}° — how steeply a SIDE wire climbs (blank = ${ELEMENT_WIRE_DEFAULTS.angle})`}
+                            onChange={e => { setWireAngle(e.target.value); patchWire('angle', e.target.value); }} />
                         </div>
                       )}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -2639,6 +2696,28 @@ export default function ManageElements() {
                           row above (PlacementZoneRow, gated by zoneShowsInsert). No global block. */}
                       {selectedEl?.image_url && !isGlb && (
                         <>
+                          {/* ⚠️ A PLACEMENT PROPERTY, NOT A CAPABILITY, so it lives here beside the
+                              fold rather than in the Capabilities list. Capabilities say what a
+                              CUSTOMER may do; this says how the piece stands.
+
+                              ⚠️ IT IS ABOUT RESTING FACING, NOT ABOUT THE TILT CONTROLS — which is
+                              a correction to what this comment first said. The billboard applies YAW
+                              ONLY, so Tilt, Roll and Spin all compose on top of it either way;
+                              sweeping spin with the flag on and off produces identical frames. What
+                              it decides is where a piece looks when nobody has turned it: on, every
+                              butterfly swivels to keep facing the viewer as the cake turns, where
+                              the reference photographs show a swarm facing every which way. */}
+                          <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}>
+                            <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={faceCamera}
+                              onChange={e => { const on = e.target.checked; setFaceCamera(on);
+                                patchPc({ billboard: on ? '' : false }); }} />
+                            <div>
+                              <div style={s.checkLabel}>Always faces the viewer</div>
+                              <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                                On (the default) the decal turns with the camera so its artwork is never seen edge-on — right for a flat sticker. Turn it OFF for a piece that should keep the facing it was placed with, like a butterfly on a wire, so a swarm faces every which way instead of all swivelling to follow the viewer.
+                              </div>
+                            </div>
+                          </label>
                           <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}>
                             <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={foldable}
                               onChange={e => { const on = e.target.checked; setFoldable(on);
