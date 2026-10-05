@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 // The SAME generator the designer would render, never a divergent copy — the rule ChocolateDripStudio
@@ -6,7 +7,7 @@ import { OrbitControls } from '@react-three/drei';
 // same reason: relief judged under brighter lights is simply the wrong relief, and relief is the
 // whole subject here.
 import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
-         creamMaterialProps } from '@spattoo/designer';
+         creamMaterialProps, grabOffset, dragStrokeTo } from '@spattoo/designer';
 
 // ── Brushstroke studio (POC) ─────────────────────────────────────────────────────────────────────
 //
@@ -56,14 +57,20 @@ const newStroke = (i) => ({
   width: BRUSH_ON_CAKE_DEFAULTS.width, weight: 0.7, seed: 1 + i * 7,
 });
 
-function Cake() {
+/* ⚠️ THE WALL IS THE DRAG SURFACE, not the stroke. A stroke dragged by raycasting ITSELF chases its
+   own moving geometry and accelerates away from the pointer; the cake is what the hand is really
+   moving against. The grab OFFSET is recorded at pointer-down and re-applied, so the point you took
+   hold of stays under the pointer — handleAt and dragTo as exact inverses (INVARIANTS #10 law 5). */
+function Cake({ onDragTo, onDragEnd }) {
   return (
     <group>
       <mesh position={[0, BOARD_H / 2, 0]} receiveShadow>
         <cylinderGeometry args={[BOARD_R, BOARD_R, BOARD_H, 64]} />
         <meshStandardMaterial color="#EDE7DA" roughness={0.85} />
       </mesh>
-      <mesh position={[0, BOARD_H + TIER_H / 2, 0]} castShadow receiveShadow>
+      <mesh position={[0, BOARD_H + TIER_H / 2, 0]} castShadow receiveShadow
+        onPointerMove={e => onDragTo(e.point)}
+        onPointerUp={onDragEnd}>
         <cylinderGeometry args={[R, R, TIER_H, 96]} />
         <meshStandardMaterial color="#FBF8F3" roughness={0.75} />
       </mesh>
@@ -71,19 +78,30 @@ function Cake() {
   );
 }
 
-function Stroke({ s }) {
+/* The drag maths lives in core (`grabOffset` / `dragStrokeTo`) and is tested there, because a studio
+   behind a login cannot be driven and the grab OFFSET is the half that can be wrong: without it the
+   stroke jumps to the pointer by however far the grabbed point was from its origin. */
+const WALL = { baseY: BOARD_H, wallH: TIER_H };
+
+function Stroke({ s, onGrab }) {
   const geo = useMemo(() => buildBrushStrokeOnWall({
     R, baseY: BOARD_H, wallH: TIER_H,
     path: gesturePath(s), width: s.width, weight: s.weight, seed: s.seed,
   }), [s.at, s.rise, s.sweep, s.climb, s.bow, s.width, s.weight, s.seed]);
   if (!geo) return null;
   return (
-    <mesh geometry={geo} castShadow receiveShadow>
+    <mesh geometry={geo} castShadow receiveShadow
+      onPointerDown={e => { e.stopPropagation(); onGrab(s, e.point); }}>
       {/* ⚠️ THE CREAM MATERIAL, NOT A LOCAL OPINION ABOUT CREAM. `creamMaterialProps` is what every
           piped stroke on every cake already uses — the calibrated albedo, the roughness curve and
           the sheen. A brushstroke IS buttercream, and a studio that mixed its own would be judging
           a colour and a finish no customer will ever see (INVARIANTS #15). */}
-      <meshPhysicalMaterial {...creamMaterialProps(0.7, s.color)} />
+      {/* DoubleSide because a painted layer's winding depends on which way the stroke happens to
+          run — the call CreamPen already makes for cream. polygonOffset because the thinnest film
+          sits almost on the wall and the depth buffer loses over a long grazing sweep, which is what
+          "breaking at extreme sweep" was. */}
+      <meshPhysicalMaterial side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1}
+        polygonOffsetUnits={-1} {...creamMaterialProps(0.7, s.color)} />
     </mesh>
   );
 }
@@ -93,14 +111,16 @@ function Stroke({ s }) {
    *"thinkness need to be a controlling nob"*. A baker reaching for this is thinking about how thick
    the cream is, not about how loaded the knife was. The geometry keeps `weight` as its parameter
    name because that is what it does to the relief profile; the LABEL is the baker's word. */
+/* ⚠️ ROUND AND HEIGHT ARE NOT SLIDERS ANY MORE. Sandeep: *"round and height need to be done with
+   dragging."* Where a stroke SITS is a thing you point at — two sliders for one position is the
+   control-and-effect split INVARIANTS #11 is about, and you cannot aim with them. Everything left
+   here changes the stroke's SHAPE, which a slider is right for. */
 const FIELDS = [
   ['width',  'Width',     0.08, 0.6,  0.01],
   ['weight', 'Thickness', 0,    1,    0.02],
   ['sweep',  'Sweep',     0.03, 0.4,  0.01],
   ['climb',  'Climb',    -0.4,  0.4,  0.01],
   ['bow',    'Bow',      -0.2,  0.2,  0.01],
-  ['at',     'Round',     0,    1,    0.01],
-  ['rise',   'Height',    0.05, 0.9,  0.01],
 ];
 
 export default function BrushStrokeStudio() {
@@ -109,16 +129,33 @@ export default function BrushStrokeStudio() {
   const cur = strokes[Math.min(sel, strokes.length - 1)];
   const patch = p => setStrokes(list => list.map((s, i) => (i === sel ? { ...s, ...p } : s)));
 
+  /* The grab: which stroke, and how far its origin was from the point taken hold of. A ref rather
+     than state — it is read inside a pointermove that was captured when the drag began. */
+  const grab = useRef(null);
+  const onGrab = (st, point) => {
+    setSel(strokes.findIndex(x => x.id === st.id));
+    grab.current = { id: st.id, ...grabOffset(st, point, WALL) };
+  };
+  const onDragTo = (point) => {
+    const g = grab.current;
+    if (!g) return;
+    const next = dragStrokeTo(g, point, WALL);
+    setStrokes(list => list.map(st => (st.id === g.id ? { ...st, ...next } : st)));
+  };
+  const onDragEnd = () => { grab.current = null; };
+
   return (
     <div style={s.wrap}>
       <div style={s.stage}>
-        <Canvas shadows camera={{ position: [0, 1.5, 4.2], fov: 38 }} gl={{ antialias: true }}>
+        <Canvas shadows camera={{ position: [0, 1.5, 4.2], fov: 38 }} gl={{ antialias: true }}
+          onPointerMissed={onDragEnd} onPointerUp={onDragEnd}>
           <color attach="background" args={['#eceaf3']} />
           <SceneLights />
           <SceneEnv />
-          <Cake />
-          {strokes.map(st => <Stroke key={st.id} s={st} />)}
-          <OrbitControls target={[0, BOARD_H + TIER_H * 0.5, 0]} enablePan={false} />
+          <Cake onDragTo={onDragTo} onDragEnd={onDragEnd} />
+          {strokes.map(st => <Stroke key={st.id} s={st} onGrab={onGrab} />)}
+          {/* Orbit stands down while a stroke is in hand, or the cake spins out from under it. */}
+          <OrbitControls makeDefault enabled={!grab.current} target={[0, BOARD_H + TIER_H * 0.5, 0]} enablePan={false} />
         </Canvas>
       </div>
 
@@ -129,6 +166,7 @@ export default function BrushStrokeStudio() {
           top of its range the edges stand proud and cast a shadow, at the bottom the stroke should
           merge into the cake with no relief at all — and still be there. Every stroke tears and
           releases at its own width; <b>Shuffle</b> rolls another.
+          <br /><b>Drag a stroke on the cake</b> to place it; the sliders only change its shape.
         </p>
 
         <div style={s.rowWrap}>
