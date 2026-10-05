@@ -85,14 +85,19 @@ function Stroke({ s }) {
   );
 }
 
+/* ⚠️ "THICKNESS", NOT "WEIGHT". It is the same number — how much cream the knife left — and Sandeep
+   has called it thickness every time: *"if its a thick stroke edges have elevation"*, then
+   *"thinkness need to be a controlling nob"*. A baker reaching for this is thinking about how thick
+   the cream is, not about how loaded the knife was. The geometry keeps `weight` as its parameter
+   name because that is what it does to the relief profile; the LABEL is the baker's word. */
 const FIELDS = [
-  ['width',  'Width',   0.08, 0.6,  0.01],
-  ['weight', 'Weight',  0,    1,    0.02],
-  ['sweep',  'Sweep',   0.03, 0.4,  0.01],
-  ['climb',  'Climb',  -0.4,  0.4,  0.01],
-  ['bow',    'Bow',    -0.2,  0.2,  0.01],
-  ['at',     'Round',   0,    1,    0.01],
-  ['rise',   'Height',  0.05, 0.9,  0.01],
+  ['width',  'Width',     0.08, 0.6,  0.01],
+  ['weight', 'Thickness', 0,    1,    0.02],
+  ['sweep',  'Sweep',     0.03, 0.4,  0.01],
+  ['climb',  'Climb',    -0.4,  0.4,  0.01],
+  ['bow',    'Bow',      -0.2,  0.2,  0.01],
+  ['at',     'Round',     0,    1,    0.01],
+  ['rise',   'Height',    0.05, 0.9,  0.01],
 ];
 
 export default function BrushStrokeStudio() {
@@ -117,9 +122,10 @@ export default function BrushStrokeStudio() {
       <div style={s.panel}>
         <h2 style={s.h2}>Brushstroke studio</h2>
         <p style={s.note}>
-          Broad buttercream strokes painted on the wall. <b>Weight</b> is the one to judge: at the top
-          of its range the edges stand proud and cast a shadow, at the bottom the stroke should merge
-          into the cake with no relief at all — and still be there.
+          Broad buttercream strokes painted on the wall. <b>Thickness</b> is the one to judge: at the
+          top of its range the edges stand proud and cast a shadow, at the bottom the stroke should
+          merge into the cake with no relief at all — and still be there. Every stroke tears and
+          releases at its own width; <b>Shuffle</b> rolls another.
         </p>
 
         <div style={s.rowWrap}>
