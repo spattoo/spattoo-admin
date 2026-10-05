@@ -8,7 +8,7 @@ import { OrbitControls } from '@react-three/drei';
 // whole subject here.
 import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
          creamMaterialProps, grabOffset, dragStrokeTo, paintBrushColors,
-         brushGesture } from '@spattoo/designer';
+         brushGesture, makeBrushBed } from '@spattoo/designer';
 
 // ── Brushstroke studio (POC) ─────────────────────────────────────────────────────────────────────
 //
@@ -81,17 +81,18 @@ function Cake({ onDragTo, onDragEnd }) {
    stroke jumps to the pointer by however far the grabbed point was from its origin. */
 const WALL = { baseY: BOARD_H, wallH: TIER_H };
 
-/* ⚠️ `layer` IS THE ORDER THEY WERE PAINTED IN, and overlapping is the point rather than a hazard.
-   Sandeep: *"when i keep brush strokes side by side, we should allow overlaps. this is an important
-   thing to make the final output look real."* Nothing ever stopped two strokes sharing ground; what
-   was missing was which of them is on top. Without it they interpenetrate and z-fight, which is not
-   "over" — it is two surfaces arguing. */
-function Stroke({ s, layer, onGrab }) {
+/* ⚠️ THE BED IS WHAT MAKES AN OVERLAP LOOK LAID RATHER THAN STACKED. Each stroke reads the cream
+   already on the wall and rides on it exactly where that cream is, then stamps itself in for the
+   next one — so a neighbour's ridge is covered rather than punched through, and a stroke with
+   nothing under it still lies flat. Lifting a whole stroke by its place in the order did both
+   wrongly at once, and Sandeep saw it: *"the part that coming out from the other strip is elevated
+   high."* */
+function Stroke({ s, bed, onGrab }) {
   const geo = useMemo(() => buildBrushStrokeOnWall({
-    R, baseY: BOARD_H, wallH: TIER_H, layer,
+    R, baseY: BOARD_H, wallH: TIER_H, bed,
     path: brushGesture({ at: s.at, rise: s.rise, climb: s.climb, sweep: s.sweep, bow: s.bow, seed: s.seed }),
     width: s.width, weight: s.weight, seed: s.seed,
-  }), [s.at, s.rise, s.sweep, s.climb, s.bow, s.width, s.weight, s.seed, layer]);
+  }), [s.at, s.rise, s.sweep, s.climb, s.bow, s.width, s.weight, s.seed, bed]);
   /* ⚠️ THIN CREAM LETS THE CAKE THROUGH, and that is most of what says buttercream rather than
      vinyl — it took a photograph of a real cake to see it. Saturated where the knife piled up,
      washing toward the wall's colour where it ran dry. */
@@ -137,6 +138,11 @@ export default function BrushStrokeStudio() {
   const cur = strokes[Math.min(sel, strokes.length - 1)];
   const patch = p => setStrokes(list => list.map((s, i) => (i === sel ? { ...s, ...p } : s)));
 
+  /* ⚠️ REBUILT WHENEVER ANYTHING MOVES, because the bed is an ACCUMULATION: drag a stroke and the
+     cream it had laid would still be recorded where it used to be. Cheap — it is one typed array,
+     and the strokes fill it in render order, each one reading what the ones before it laid down. */
+  const bed = useMemo(() => makeBrushBed({ R, wallH: TIER_H }), [JSON.stringify(strokes)]);
+
   /* The grab: which stroke, and how far its origin was from the point taken hold of. A ref rather
      than state — it is read inside a pointermove that was captured when the drag began. */
   const grab = useRef(null);
@@ -161,7 +167,7 @@ export default function BrushStrokeStudio() {
           <SceneLights />
           <SceneEnv />
           <Cake onDragTo={onDragTo} onDragEnd={onDragEnd} />
-          {strokes.map((st, i) => <Stroke key={st.id} s={st} layer={i} onGrab={onGrab} />)}
+          {strokes.map(st => <Stroke key={st.id} s={st} bed={bed} onGrab={onGrab} />)}
           {/* Orbit stands down while a stroke is in hand, or the cake spins out from under it. */}
           <OrbitControls makeDefault enabled={!grab.current} target={[0, BOARD_H + TIER_H * 0.5, 0]} enablePan={false} />
         </Canvas>
