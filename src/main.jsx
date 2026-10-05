@@ -62,6 +62,7 @@ const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx
 const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
 const RainbowStudio         = lazy(() => import('./admin/RainbowStudio.jsx'));
 const CloudStudio           = lazy(() => import('./admin/CloudStudio.jsx'));
+const BrushStrokeStudio     = lazy(() => import('./admin/BrushStrokeStudio.jsx'));
 const FondantStudio         = lazy(() => import('./admin/FondantStudio.jsx'));
 const LetterBlocksStudio    = lazy(() => import('./admin/LetterBlocksStudio.jsx'));
 const GlazeStudio           = lazy(() => import('./admin/GlazeStudio.jsx'));
@@ -138,6 +139,7 @@ const ROUTES = {
   '/elements/grass':             GrassStudio,
   '/elements/rainbow':           RainbowStudio,
   '/elements/cloud':             CloudStudio,
+  '/elements/brush-stroke':      BrushStrokeStudio,
   '/elements/fondant':           FondantStudio,
   '/elements/letter-blocks':     LetterBlocksStudio,
   '/elements/glaze':             GlazeStudio,
@@ -194,6 +196,11 @@ const NAV_GROUPS = [
     { href: '/elements/grass',          label: 'Grass' },
     { href: '/elements/rainbow',        label: 'Rainbow' },
     { href: '/elements/cloud',          label: 'Cloud' },
+    /* ⚠️ A POC GETS A DOOR, NOT A URL IN A CHAT MESSAGE. Sandeep, after a day of dev/ harnesses:
+       *"if tomorrow i want to visit it, i wont have this url. any poc we do should have entry in
+       editors menu in admin."* This list is also what the /editors tiles page renders from, so one
+       entry is both. */
+    { href: '/elements/brush-stroke',   label: 'Brushstroke' },
     { href: '/elements/fondant',        label: 'Fondant Studio' },
     { href: '/elements/letter-blocks',  label: 'Letter Blocks' },
     { href: '/elements/glaze',          label: 'Glaze Studio' },
