@@ -45,7 +45,24 @@ const CAKE_COLOR = '#FBF8F3';   // what a thin stroke washes toward — the wall
    them reading as a fence. Authored as a gesture rather than a point list so a stroke stays the same
    stroke on a bigger tier. */
 
-const SWATCHES = ['#F6DCE2', '#8EC5E8', '#F4C542', '#E8788F', '#B79CE0', '#FFFFFF', '#3FAE8E', '#2C2C2C'];
+/* ⚠️ EVERY HUE HAS A DEEP TONE, and until now none of them did. Seven pastels and one near-black,
+   so the only way to get anything dark on a cake was to go achromatic — Sandeep, after the sheen bug
+   was fixed and the render was still pale: *"you fixed the bug but still there is no dark version of
+   any color."* Two different faults wearing the same symptom, and fixing the first one is what made
+   the second one visible.
+   Paired light/deep down the columns, so the row a swatch is in says which it is. A deep tone is NOT
+   the pastel darkened — buttercream deepens by losing white rather than by losing light, so the
+   bottom row is more saturated as well as darker, which is what the colour actually does in a bowl. */
+const HUES = [
+  ['#F6DCE2', '#B24A63'],   // blush   → deep rose
+  ['#8EC5E8', '#2E5C8A'],   // sky     → navy
+  ['#F4C542', '#A9741A'],   // gold    → amber
+  ['#E8788F', '#8E2740'],   // rose    → crimson
+  ['#B79CE0', '#53348F'],   // lilac   → violet
+  ['#3FAE8E', '#1C5B49'],   // mint    → forest
+  ['#FFFFFF', '#2C2C2C'],   // white   → charcoal
+];
+const SWATCHES = HUES.flat();
 let nextId = 1;
 const newStroke = (i) => ({
   id: nextId++,
@@ -153,6 +170,24 @@ function Band({ palette, count, shape }) {
         polygonOffsetUnits={-1} {...creamMaterialProps(0.7, part.color)} color="#ffffff" vertexColors />
     </mesh>
   ));
+}
+
+/* The colours on offer, light over deep, shared by both modes — one component rather than the two
+   copies this screen had, which is how one of them ended up with a different set from the other. */
+function Swatches({ value, onPick }) {
+  return (
+    <div style={s.swGrid}>
+      {HUES.map(([light, deep]) => (
+        <div key={light} style={s.swCol}>
+          {[light, deep].map(c => (
+            <button key={c} onClick={() => onPick(c)} title={c}
+              style={{ ...s.sw, background: c,
+                       outline: value === c ? '2.5px solid #3D5A44' : '1px solid #ccc' }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 const BAND_FIELDS = [
@@ -283,13 +318,8 @@ export default function BrushStrokeStudio() {
               )}
             </div>
 
-            <div style={s.swatches}>
-              {SWATCHES.map(c => (
-                <button key={c} onClick={() => setPalette(p => p.map((x, j) => (j === slot ? c : x)))} title={c}
-                  style={{ ...s.sw, background: c,
-                           outline: palette[slot] === c ? '2.5px solid #3D5A44' : '1px solid #ccc' }} />
-              ))}
-            </div>
+            <Swatches value={palette[slot]}
+              onPick={c => setPalette(p => p.map((x, j) => (j === slot ? c : x)))} />
 
             {BAND_FIELDS.map(([k, label, min, max, step]) => (
               <label key={k} style={s.field}>
@@ -330,12 +360,7 @@ export default function BrushStrokeStudio() {
           )}
         </div>
 
-        <div style={s.swatches}>
-          {SWATCHES.map(c => (
-            <button key={c} onClick={() => patch({ color: c })} title={c}
-              style={{ ...s.sw, background: c, outline: cur.color === c ? '2.5px solid #3D5A44' : '1px solid #ccc' }} />
-          ))}
-        </div>
+        <Swatches value={cur.color} onPick={c => patch({ color: c })} />
 
         {FIELDS.map(([k, label, min, max, step]) => (
           <label key={k} style={s.field}>
@@ -368,6 +393,8 @@ const s = {
   add:    { width: 26, height: 26, borderRadius: '50%', border: '1.5px dashed #C5D4C8', background: '#fff', cursor: 'pointer', fontWeight: 700 },
   del:    { marginLeft: 'auto', fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1.5px solid #e4b7bf', background: '#fff6f7', color: '#b4545f', cursor: 'pointer', fontWeight: 700 },
   swatches:{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 },
+  swGrid: { display: 'flex', gap: 6, marginBottom: 12 },
+  swCol:  { display: 'flex', flexDirection: 'column', gap: 5 },
   sw:     { width: 22, height: 22, borderRadius: '50%', border: 'none', cursor: 'pointer' },
   field:  { display: 'block', marginBottom: 8 },
   lab:    { display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 700, marginBottom: 2 },
