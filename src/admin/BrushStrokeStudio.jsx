@@ -7,7 +7,8 @@ import { OrbitControls } from '@react-three/drei';
 // same reason: relief judged under brighter lights is simply the wrong relief, and relief is the
 // whole subject here.
 import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
-         creamMaterialProps, grabOffset, dragStrokeTo, paintBrushColors } from '@spattoo/designer';
+         creamMaterialProps, grabOffset, dragStrokeTo, paintBrushColors,
+         brushGesture } from '@spattoo/designer';
 
 // ── Brushstroke studio (POC) ─────────────────────────────────────────────────────────────────────
 //
@@ -36,18 +37,12 @@ import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
 const R = 1, TIER_H = 1.25, BOARD_R = 1.5, BOARD_H = 0.07;
 const CAKE_COLOR = '#FBF8F3';   // what a thin stroke washes toward — the wall it is painted on
 
-/* A stroke is authored as a GESTURE, not as a list of points: where it starts round the cake, how
-   far it sweeps, how much it climbs, and how much it bows. That is what a hand does — and it means a
-   stroke stays the same stroke on a bigger tier, which a point list never would. */
-function gesturePath({ at, rise, sweep, climb, bow }) {
-  const n = 14, out = [];
-  for (let i = 0; i < n; i++) {
-    const t = i / (n - 1);
-    const arc = Math.sin(Math.PI * t) * bow;          // the bow pushes the middle up
-    out.push([at + sweep * t, Math.min(0.98, Math.max(0.02, rise + climb * t + arc))]);
-  }
-  return out;
-}
+/* ⚠️ THE GESTURE COMES FROM CORE, not from a copy here. `brushGesture` knows what a hand does — it
+   starts the pull at the BASE, where a knife lands and where strokes merge into one another, and
+   runs each one out at its own height, because in a photograph of a real cake a short stubby stroke
+   sits beside one reaching two thirds up the wall and that unevenness is most of what stops a row of
+   them reading as a fence. Authored as a gesture rather than a point list so a stroke stays the same
+   stroke on a bigger tier. */
 
 const SWATCHES = ['#F6DCE2', '#8EC5E8', '#F4C542', '#E8788F', '#B79CE0', '#FFFFFF', '#3FAE8E', '#2C2C2C'];
 let nextId = 1;
@@ -56,7 +51,7 @@ const newStroke = (i) => ({
   color: SWATCHES[i % SWATCHES.length],
   /* Close enough together that they OVERLAP — a baker does not leave a white gap between strokes,
      and the overlaps are most of what stops a row of them reading as stripes on wallpaper. */
-  at: 0.47 + i * 0.03, rise: 0.2, sweep: 0.015, climb: 0.5, bow: 0.01,
+  at: 0.47 + i * 0.028, rise: 0.02, sweep: 0.015, climb: 0.52, bow: 0.012,
   width: BRUSH_ON_CAKE_DEFAULTS.width, weight: 0.7, seed: 1 + i * 7,
 });
 
@@ -94,7 +89,8 @@ const WALL = { baseY: BOARD_H, wallH: TIER_H };
 function Stroke({ s, layer, onGrab }) {
   const geo = useMemo(() => buildBrushStrokeOnWall({
     R, baseY: BOARD_H, wallH: TIER_H, layer,
-    path: gesturePath(s), width: s.width, weight: s.weight, seed: s.seed,
+    path: brushGesture({ at: s.at, rise: s.rise, climb: s.climb, sweep: s.sweep, bow: s.bow, seed: s.seed }),
+    width: s.width, weight: s.weight, seed: s.seed,
   }), [s.at, s.rise, s.sweep, s.climb, s.bow, s.width, s.weight, s.seed, layer]);
   /* ⚠️ THIN CREAM LETS THE CAKE THROUGH, and that is most of what says buttercream rather than
      vinyl — it took a photograph of a real cake to see it. Saturated where the knife piled up,
@@ -130,8 +126,8 @@ function Stroke({ s, layer, onGrab }) {
 const FIELDS = [
   ['width',  'Width',     0.08, 0.6,  0.01],
   ['weight', 'Thickness', 0,    1,    0.02],
-  ['sweep',  'Sweep',     0.03, 0.4,  0.01],
-  ['climb',  'Climb',    -0.4,  0.4,  0.01],
+  ['sweep',  'Sweep',     0.00, 0.3,  0.005],
+  ['climb',  'Length',    0.15, 0.9,  0.01],
   ['bow',    'Bow',      -0.2,  0.2,  0.01],
 ];
 
