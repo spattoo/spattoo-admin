@@ -134,19 +134,25 @@ function Stroke({ s, bed, onGrab }) {
  * the far side of the cake. The readout shows what was actually laid, not what was asked for.
  */
 function Band({ palette, count, shape }) {
-  const geo = useMemo(() => buildBrushBand({
+  const parts = useMemo(() => buildBrushBand({
     R, baseY: BOARD_H, wallH: TIER_H, under: CAKE_COLOR,
     colors: palette, count, seed: shape.seed,
     weight: shape.weight, sweep: shape.sweep, climb: shape.climb, bow: shape.bow,
     overlap: shape.overlap,
   }), [palette.join(), count, shape.seed, shape.weight, shape.sweep, shape.climb, shape.bow, shape.overlap]);
-  if (!geo) return null;
-  return (
-    <mesh geometry={geo} castShadow receiveShadow>
+  if (!parts.length) return null;
+  /* ⚠️ ONE MATERIAL PER COLOUR, which is why the band comes back in parts rather than as one mesh.
+     `creamMaterialProps` takes its SHEEN from the cream's own colour, because that is what cream
+     does; one material for the lot puts a white sheen over a charcoal stroke and renders it the
+     colour of wet concrete. `color="#ffffff"` because the albedo is already in the vertex colours —
+     the per-vertex wash at a thin edge is something no material can say — but sheen and roughness
+     come from the real colour. Two to six draw calls for a tier, not one; still nothing. */
+  return parts.map(part => (
+    <mesh key={part.color} geometry={part.geometry} castShadow receiveShadow>
       <meshPhysicalMaterial side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1}
-        polygonOffsetUnits={-1} {...creamMaterialProps(0.7, '#ffffff')} color="#ffffff" vertexColors />
+        polygonOffsetUnits={-1} {...creamMaterialProps(0.7, part.color)} color="#ffffff" vertexColors />
     </mesh>
-  );
+  ));
 }
 
 const BAND_FIELDS = [
