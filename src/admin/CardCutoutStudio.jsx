@@ -546,10 +546,11 @@ export default function CardCutoutStudio() {
               — sixty percent more fill and no IBL at all — so every colour judged here was judged
               under a light no cake has ever had. The Cloud, Grass and Relief Sticker studios already
               mount these two for the same reason.
-              ⚠️ It is still not the customer's scene: admin never calls `configureEnvMap`, so
-              SceneEnv falls back to drei's INDOOR apartment preset while every deployed cake uses
-              the self-hosted OUTDOOR map. envProps warns about it in the console. Matching the LAMPS
-              is worth having on its own; matching the environment is a separate, wider fix. */}
+              ⚠️ The environment is the customer's too, as of `src/scene.js` — which is the "separate,
+              wider fix" this note used to promise. admin now calls `configureEnvMap`, so SceneEnv
+              gets the self-hosted OUTDOOR map rather than falling back to drei's indoor preset.
+              Deployed admin still needs VITE_ASSETS_BASE; without it the fallback returns, and
+              envProps says so in the console rather than letting it pass unnoticed. */}
           <SceneLights shadows />
           <SceneEnv />
           {/* ⚠️ THE DESIGNER'S OWN GROUND, and picking a nicer one is a trap I already fell into.

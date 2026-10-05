@@ -219,10 +219,9 @@ export default function TopEdgeStudio() {
           {/* ⚠️ THE DESIGNER'S OWN RIG AND GROUND, not a hand-rolled pair. A finish judged under a
               light no cake has ever had is a judgement about the wrong variable (INVARIANTS #17),
               and core sets its ground as a scene BACKGROUND, so it is in the render rather than
-              being a colour painted behind a transparent canvas. CardCutoutStudio's note applies
-              here too: admin never calls `configureEnvMap`, so SceneEnv falls back to drei's indoor
-              apartment preset while deployed cakes use the self-hosted outdoor map. Matching the
-              lamps is worth having on its own; the environment is a separate, wider fix. */}
+              being a colour painted behind a transparent canvas. The environment matches as well
+              now — `src/scene.js` configures the assets base, so SceneEnv gets the self-hosted
+              outdoor map rather than drei's indoor preset. */}
           <SceneLights shadows />
           <SceneEnv />
           <SceneBackground colour={DESIGNER_GROUND} />

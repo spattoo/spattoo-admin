@@ -804,9 +804,9 @@ export default function ManeStudio() {
             : { position: [0, TOP_Y * 0.62, 3.6], fov: 34 }}
           gl={{ preserveDrawingBuffer: true }} style={{ position: 'absolute', inset: 0 }}>
           {/* ⚠️ THE DESIGNER'S OWN RIG AND GROUND (INVARIANTS #17). Cream judged under a light no
-              cake has had is a judgement about the wrong variable. CardCutoutStudio's caveat applies
-              here too: admin never calls `configureEnvMap`, so SceneEnv falls back to drei's indoor
-              preset while deployed cakes use the self-hosted outdoor map. */}
+              cake has had is a judgement about the wrong variable. The environment matches too now —
+              `src/scene.js` configures the assets base, so SceneEnv gets the self-hosted outdoor map
+              instead of drei's indoor preset. */}
           <SceneLights shadows />
           <SceneEnv />
           <SceneBackground colour={DESIGNER_GROUND} />

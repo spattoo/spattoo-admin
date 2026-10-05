@@ -10,6 +10,9 @@ import ReactDOM from 'react-dom/client';
 // font — the library's warnIfFontsMissing() will say so in the console.
 import '@fontsource-variable/quicksand';
 import '@fontsource/playfair-display/700.css';
+/* Lights every studio the way production lights a cake — one side-effect import, because the thing
+   that was missing is global. See the file; it is the admin twin of spattoo-core's dev/scene.js. */
+import './scene.js';
 import { supabase } from './lib/supabase.js';
 import Login from './auth/Login.jsx';
 import logo from './images/spattoo-green.png';
