@@ -164,7 +164,11 @@ export default function BrushStrokeStudio() {
         <Canvas shadows camera={{ position: [0, 1.5, 4.2], fov: 38 }} gl={{ antialias: true }}
           onPointerMissed={onDragEnd} onPointerUp={onDragEnd}>
           <color attach="background" args={['#eceaf3']} />
-          <SceneLights />
+          {/* ⚠️ `shadows`, BECAUSE A STUDIO IS LIT LIKE THE CAKE IT AUTHORS FOR (INVARIANTS #17).
+              SceneLights defaults it off; the live designer mounts it on. A studio whose whole
+              subject is how proud the cream stands cannot be the one place the height cue is
+              missing. */}
+          <SceneLights shadows />
           <SceneEnv />
           <Cake onDragTo={onDragTo} onDragEnd={onDragEnd} />
           {strokes.map(st => <Stroke key={st.id} s={st} bed={bed} onGrab={onGrab} />)}
