@@ -712,8 +712,9 @@ export default function AddElement() {
           builtPlacementConfig.bottom_flip = pipingBottomFlip;
           // Flexible out of the box: both layouts allowed, default ring. Admins refine
           // allowed/default per zone in Manage Elements. See spattoo-core designer.
-          builtPlacementConfig.top_arrangements_allowed    = ['ring', 'single'];
-          builtPlacementConfig.bottom_arrangements_allowed = ['ring', 'single'];
+          // `single` is retired — see ManageElements' ARRANGEMENT_MODES and core's pipingLayer.js.
+          builtPlacementConfig.top_arrangements_allowed    = ['ring'];
+          builtPlacementConfig.bottom_arrangements_allowed = ['ring'];
           builtPlacementConfig.top_arrangement    = 'ring';
           builtPlacementConfig.bottom_arrangement = 'ring';
           // single_angle omitted → designer seeds the first piece at the cake front.

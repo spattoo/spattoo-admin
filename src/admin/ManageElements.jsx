@@ -23,6 +23,12 @@ import { serializeZone, zoneValueMode, zoneValueSeat, zoneValueAlt, zoneAltMode,
 import PlacementZoneRow from './PlacementZoneRow.jsx';
 import ElementPreviewPanel from './ElementPreviewPanel.jsx';
 
+/* What a staff member may author as an arrangement. `single` placed pieces on the ring's own track
+   by angle; hand-piping covers the same ground with more freedom and less precision, and keeping two
+   ways to put one rosette on a rim was a choice nobody benefited from. Core's
+   OFFERED_ARRANGEMENTS is the matching half — this list must never be wider than that one. */
+const ARRANGEMENT_MODES = ['ring'];
+
 const CAKE_ZONES = [
   { value: 'top_surface', label: 'Top Surface' },
   { value: 'side',        label: 'Side' },
@@ -71,8 +77,8 @@ const DEFAULT_PIPING_PLACEMENT_CONFIG = {
   // New piping elements are flexible out of the box (ring + single). The designer shows
   // a Ring/Single toggle only when a zone allows both; the user can duplicate single
   // pieces and rotate each around the cake (single_angle = first piece, single_max = cap).
-  top_arrangements_allowed:    ['ring', 'single'],
-  bottom_arrangements_allowed: ['ring', 'single'],
+  top_arrangements_allowed:    ['ring'],
+  bottom_arrangements_allowed: ['ring'],
   top_arrangement:             'ring',
   bottom_arrangement:          'ring',
   // single_angle omitted on purpose → the designer seeds the first piece at the cake
@@ -951,7 +957,7 @@ export default function ManageElements() {
     if (!ns) return;
     setFullRingConfig(c => ({ ...c, [zone]: on }));
     patchPc(on
-      ? { [`${ns}_ring_finish`]: 'element', [`${ns}_arrangement`]: 'ring', [`${ns}_arrangements_allowed`]: ['ring', 'single'] }
+      ? { [`${ns}_ring_finish`]: 'element', [`${ns}_arrangement`]: 'ring', [`${ns}_arrangements_allowed`]: ['ring'] }
       : { [`${ns}_ring_finish`]: null, [`${ns}_arrangement`]: null, [`${ns}_arrangements_allowed`]: null });
   }
   // Write a zone's mode + seat + insert modifier back into all three control maps AND the
@@ -1549,6 +1555,14 @@ export default function ManageElements() {
           const allowedKey = `${prefix}_arrangements_allowed`;
           const allowed = Array.isArray(pc[allowedKey]) && pc[allowedKey].length ? pc[allowedKey] : ['ring'];
           const def = allowed.includes(pc[`${prefix}_arrangement`]) ? pc[`${prefix}_arrangement`] : allowed[0];
+          /* ⚠️ `single` IS RETIRED AND STILL STORED. Sandeep: *"single option is no more needed since
+             user can do it using hand piping... we need to remove it from admin (manage elements).
+             so staff wont select single option."* Core stopped OFFERING it (see
+             pipingLayer.js's OFFERED_ARRANGEMENTS); this stops it being authored.
+             ⚠️ THE CANONICAL-ORDER LINE BELOW STILL NAMES BOTH, DELIBERATELY. Ten elements carry
+             `single` in this array and four catalogue templates are built on it — a staff member
+             toggling Ring on an existing row must not quietly drop the other value on the way
+             through. Hidden from the choice, preserved in the data. */
           const toggleMode = (mode) => {
             const has = allowed.includes(mode);
             let next = has ? allowed.filter(m => m !== mode) : [...allowed, mode];
@@ -1562,7 +1576,7 @@ export default function ManageElements() {
             <div key={prefix} style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e2ebe3' }}>
               <div style={{ fontSize: 11, color: '#3D5A44', fontWeight: 700, fontFamily: "'Quicksand',sans-serif", marginBottom: 6 }}>{label} arrangement</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {['ring', 'single'].map(mode => {
+                {ARRANGEMENT_MODES.map(mode => {
                   const on = allowed.includes(mode);
                   return (
                     <button key={mode} onClick={() => toggleMode(mode)}
@@ -1572,11 +1586,12 @@ export default function ManageElements() {
                   );
                 })}
               </div>
-              {/* Default only matters when the user can switch (both allowed) */}
-              {allowed.length > 1 && (
+              {/* Default only matters when the user can switch — counted over what is OFFERED, not
+                  what is stored: a row still carrying a retired `single` has one real choice. */}
+              {allowed.filter(m => ARRANGEMENT_MODES.includes(m)).length > 1 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                   <span style={{ fontSize: 11, color: '#6B8C74', fontWeight: 600, fontFamily: "'Quicksand',sans-serif" }}>Default</span>
-                  {allowed.map(mode => {
+                  {allowed.filter(m => ARRANGEMENT_MODES.includes(m)).map(mode => {
                     const on = def === mode;
                     return (
                       <button key={mode} onClick={() => updatePc({ [`${prefix}_arrangement`]: mode })}
