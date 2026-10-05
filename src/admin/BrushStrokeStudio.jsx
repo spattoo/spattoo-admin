@@ -51,8 +51,13 @@ const newStroke = (i) => ({
   id: nextId++,
   color: SWATCHES[i % SWATCHES.length],
   /* Close enough together that they OVERLAP — a baker does not leave a white gap between strokes,
-     and the overlaps are most of what stops a row of them reading as stripes on wallpaper. */
-  at: 0.47 + i * 0.028, rise: 0.02, sweep: 0.015, climb: 0.52, bow: 0.012,
+     and the overlaps are most of what stops a row of them reading as stripes on wallpaper.
+     ⚠️ AND IN FRONT OF THE CAMERA. `at` is TURNS round the tier, so 0.47 is very nearly half a
+     turn: the three strokes were laid on the far side and this screen opened on a bare white
+     cylinder. Everything worked — the chips, the swatches, the sliders — against geometry nobody
+     could see, which is how it reached Sandeep as *"i cant change colors in brushstroke studio."*
+     The camera sits on +Z and `place` puts turn 0 there, so the set is centred on 0. */
+  at: -0.028 + i * 0.028, rise: 0.02, sweep: 0.015, climb: 0.52, bow: 0.012,
   width: BRUSH_ON_CAKE_DEFAULTS.width, weight: 0.7, seed: 1 + i * 7,
 });
 
