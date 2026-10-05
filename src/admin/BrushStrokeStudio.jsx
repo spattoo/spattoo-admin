@@ -53,7 +53,9 @@ let nextId = 1;
 const newStroke = (i) => ({
   id: nextId++,
   color: SWATCHES[i % SWATCHES.length],
-  at: (i * 0.17) % 1, rise: 0.22 + (i % 3) * 0.16, sweep: 0.13, climb: 0.1, bow: 0.04,
+  /* Close enough together that they OVERLAP — a baker does not leave a white gap between strokes,
+     and the overlaps are most of what stops a row of them reading as stripes on wallpaper. */
+  at: 0.47 + i * 0.03, rise: 0.2, sweep: 0.015, climb: 0.5, bow: 0.01,
   width: BRUSH_ON_CAKE_DEFAULTS.width, weight: 0.7, seed: 1 + i * 7,
 });
 
@@ -83,11 +85,16 @@ function Cake({ onDragTo, onDragEnd }) {
    stroke jumps to the pointer by however far the grabbed point was from its origin. */
 const WALL = { baseY: BOARD_H, wallH: TIER_H };
 
-function Stroke({ s, onGrab }) {
+/* ⚠️ `layer` IS THE ORDER THEY WERE PAINTED IN, and overlapping is the point rather than a hazard.
+   Sandeep: *"when i keep brush strokes side by side, we should allow overlaps. this is an important
+   thing to make the final output look real."* Nothing ever stopped two strokes sharing ground; what
+   was missing was which of them is on top. Without it they interpenetrate and z-fight, which is not
+   "over" — it is two surfaces arguing. */
+function Stroke({ s, layer, onGrab }) {
   const geo = useMemo(() => buildBrushStrokeOnWall({
-    R, baseY: BOARD_H, wallH: TIER_H,
+    R, baseY: BOARD_H, wallH: TIER_H, layer,
     path: gesturePath(s), width: s.width, weight: s.weight, seed: s.seed,
-  }), [s.at, s.rise, s.sweep, s.climb, s.bow, s.width, s.weight, s.seed]);
+  }), [s.at, s.rise, s.sweep, s.climb, s.bow, s.width, s.weight, s.seed, layer]);
   if (!geo) return null;
   return (
     <mesh geometry={geo} castShadow receiveShadow
@@ -153,7 +160,7 @@ export default function BrushStrokeStudio() {
           <SceneLights />
           <SceneEnv />
           <Cake onDragTo={onDragTo} onDragEnd={onDragEnd} />
-          {strokes.map(st => <Stroke key={st.id} s={st} onGrab={onGrab} />)}
+          {strokes.map((st, i) => <Stroke key={st.id} s={st} layer={i} onGrab={onGrab} />)}
           {/* Orbit stands down while a stroke is in hand, or the cake spins out from under it. */}
           <OrbitControls makeDefault enabled={!grab.current} target={[0, BOARD_H + TIER_H * 0.5, 0]} enablePan={false} />
         </Canvas>
@@ -167,6 +174,7 @@ export default function BrushStrokeStudio() {
           merge into the cake with no relief at all — and still be there. Every stroke tears and
           releases at its own width; <b>Shuffle</b> rolls another.
           <br /><b>Drag a stroke on the cake</b> to place it; the sliders only change its shape.
+          Strokes are meant to <b>overlap</b> — each new one lays over the ones before it.
         </p>
 
         <div style={s.rowWrap}>
