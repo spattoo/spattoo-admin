@@ -8,7 +8,8 @@ import { OrbitControls } from '@react-three/drei';
 // whole subject here.
 import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
          creamMaterialProps, grabOffset, dragStrokeTo, paintBrushColors,
-         brushGesture, makeBrushBed } from '@spattoo/designer';
+         brushGesture, makeBrushBed, buildBrushBand, brushBandCount,
+         BRUSH_BAND_DEFAULTS } from '@spattoo/designer';
 
 // ── Brushstroke studio (POC) ─────────────────────────────────────────────────────────────────────
 //
@@ -115,6 +116,43 @@ function Stroke({ s, bed, onGrab }) {
   );
 }
 
+/* ── The band ────────────────────────────────────────────────────────────────────────────────────
+ *
+ * The whole tier at once: a ring of pulls in a palette that repeats, which is what this technique
+ * actually is on a cake — the loose strokes above are a way of judging ONE of them.
+ *
+ * ⚠️ ONE MESH, AND NOT AN InstancedMesh. See buildBrushBand: an instance draws one geometry many
+ * times, and no two strokes here share a shape. A merge buys the same single draw call.
+ *
+ * ⚠️ AND THE COUNT IS NOT WHAT THE SLIDER SAYS. A band is a closed loop, so the strokes are snapped
+ * to a whole number of colour repeats — otherwise two of the same colour meet at the seam, once, on
+ * the far side of the cake. The readout shows what was actually laid, not what was asked for.
+ */
+function Band({ palette, count, shape }) {
+  const geo = useMemo(() => buildBrushBand({
+    R, baseY: BOARD_H, wallH: TIER_H, under: CAKE_COLOR,
+    colors: palette, count, seed: shape.seed,
+    weight: shape.weight, sweep: shape.sweep, climb: shape.climb, bow: shape.bow,
+    overlap: shape.overlap,
+  }), [palette.join(), count, shape.seed, shape.weight, shape.sweep, shape.climb, shape.bow, shape.overlap]);
+  if (!geo) return null;
+  return (
+    <mesh geometry={geo} castShadow receiveShadow>
+      <meshPhysicalMaterial side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1}
+        polygonOffsetUnits={-1} {...creamMaterialProps(0.7, '#ffffff')} color="#ffffff" vertexColors />
+    </mesh>
+  );
+}
+
+const BAND_FIELDS = [
+  ['count',   'Strokes',   6,    40,   1],
+  ['overlap', 'Overlap',   0,    0.8,  0.05],
+  ['weight',  'Thickness', 0,    1,    0.02],
+  ['sweep',   'Sweep',     0.00, 0.3,  0.005],
+  ['climb',   'Length',    0.15, 0.9,  0.01],
+  ['bow',     'Bow',      -0.2,  0.2,  0.01],
+];
+
 /* ⚠️ "THICKNESS", NOT "WEIGHT". It is the same number — how much cream the knife left — and Sandeep
    has called it thickness every time: *"if its a thick stroke edges have elevation"*, then
    *"thinkness need to be a controlling nob"*. A baker reaching for this is thinking about how thick
@@ -133,6 +171,17 @@ const FIELDS = [
 ];
 
 export default function BrushStrokeStudio() {
+  /* Two things to look at, not two studios: one stroke on its own is how you judge a stroke, and a
+     band is the thing that goes on a cake. Same generator under both. */
+  const [mode, setMode] = useState('band');
+  const [palette, setPalette] = useState(BRUSH_BAND_DEFAULTS.colors);
+  const [slot, setSlot] = useState(0);        // which colour of the repeat is being changed
+  const [band, setBand] = useState({
+    count: BRUSH_BAND_DEFAULTS.count, overlap: BRUSH_BAND_DEFAULTS.overlap,
+    weight: 0.75, sweep: BRUSH_BAND_DEFAULTS.sweep, climb: BRUSH_BAND_DEFAULTS.climb,
+    bow: BRUSH_BAND_DEFAULTS.bow, seed: BRUSH_BAND_DEFAULTS.seed,
+  });
+  const laid = brushBandCount({ count: band.count, colors: palette });
   const [strokes, setStrokes] = useState(() => [0, 1, 2].map(newStroke));
   const [sel, setSel] = useState(0);
   const cur = strokes[Math.min(sel, strokes.length - 1)];
@@ -171,7 +220,9 @@ export default function BrushStrokeStudio() {
           <SceneLights shadows />
           <SceneEnv />
           <Cake onDragTo={onDragTo} onDragEnd={onDragEnd} />
-          {strokes.map(st => <Stroke key={st.id} s={st} bed={bed} onGrab={onGrab} />)}
+          {mode === 'band'
+            ? <Band palette={palette} count={band.count} shape={band} />
+            : strokes.map(st => <Stroke key={st.id} s={st} bed={bed} onGrab={onGrab} />)}
           {/* Orbit stands down while a stroke is in hand, or the cake spins out from under it. */}
           <OrbitControls makeDefault enabled={!grab.current} target={[0, BOARD_H + TIER_H * 0.5, 0]} enablePan={false} />
         </Canvas>
@@ -179,6 +230,72 @@ export default function BrushStrokeStudio() {
 
       <div style={s.panel}>
         <h2 style={s.h2}>Brushstroke studio</h2>
+
+        <div style={s.modes}>
+          {[['band', 'Band round the cake'], ['one', 'Single strokes']].map(([k, label]) => (
+            <button key={k} onClick={() => setMode(k)}
+              style={{ ...s.mode, ...(mode === k ? s.modeOn : null) }}>{label}</button>
+          ))}
+        </div>
+
+        {mode === 'band' ? (
+          <>
+            <p style={s.note}>
+              The whole tier at once. Pick the colours and they <b>repeat</b> round the cake — two
+              colours alternate, three cycle, and so on. Each stroke runs out at its own height and
+              tears at its own width, so no two are the same; <b>Shuffle</b> rolls the lot.
+              <br />One mesh, one draw call — <b>{laid}</b> strokes.
+            </p>
+
+            {/* ⚠️ THE READOUT IS THE SNAPPED COUNT, NOT THE SLIDER. A band is a closed loop, so the
+                strokes are rounded to a whole number of colour repeats — otherwise two of the same
+                colour sit together at the seam, exactly once, on the side of the cake nobody is
+                looking at while they set it. A slider that said 19 and laid 18 with no sign of it
+                would be the control lying about its own effect. */}
+            {/* ⚠️ A CHIP IS PICKED, THEN COLOURED — the same two-step the single-stroke mode above
+                already uses, and the reason is rule 1 rather than consistency for its own sake: a
+                native <select> styled as a circle renders its VALUE inside itself, so every chip
+                carried "#F6DCE2" in black text across the colour it was showing. */}
+            <div style={s.rowWrap}>
+              {palette.map((c, i) => (
+                <button key={i} onClick={() => setSlot(i)} title={`Colour ${i + 1}`}
+                  style={{ ...s.chip, background: c,
+                           outline: i === slot ? '2.5px solid #3D5A44' : '1.5px solid #C5D4C8' }} />
+              ))}
+              {palette.length < 6 && (
+                <button style={s.add} title="Add a colour"
+                  onClick={() => { setPalette(p => [...p, SWATCHES[p.length % SWATCHES.length]]); setSlot(palette.length); }}>+</button>
+              )}
+              {palette.length > 1 && (
+                <button style={s.del} title="Drop this colour"
+                  onClick={() => { setPalette(p => p.filter((_, j) => j !== slot)); setSlot(0); }}>Remove</button>
+              )}
+            </div>
+
+            <div style={s.swatches}>
+              {SWATCHES.map(c => (
+                <button key={c} onClick={() => setPalette(p => p.map((x, j) => (j === slot ? c : x)))} title={c}
+                  style={{ ...s.sw, background: c,
+                           outline: palette[slot] === c ? '2.5px solid #3D5A44' : '1px solid #ccc' }} />
+              ))}
+            </div>
+
+            {BAND_FIELDS.map(([k, label, min, max, step]) => (
+              <label key={k} style={s.field}>
+                <span style={s.lab}>{label}<b style={s.val}>
+                  {k === 'count' ? laid : (band[k] ?? 0).toFixed(2)}</b></span>
+                <input type="range" min={min} max={max} step={step} value={band[k]}
+                  onChange={e => setBand(b => ({ ...b, [k]: +e.target.value }))} style={s.range} />
+              </label>
+            ))}
+
+            <button style={s.shuffle}
+              onClick={() => setBand(b => ({ ...b, seed: 1 + Math.floor(Math.random() * 9999) }))}>
+              Shuffle the band
+            </button>
+          </>
+        ) : (
+        <>
         <p style={s.note}>
           Broad buttercream strokes painted on the wall. <b>Thickness</b> is the one to judge: at the
           top of its range the edges stand proud and cast a shadow, at the bottom the stroke should
@@ -222,6 +339,8 @@ export default function BrushStrokeStudio() {
         <button style={s.shuffle} onClick={() => patch({ seed: 1 + Math.floor(Math.random() * 9999) })}>
           Shuffle the tear
         </button>
+        </>
+        )}
       </div>
     </div>
   );
@@ -243,5 +362,9 @@ const s = {
   lab:    { display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 700, marginBottom: 2 },
   val:    { color: '#6B8C74' },
   range:  { width: '100%' },
+  modes:  { display: 'flex', gap: 6, marginBottom: 10 },
+  mode:   { flex: 1, fontSize: 11, fontWeight: 700, padding: '6px 4px', borderRadius: 8,
+            border: '1.5px solid #C5D4C8', background: '#fff', color: '#6B8C74', cursor: 'pointer' },
+  modeOn: { background: '#3D5A44', borderColor: '#3D5A44', color: '#fff' },
   shuffle:{ width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', color: '#3D5A44', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
 };
