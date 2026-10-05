@@ -290,7 +290,10 @@ export default function BrushStrokeStudio() {
               The whole tier at once. Pick the colours and they <b>repeat</b> round the cake — two
               colours alternate, three cycle, and so on. Each stroke runs out at its own height and
               tears at its own width, so no two are the same; <b>Shuffle</b> rolls the lot.
-              <br />One mesh, one draw call — <b>{laid}</b> strokes.
+              <br /><b>Shorter strokes are narrower</b> — a knife pulled a short way leaves a short,
+              narrow mark, not a wide one — so pulling <b>Length</b> down opens gaps in the band.
+              Raise <b>Strokes</b> to close it again.
+              <br /><b>{laid}</b> strokes, one draw call per colour.
             </p>
 
             {/* ⚠️ THE READOUT IS THE SNAPPED COUNT, NOT THE SLIDER. A band is a closed loop, so the
