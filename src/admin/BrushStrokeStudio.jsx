@@ -7,7 +7,7 @@ import { OrbitControls } from '@react-three/drei';
 // same reason: relief judged under brighter lights is simply the wrong relief, and relief is the
 // whole subject here.
 import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
-         creamMaterialProps, grabOffset, dragStrokeTo } from '@spattoo/designer';
+         creamMaterialProps, grabOffset, dragStrokeTo, paintBrushColors } from '@spattoo/designer';
 
 // ── Brushstroke studio (POC) ─────────────────────────────────────────────────────────────────────
 //
@@ -34,6 +34,7 @@ import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
 // customer ever sees.
 
 const R = 1, TIER_H = 1.25, BOARD_R = 1.5, BOARD_H = 0.07;
+const CAKE_COLOR = '#FBF8F3';   // what a thin stroke washes toward — the wall it is painted on
 
 /* A stroke is authored as a GESTURE, not as a list of points: where it starts round the cake, how
    far it sweeps, how much it climbs, and how much it bows. That is what a hand does — and it means a
@@ -95,6 +96,10 @@ function Stroke({ s, layer, onGrab }) {
     R, baseY: BOARD_H, wallH: TIER_H, layer,
     path: gesturePath(s), width: s.width, weight: s.weight, seed: s.seed,
   }), [s.at, s.rise, s.sweep, s.climb, s.bow, s.width, s.weight, s.seed, layer]);
+  /* ⚠️ THIN CREAM LETS THE CAKE THROUGH, and that is most of what says buttercream rather than
+     vinyl — it took a photograph of a real cake to see it. Saturated where the knife piled up,
+     washing toward the wall's colour where it ran dry. */
+  useMemo(() => geo && paintBrushColors(geo, s.color, CAKE_COLOR), [geo, s.color]);
   if (!geo) return null;
   return (
     <mesh geometry={geo} castShadow receiveShadow
@@ -108,7 +113,7 @@ function Stroke({ s, layer, onGrab }) {
           sits almost on the wall and the depth buffer loses over a long grazing sweep, which is what
           "breaking at extreme sweep" was. */}
       <meshPhysicalMaterial side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1}
-        polygonOffsetUnits={-1} {...creamMaterialProps(0.7, s.color)} />
+        polygonOffsetUnits={-1} {...creamMaterialProps(0.7, s.color)} color="#ffffff" vertexColors />
     </mesh>
   );
 }
