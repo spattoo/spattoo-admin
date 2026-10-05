@@ -5,7 +5,8 @@ import { OrbitControls } from '@react-three/drei';
 // states and every studio since repeats. SceneLights/SceneEnv are the designer's own rig for the
 // same reason: relief judged under brighter lights is simply the wrong relief, and relief is the
 // whole subject here.
-import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
+         creamMaterialProps } from '@spattoo/designer';
 
 // ── Brushstroke studio (POC) ─────────────────────────────────────────────────────────────────────
 //
@@ -78,9 +79,11 @@ function Stroke({ s }) {
   if (!geo) return null;
   return (
     <mesh geometry={geo} castShadow receiveShadow>
-      {/* Buttercream, not plastic: matte enough that the RIDGES are what catches the light rather
-          than a specular sheen that would read the same whatever the relief was doing. */}
-      <meshStandardMaterial color={s.color} roughness={0.62} metalness={0} />
+      {/* ⚠️ THE CREAM MATERIAL, NOT A LOCAL OPINION ABOUT CREAM. `creamMaterialProps` is what every
+          piped stroke on every cake already uses — the calibrated albedo, the roughness curve and
+          the sheen. A brushstroke IS buttercream, and a studio that mixed its own would be judging
+          a colour and a finish no customer will ever see (INVARIANTS #15). */}
+      <meshPhysicalMaterial {...creamMaterialProps(0.7, s.color)} />
     </mesh>
   );
 }
