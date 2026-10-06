@@ -60,6 +60,7 @@ const RecolorTester         = lazy(() => import('./admin/RecolorTester.jsx'));
 const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx'));
 const FlowerNailStudio      = lazy(() => import('./admin/FlowerNailStudio.jsx'));
 const CardCutoutStudio      = lazy(() => import('./admin/CardCutoutStudio.jsx'));
+const WaferPaperStudio      = lazy(() => import('./admin/WaferPaperStudio.jsx'));
 const TopperComposer        = lazy(() => import('./admin/TopperComposer.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
 const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
@@ -137,6 +138,7 @@ const ROUTES = {
   '/elements/freehand-pen':      FreehandPenStudio,
   '/elements/flower-nail':       FlowerNailStudio,
   '/elements/card-cutout':       CardCutoutStudio,
+  '/elements/wafer-paper':       WaferPaperStudio,
   '/elements/topper-composer':   TopperComposer,
   '/elements/chocolate-drip':    ChocolateDripStudio,
   '/elements/grass':             GrassStudio,
@@ -194,6 +196,7 @@ const NAV_GROUPS = [
     { href: '/elements/freehand-pen',   label: 'Freehand Pen' },
     { href: '/elements/flower-nail',    label: 'Flower Nail' },
     { href: '/elements/card-cutout',    label: 'Card Cutout' },
+    { href: '/elements/wafer-paper',    label: 'Wafer Paper' },
     { href: '/elements/topper-composer', label: 'Topper Composer' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
     { href: '/elements/grass',          label: 'Grass' },
