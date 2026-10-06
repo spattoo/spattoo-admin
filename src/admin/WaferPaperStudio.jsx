@@ -109,10 +109,15 @@ export default function WaferPaperStudio() {
   const [preset, setPreset] = useState('White, waved');
   const [shapeKey, setShapeKey] = useState('round');
   const [backdrop, setBackdrop] = useState('Designer (real)');
-  /* ⚠️ ON BY DEFAULT, because it is how the technique is used. Sandeep: "usually wafer paper is
-     used with same color as the cake." The skirt is a TEXTURE on the cake, not a contrasting trim,
-     and pairing white paper with a cream tier — which is what this studio did — judges a cake
-     nobody makes. Off when you deliberately want the two-tone look (reference 1 is pink on cream). */
+  /* A convenience, not a rule — and the first version of this comment got that wrong. Sandeep:
+     "we dont restrict that cake and wafer paper should be of same color. i just said a general
+     pracatice." Matching is the common case and a sensible place to start, which is why it is the
+     default; it is NOT a constraint, and nothing in core's geometry or material knows about it.
+     Reference 1 is pink paper on a cream tier, so the two-tone cake is as real as the matched one.
+
+     What the default is actually worth: it was pairing white paper with a cream tier, which made
+     the white-on-white contrast look worse than it is, because two near-whites were fighting
+     instead of reading as one object. */
   const [matchCake, setMatchCake] = useState(true);
   const [p, setP] = useState({ ...WAFER_DEFAULTS, ...PRESETS['White, waved'], seed: 7,
                                ...WAFER_PAPER_MATERIAL });
@@ -134,9 +139,9 @@ export default function WaferPaperStudio() {
             <Btn key={k} on={preset === k} onClick={() => pick(k)}>{k}</Btn>
           ))}
         </Row>
-        <Row label="Cake">
-          <Btn on={matchCake} onClick={() => setMatchCake(true)}>same colour as the paper</Btn>
-          <Btn on={!matchCake} onClick={() => setMatchCake(false)}>contrasting</Btn>
+        <Row label="Cake colour — a starting point, not a rule">
+          <Btn on={matchCake} onClick={() => setMatchCake(true)}>match the paper</Btn>
+          <Btn on={!matchCake} onClick={() => setMatchCake(false)}>cream</Btn>
         </Row>
         <Row label="Backdrop — for judging, not the product">
           {Object.keys(BACKDROPS).map(k => (
