@@ -9,7 +9,7 @@ import { OrbitControls } from '@react-three/drei';
 import { buildBrushStrokeOnWall, BRUSH_ON_CAKE_DEFAULTS, SceneLights, SceneEnv,
          creamMaterialProps, grabOffset, dragStrokeTo, paintBrushColors,
          brushGesture, makeBrushBed, buildBrushBand, brushBandCount,
-         BRUSH_BAND_DEFAULTS } from '@spattoo/designer';
+         brushGestureFromDrag, BRUSH_BAND_DEFAULTS } from '@spattoo/designer';
 
 // ── Brushstroke studio (POC) ─────────────────────────────────────────────────────────────────────
 //
@@ -82,7 +82,12 @@ const newStroke = (i) => ({
    own moving geometry and accelerates away from the pointer; the cake is what the hand is really
    moving against. The grab OFFSET is recorded at pointer-down and re-applied, so the point you took
    hold of stays under the pointer — handleAt and dragTo as exact inverses (INVARIANTS #10 law 5). */
-function Cake({ onDragTo, onDragEnd }) {
+/* ⚠️ THE WALL IS BOTH THE DRAG SURFACE AND THE DRAWING SURFACE, and which one a press means is
+   decided by WHAT WAS PRESSED. Down on a stroke takes hold of it; down on the bare cake starts a new
+   one along the way the hand then travels — Sandeep: *"user should be able to use mouse/touch and
+   drag to add strokes. it should following the draw direction."* Both end on the same pointer-up, so
+   neither can be left half-held. */
+function Cake({ onDrawStart, onDragTo, onDragEnd }) {
   return (
     <group>
       <mesh position={[0, BOARD_H / 2, 0]} receiveShadow>
@@ -90,6 +95,7 @@ function Cake({ onDragTo, onDragEnd }) {
         <meshStandardMaterial color="#EDE7DA" roughness={0.85} />
       </mesh>
       <mesh position={[0, BOARD_H + TIER_H / 2, 0]} castShadow receiveShadow
+        onPointerDown={e => { e.stopPropagation(); onDrawStart(e.point); }}
         onPointerMove={e => onDragTo(e.point)}
         onPointerUp={onDragEnd}>
         <cylinderGeometry args={[R, R, TIER_H, 96]} />
@@ -241,17 +247,44 @@ export default function BrushStrokeStudio() {
   /* The grab: which stroke, and how far its origin was from the point taken hold of. A ref rather
      than state — it is read inside a pointermove that was captured when the drag began. */
   const grab = useRef(null);
+  /* Where a new stroke was started, and the id it was given so the drag can keep reshaping it. A ref
+     for the same reason `grab` is one: both are read inside a pointermove. */
+  const draw = useRef(null);
+
   const onGrab = (st, point) => {
     setSel(strokes.findIndex(x => x.id === st.id));
     grab.current = { id: st.id, ...grabOffset(st, point, WALL) };
   };
+
+  /* ⚠️ THE STROKE IS NOT CREATED ON PRESS, it is created on the first MOVE that travels far enough.
+     Created on press, every tap on the cake would leave a stroke behind — and a tap is how you
+     dismiss or deselect, so the screen would fill with cream nobody asked for. `brushGestureFromDrag`
+     returns null until the hand has actually gone somewhere, which is the same "measure the distance
+     TRAVELLED" rule a closed piping gesture already needs. */
+  const onDrawStart = (point) => { draw.current = { from: point, id: null }; };
+
   const onDragTo = (point) => {
-    const g = grab.current;
-    if (!g) return;
-    const next = dragStrokeTo(g, point, WALL);
-    setStrokes(list => list.map(st => (st.id === g.id ? { ...st, ...next } : st)));
+    const d = draw.current;
+    if (d) {
+      const g = brushGestureFromDrag(d.from, point, WALL);
+      if (!g) return;                              // still a tap
+      if (d.id === null) {
+        const id = nextId++;
+        d.id = id;
+        setStrokes(list => [...list, { ...newStroke(list.length), id, ...g }]);
+        setSel(strokes.length);
+      } else {
+        setStrokes(list => list.map(st => (st.id === d.id ? { ...st, ...g } : st)));
+      }
+      return;
+    }
+    const gr = grab.current;
+    if (!gr) return;
+    const next = dragStrokeTo(gr, point, WALL);
+    setStrokes(list => list.map(st => (st.id === gr.id ? { ...st, ...next } : st)));
   };
-  const onDragEnd = () => { grab.current = null; };
+
+  const onDragEnd = () => { grab.current = null; draw.current = null; };
 
   return (
     <div style={s.wrap}>
@@ -265,12 +298,13 @@ export default function BrushStrokeStudio() {
               missing. */}
           <SceneLights shadows />
           <SceneEnv />
-          <Cake onDragTo={onDragTo} onDragEnd={onDragEnd} />
+          <Cake onDrawStart={onDrawStart} onDragTo={onDragTo} onDragEnd={onDragEnd} />
           {mode === 'band'
             ? <Band palette={palette} count={band.count} shape={band} />
             : strokes.map(st => <Stroke key={st.id} s={st} bed={bed} onGrab={onGrab} />)}
           {/* Orbit stands down while a stroke is in hand, or the cake spins out from under it. */}
-          <OrbitControls makeDefault enabled={!grab.current} target={[0, BOARD_H + TIER_H * 0.5, 0]} enablePan={false} />
+          {/* Orbit stands down for either gesture, or the cake spins out from under the hand. */}
+          <OrbitControls makeDefault enabled={!grab.current && !draw.current} target={[0, BOARD_H + TIER_H * 0.5, 0]} enablePan={false} />
         </Canvas>
       </div>
 
@@ -345,7 +379,9 @@ export default function BrushStrokeStudio() {
           top of its range the edges stand proud and cast a shadow, at the bottom the stroke should
           merge into the cake with no relief at all — and still be there. Every stroke tears and
           releases at its own width; <b>Shuffle</b> rolls another.
-          <br /><b>Drag a stroke on the cake</b> to place it; the sliders only change its shape.
+          <br /><b>Drag on the bare cake to draw a new stroke</b> — it follows the way your hand went,
+          so a short pull up the wall gives a short stroke and a long diagonal a long one.
+          <b>Drag an existing stroke</b> to move it; the sliders reshape the selected one.
           Strokes are meant to <b>overlap</b> — each new one lays over the ones before it.
         </p>
 
