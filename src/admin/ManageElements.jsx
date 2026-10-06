@@ -443,6 +443,7 @@ const PROCEDURAL_STUDIOS = {
   cloud:         { href: '/elements/cloud',          label: 'Cloud Studio' },
   grass:         { href: '/elements/grass',          label: 'Grass Studio' },
   letter_blocks: { href: '/elements/letter-blocks',  label: 'Letter Blocks Studio' },
+  cream_brush:   { href: '/elements/brush-stroke',   label: 'Brushstroke Studio' },
 };
 // Chocolate drip is deliberately absent, the same way it is absent from PROCEDURAL_TOOLS: it writes
 // a piping layer rather than placing a decoration, and its config says `top_drip` rather than naming
