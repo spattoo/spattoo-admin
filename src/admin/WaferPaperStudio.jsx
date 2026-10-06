@@ -4,7 +4,7 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
-  buildWaferSkirt, WAFER_DEFAULTS,
+  buildWaferSkirt, WAFER_DEFAULTS, WAFER_PAPER_MATERIAL, waferFibreTexture,
 } from '@spattoo/designer';
 
 /* ── Wafer paper, cut into panels and stood around the cake ───────────────────────────────────────
@@ -29,6 +29,30 @@ import {
  */
 
 const TIER = { radius: 1.45, height: 1.1 };
+
+/* ── Backdrops, and why this control exists at all ────────────────────────────────────────────────
+ * Sandeep: *"everything looks white and so much glaring. cant see cake and wafer."*
+ *
+ * It is not the lighting. The rig here is core's own (SceneLights/SceneEnv) and admin's /cdn proxy
+ * serves byte-for-byte the same HDRI core's harness does — both checked. It is not the material
+ * either: dropping transmission from 0.45 to 0.18 moved measured contrast by 0.000.
+ *
+ * It is CONTRAST, and the number is brutal. White paper on a white cake against DESIGNER_GROUND
+ * reads 0.064 — (p95−p5)/mean, the reading INVARIANTS 18c uses, where a surface nobody has ever
+ * called dull sits at 0.463. On a darker ground the same frame reads 0.300; in pink, 0.176.
+ *
+ * ⚠️ WHICH IS A FACT ABOUT THE CAKE, NOT ABOUT THIS SCREEN, so the default stays DESIGNER_GROUND.
+ * CardCutoutStudio already made the other choice — it switched to a mid grey so a white card would
+ * read, and its own note calls that fixing a symptom in a surface that does not exist on a cake.
+ * The darker backdrops here are labelled as what they are: a way to answer "is that the cake or the
+ * backdrop?" in one click, and then go back. Every reference photograph solves this in the cake
+ * rather than in the room — berries, strawberries, a dark board, a grey wall behind. */
+const BACKDROPS = {
+  'Designer (real)': DESIGNER_GROUND,
+  'Warm':            '#d8cfc4',
+  'Mid':             '#b9b0a6',
+  'Dark':            '#6f6862',
+};
 const SHAPES = {
   round: { kind: 'round', radius: TIER.radius },
   sheet: { kind: 'rect', halfW: 1.65, halfD: 1.1, cornerR: 0.2 },
@@ -40,32 +64,43 @@ const SHAPES = {
 const PRESETS = {
   'Pink, notched hem': { count: 30, width: 2.0, height: 0.80, rise: 0.22, taper: 0.02, ripple: 0.16,
     ripples: 2.4, sway: 0.05, curl: 0.12, splay: 0.06, lean: 0.03, jitter: 0.30,
-    hem: 'notch', notch: 0.18, colour: '#f2766d', opacity: 0.93 },
+    hem: 'notch', notch: 0.18, colour: '#f2766d' },
   'White, waved':      { count: 34, width: 2.3, height: 0.95, rise: 0.04, taper: 0.18, ripple: 0.30,
     ripples: 6.0, sway: 0.10, curl: 0.22, splay: 0.08, lean: 0.05, jitter: 0.45,
-    hem: 'straight', notch: 0.10, colour: '#fbf7f2', opacity: 0.88 },
+    hem: 'straight', notch: 0.10, colour: '#fbf7f2' },
   'White, rippled':    { count: 44, width: 2.0, height: 0.92, rise: 0.02, taper: 0.22, ripple: 0.26,
     ripples: 8.0, sway: 0.12, curl: 0.18, splay: 0.08, lean: 0.03, jitter: 0.50,
-    hem: 'torn', notch: 0.12, colour: '#fdfbf7', opacity: 0.86 },
+    hem: 'torn', notch: 0.12, colour: '#fdfbf7' },
   'White, broad':      { count: 20, width: 2.4, height: 0.98, rise: 0.06, taper: 0.06, ripple: 0.24,
     ripples: 3.0, sway: 0.06, curl: 0.30, splay: 0.06, lean: 0.02, jitter: 0.35,
-    hem: 'straight', notch: 0.10, colour: '#ffffff', opacity: 0.82 },
+    hem: 'straight', notch: 0.10, colour: '#ffffff' },
 };
 
 function Skirt({ shape, p }) {
+  // Generated, not shipped: it is noise, and a procedural one scales to any panel without UVs.
+  const fibre = useMemo(() => waferFibreTexture({ strength: p.fibre }), [p.fibre]);
   const geom = useMemo(() => buildWaferSkirt({ shape, tierHeight: TIER.height, ...p }), [shape, p]);
   if (!geom) return null;
   return (
     <mesh geometry={geom} position={[0, TIER.height / 2, 0]} castShadow receiveShadow>
       {/* ⚠️ DoubleSide: a sheet of paper has no back. Single-sided, every panel on the far side of
           the cake vanishes the moment it turns — and that is half of them at any angle.
-          ⚠️ And the material is half the look. Wafer paper is thin enough to pass light, so the
-          panels in front are lit partly THROUGH the ones behind; with transmission at 0 the same
-          geometry reads as painted card. Judge the two with the toggle, not from the slider name. */}
+
+          ⚠️ AND NO `transparent` / `opacity` WHILE TRANSMISSION IS ON. Sandeep, on the first
+          render: "may be geometrically fine, but it does not look like wafer paper." He was right
+          and the geometry was not the fault: setting that pair puts the mesh on the alpha-blended
+          path, so every pixel becomes a flat lerp toward what is behind it and the transmission is
+          thrown away. Two overlapping panels came out the same flat pink instead of getting denser
+          where they cross, which is the single most paper-like thing about the references.
+          The numbers live in core's WAFER_PAPER_MATERIAL so this studio and the cake agree. */}
       <meshPhysicalMaterial
-        color={p.colour} side={THREE.DoubleSide} roughness={p.roughness}
-        transmission={p.transmission} thickness={0.02} ior={1.35}
-        transparent opacity={p.opacity} />
+        color={p.colour} side={THREE.DoubleSide}
+        roughness={p.roughness} transmission={p.transmission}
+        thickness={p.thickness} ior={WAFER_PAPER_MATERIAL.ior}
+        sheen={p.sheen} sheenRoughness={WAFER_PAPER_MATERIAL.sheenRoughness}
+        sheenColor="#ffffff" specularIntensity={p.specular}
+        roughnessMap={p.fibre > 0 ? fibre : null}
+        metalness={0} />
     </mesh>
   );
 }
@@ -73,8 +108,9 @@ function Skirt({ shape, p }) {
 export default function WaferPaperStudio() {
   const [preset, setPreset] = useState('White, waved');
   const [shapeKey, setShapeKey] = useState('round');
+  const [backdrop, setBackdrop] = useState('Designer (real)');
   const [p, setP] = useState({ ...WAFER_DEFAULTS, ...PRESETS['White, waved'], seed: 7,
-                               roughness: 0.92, transmission: 0.35 });
+                               ...WAFER_PAPER_MATERIAL });
   const set = (k) => (v) => setP(o => ({ ...o, [k]: v }));
   const pick = (name) => { setPreset(name); setP(o => ({ ...o, ...PRESETS[name] })); };
 
@@ -91,6 +127,11 @@ export default function WaferPaperStudio() {
         <Row label="Start from">
           {Object.keys(PRESETS).map(k => (
             <Btn key={k} on={preset === k} onClick={() => pick(k)}>{k}</Btn>
+          ))}
+        </Row>
+        <Row label="Backdrop — for judging, not the product">
+          {Object.keys(BACKDROPS).map(k => (
+            <Btn key={k} on={backdrop === k} onClick={() => setBackdrop(k)}>{k}</Btn>
           ))}
         </Row>
         <Row label="Tier">
@@ -134,9 +175,16 @@ export default function WaferPaperStudio() {
 
         <H>The paper</H>
         <Sl label="Translucency" v={p.transmission} min={0} max={1} step={0.02} on={set('transmission')}
-            hint="At 0 it reads as painted card." />
-        <Sl label="Opacity"      v={p.opacity}   min={0.4} max={1} step={0.02} on={set('opacity')} />
-        <Sl label="Roughness"    v={p.roughness} min={0.2} max={1} step={0.02} on={set('roughness')} />
+            hint="At 0 it reads as painted card. This is the control that decides whether it looks like paper." />
+        <Sl label="Diffusion"    v={p.thickness} min={0.01} max={0.5} step={0.01} on={set('thickness')}
+            hint="How far light travels inside the sheet before it scatters out." />
+        <Sl label="Roughness"    v={p.roughness} min={0.2} max={1} step={0.02} on={set('roughness')}
+            hint="High, with transmission high, is what makes a glow rather than glass." />
+        <Sl label="Sheen"        v={p.sheen} min={0} max={1} step={0.02} on={set('sheen')}
+            hint="The cloth lobe — a broad highlight instead of a plastic dot." />
+        <Sl label="Specular"     v={p.specular} min={0} max={1} step={0.02} on={set('specular')} />
+        <Sl label="Grain"        v={p.fibre} min={0} max={1} step={0.02} on={set('fibre')}
+            hint="Pressed starch has a visible fibre." />
         <Row label="Colour">
           {['#ffffff', '#fbf7f2', '#f2766d', '#f6c6cf', '#d9c7f0', '#cfe3d4'].map(c => (
             <button key={c} onClick={() => setP(o => ({ ...o, colour: c }))}
@@ -161,7 +209,7 @@ export default function WaferPaperStudio() {
           gl={{ preserveDrawingBuffer: true }} style={{ position: 'absolute', inset: 0 }}>
           <SceneLights shadows />
           <SceneEnv />
-          <SceneBackground colour={DESIGNER_GROUND} />
+          <SceneBackground colour={BACKDROPS[backdrop]} />
           <OrbitControls enablePan={false} makeDefault target={[0, 0.35, 0]} />
 
           {/* The cake, and it is not scenery: these panels are cut to the tier's own height and hang
@@ -179,6 +227,15 @@ export default function WaferPaperStudio() {
           )}
 
           <Skirt shape={SHAPES[shapeKey]} p={p} />
+
+          {/* ⚠️ THE FLOOR IS NOT SCENERY — it is the only surface that can RECEIVE the key light's
+              shadow, and this studio shipped without one. A lit object casting into nothing reads
+              flat however right its colour is, which is the note CardCutoutStudio already carries.
+              It is not what caused the glare (measured: the backdrop was), but it was missing. */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -TIER.height / 2, 0]} receiveShadow>
+            <circleGeometry args={[7, 48]} />
+            <meshStandardMaterial color={BACKDROPS[backdrop]} roughness={1} />
+          </mesh>
         </Canvas>
       </div>
     </div>
