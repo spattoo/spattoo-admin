@@ -56,7 +56,22 @@ export default defineConfig({
       : []),
   ],
   build: { sourcemap: !!sentryAuthToken },   // emit maps only when we'll upload them
-  server: { port: 5174 },
+  server: {
+    port: 5174,
+    /* ⚠️ THE ASSETS ORIGIN, PROXIED, SO A STUDIO IS LIT LIKE A CAKE. `src/scene.js` points
+       `configureEnvMap` at `/cdn`; without this proxy that is a 404 and SceneEnv falls back to
+       drei's indoor preset, which is the fault scene.js exists to end. Proxied rather than fetched
+       straight from the CDN because its CORS allowlist holds the app's origins, not this one, and a
+       WebGL texture load with no `access-control-allow-origin` fails silently — straight back into
+       the same fallback. Same target, same reasoning, as spattoo-core's own harness proxy. */
+    proxy: {
+      '/cdn': {
+        target: 'https://dev.spattoocdn.com',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/cdn/, ''),
+      },
+    },
+  },
   appType: 'spa',
   resolve: {
     // ── Core from SOURCE when it is next door, from the vendored tarball otherwise ────────────

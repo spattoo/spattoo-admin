@@ -10,6 +10,9 @@ import ReactDOM from 'react-dom/client';
 // font — the library's warnIfFontsMissing() will say so in the console.
 import '@fontsource-variable/quicksand';
 import '@fontsource/playfair-display/700.css';
+/* Lights every studio the way production lights a cake — one side-effect import, because the thing
+   that was missing is global. See the file; it is the admin twin of spattoo-core's dev/scene.js. */
+import './scene.js';
 import { supabase } from './lib/supabase.js';
 import Login from './auth/Login.jsx';
 import logo from './images/spattoo-green.png';
@@ -57,11 +60,13 @@ const RecolorTester         = lazy(() => import('./admin/RecolorTester.jsx'));
 const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx'));
 const FlowerNailStudio      = lazy(() => import('./admin/FlowerNailStudio.jsx'));
 const CardCutoutStudio      = lazy(() => import('./admin/CardCutoutStudio.jsx'));
+const WaferPaperStudio      = lazy(() => import('./admin/WaferPaperStudio.jsx'));
 const TopperComposer        = lazy(() => import('./admin/TopperComposer.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
 const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
 const RainbowStudio         = lazy(() => import('./admin/RainbowStudio.jsx'));
 const CloudStudio           = lazy(() => import('./admin/CloudStudio.jsx'));
+const BrushStrokeStudio     = lazy(() => import('./admin/BrushStrokeStudio.jsx'));
 const FondantStudio         = lazy(() => import('./admin/FondantStudio.jsx'));
 const LetterBlocksStudio    = lazy(() => import('./admin/LetterBlocksStudio.jsx'));
 const GlazeStudio           = lazy(() => import('./admin/GlazeStudio.jsx'));
@@ -133,11 +138,13 @@ const ROUTES = {
   '/elements/freehand-pen':      FreehandPenStudio,
   '/elements/flower-nail':       FlowerNailStudio,
   '/elements/card-cutout':       CardCutoutStudio,
+  '/elements/wafer-paper':       WaferPaperStudio,
   '/elements/topper-composer':   TopperComposer,
   '/elements/chocolate-drip':    ChocolateDripStudio,
   '/elements/grass':             GrassStudio,
   '/elements/rainbow':           RainbowStudio,
   '/elements/cloud':             CloudStudio,
+  '/elements/brush-stroke':      BrushStrokeStudio,
   '/elements/fondant':           FondantStudio,
   '/elements/letter-blocks':     LetterBlocksStudio,
   '/elements/glaze':             GlazeStudio,
@@ -189,11 +196,17 @@ const NAV_GROUPS = [
     { href: '/elements/freehand-pen',   label: 'Freehand Pen' },
     { href: '/elements/flower-nail',    label: 'Flower Nail' },
     { href: '/elements/card-cutout',    label: 'Card Cutout' },
+    { href: '/elements/wafer-paper',    label: 'Wafer Paper' },
     { href: '/elements/topper-composer', label: 'Topper Composer' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
     { href: '/elements/grass',          label: 'Grass' },
     { href: '/elements/rainbow',        label: 'Rainbow' },
     { href: '/elements/cloud',          label: 'Cloud' },
+    /* ⚠️ A POC GETS A DOOR, NOT A URL IN A CHAT MESSAGE. Sandeep, after a day of dev/ harnesses:
+       *"if tomorrow i want to visit it, i wont have this url. any poc we do should have entry in
+       editors menu in admin."* This list is also what the /editors tiles page renders from, so one
+       entry is both. */
+    { href: '/elements/brush-stroke',   label: 'Brushstroke' },
     { href: '/elements/fondant',        label: 'Fondant Studio' },
     { href: '/elements/letter-blocks',  label: 'Letter Blocks' },
     { href: '/elements/glaze',          label: 'Glaze Studio' },

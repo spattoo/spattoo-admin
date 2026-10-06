@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // states and GrassStudio repeats. SceneLights/SceneEnv are the designer's own rig for the same
 // reason: a colour judged under brighter lights is simply the wrong colour.
 import { RainbowArch, rainbowBands, rainbowGuide, RAINBOW_DEFAULTS, SceneLights, SceneEnv,
-         RAINBOW_ARRANGEMENTS, ArrangementTile, arrangementOf, iconTiers } from '@spattoo/designer';
+         RAINBOW_ARRANGEMENTS, ArrangementTile, arrangementOf, iconTiers, springRange } from '@spattoo/designer';
 import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Rainbow studio ────────────────────────────────────────────────────────────
@@ -421,7 +421,16 @@ export default function RainbowStudio() {
 
         {/* Back after being cut. It was measured in ONE arrangement — an arch leaning over the cake,
             where a resting foot pins it — and cut on that evidence. It is live in the other four. */}
-        {num('Springs at', 'spring', 0, 1.4, 0.02)}
+        {/* ⚠️ THE RANGE IS ASKED FOR, NOT TYPED. It read `0, 1.4` while core's `springRange` owned the
+            real bounds, which is the butterfly-wire mistake exactly: core raised the wire's angle
+            ceiling to 88° and this kind of hard-coded copy went on offering 75 until Sandeep said so.
+            `springRange` also knows the two things a literal cannot — that a foot resting on the cake
+            top pins the floor at 1, and that on the wall this parameter IS the drag's `v` and may
+            never exceed 1. One source, and the studio cannot author a value the cake would reject. */}
+        {(() => {
+          const r = springRange(p) ?? { min: 0, max: 1.8, step: 0.02 };
+          return num('Springs at', 'spring', r.min, r.max, r.step);
+        })()}
         {springPinned && (
           <div style={{ ...s.row, marginTop: -4, marginBottom: 10 }}>
             <span style={s.lbl} />
