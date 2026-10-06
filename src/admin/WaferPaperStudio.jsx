@@ -177,12 +177,17 @@ export default function WaferPaperStudio() {
         <Sl label="Lean"         v={p.lean}    min={-0.2} max={0.35} step={0.01} on={set('lean')} />
 
         <H>Cut and variation</H>
-        <Row label="Hem">
-          {['straight', 'notch', 'torn'].map(h => (
+        {/* ⚠️ Two of these are not a hem at all. `straight`, `notch` and `torn` trim the bottom of a
+            strip; `round` and `petal` make the piece a different SHAPE — a half-disc and a leaf —
+            which is how the domed reference is made: the paper is cut as petals and laid in
+            overlapping rings rather than hung as a fringe. */}
+        <Row label="Cut">
+          {['straight', 'notch', 'torn', 'round', 'petal'].map(h => (
             <Btn key={h} on={p.hem === h} onClick={() => setP(o => ({ ...o, hem: h }))}>{h}</Btn>
           ))}
         </Row>
-        <Sl label="Hem depth" v={p.notch}  min={0} max={0.4} step={0.01} on={set('notch')} />
+        <Sl label="Cut depth" v={p.notch}  min={0} max={0.4} step={0.01} on={set('notch')}
+            hint="On a notch or tear, how deep. On a round or petal, how much flat shoulder is left to glue — a true semicircle comes to a point with nothing to stick on." />
         <Sl label="Shingle"   v={p.shingle} min={0} max={0.06} step={0.002} on={set('shingle')}
             hint="Each sheet sits a little further out than the last, like roof tiles, so they have a front-to-back order." />
         <Sl label="Nest"      v={p.nest} min={0} max={1} step={0.05} on={set('nest')}
