@@ -169,6 +169,10 @@ export default function WaferPaperStudio() {
           ))}
         </Row>
         <Sl label="Hem depth" v={p.notch}  min={0} max={0.4} step={0.01} on={set('notch')} />
+        <Sl label="Shingle"   v={p.shingle} min={0} max={0.06} step={0.002} on={set('shingle')}
+            hint="Each sheet sits a little further out than the last, like roof tiles, so they have a front-to-back order." />
+        <Sl label="Nest"      v={p.nest} min={0} max={1} step={0.05} on={set('nest')}
+            hint="Ridge into valley. At 0 each sheet creases independently and they pass through one another." />
         <Sl label="Jitter"    v={p.jitter} min={0} max={1} step={0.02} on={set('jitter')}
             hint="How much the strips differ. At 0 the eye finds the repeat." />
         <Sl label="Seed"      v={p.seed}   min={1} max={40} step={1} on={set('seed')} int />
