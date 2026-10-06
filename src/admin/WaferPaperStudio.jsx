@@ -109,6 +109,11 @@ export default function WaferPaperStudio() {
   const [preset, setPreset] = useState('White, waved');
   const [shapeKey, setShapeKey] = useState('round');
   const [backdrop, setBackdrop] = useState('Designer (real)');
+  /* ⚠️ ON BY DEFAULT, because it is how the technique is used. Sandeep: "usually wafer paper is
+     used with same color as the cake." The skirt is a TEXTURE on the cake, not a contrasting trim,
+     and pairing white paper with a cream tier — which is what this studio did — judges a cake
+     nobody makes. Off when you deliberately want the two-tone look (reference 1 is pink on cream). */
+  const [matchCake, setMatchCake] = useState(true);
   const [p, setP] = useState({ ...WAFER_DEFAULTS, ...PRESETS['White, waved'], seed: 7,
                                ...WAFER_PAPER_MATERIAL });
   const set = (k) => (v) => setP(o => ({ ...o, [k]: v }));
@@ -128,6 +133,10 @@ export default function WaferPaperStudio() {
           {Object.keys(PRESETS).map(k => (
             <Btn key={k} on={preset === k} onClick={() => pick(k)}>{k}</Btn>
           ))}
+        </Row>
+        <Row label="Cake">
+          <Btn on={matchCake} onClick={() => setMatchCake(true)}>same colour as the paper</Btn>
+          <Btn on={!matchCake} onClick={() => setMatchCake(false)}>contrasting</Btn>
         </Row>
         <Row label="Backdrop — for judging, not the product">
           {Object.keys(BACKDROPS).map(k => (
@@ -221,12 +230,12 @@ export default function WaferPaperStudio() {
           {shapeKey === 'round' ? (
             <mesh receiveShadow castShadow>
               <cylinderGeometry args={[TIER.radius, TIER.radius, TIER.height, 72]} />
-              <meshStandardMaterial color="#FAF5EE" roughness={0.92} />
+              <meshStandardMaterial color={matchCake ? p.colour : '#FAF5EE'} roughness={0.92} />
             </mesh>
           ) : (
             <mesh receiveShadow castShadow>
               <boxGeometry args={[SHAPES.sheet.halfW * 2, TIER.height, SHAPES.sheet.halfD * 2]} />
-              <meshStandardMaterial color="#FAF5EE" roughness={0.92} />
+              <meshStandardMaterial color={matchCake ? p.colour : '#FAF5EE'} roughness={0.92} />
             </mesh>
           )}
 
