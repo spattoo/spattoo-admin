@@ -271,7 +271,18 @@ export default function BrushStrokeStudio() {
       if (d.id === null) {
         const id = nextId++;
         d.id = id;
-        setStrokes(list => [...list, { ...newStroke(list.length), id, ...g }]);
+        /* ⚠️ A DRAWN STROKE INHERITS THE SETTINGS IN FRONT OF YOU. Built from `newStroke` alone it
+           came out at the template's thickness and width, so setting Thickness and then drawing
+           silently threw that away — Sandeep: *"once i set the thickness and start hand drawing,
+           its not keeping the same thickness, its resetting."* The sliders show the SELECTED
+           stroke, so what they show is what the hand is about to lay down; `g` still wins, because
+           where it goes and how far it ran is what was actually drawn. */
+        const like = strokes[Math.min(sel, strokes.length - 1)];
+        setStrokes(list => [...list, {
+          ...newStroke(list.length), id,
+          ...(like ? { color: like.color, width: like.width, weight: like.weight, seed: like.seed } : null),
+          ...g,
+        }]);
         setSel(strokes.length);
       } else {
         setStrokes(list => list.map(st => (st.id === d.id ? { ...st, ...g } : st)));
