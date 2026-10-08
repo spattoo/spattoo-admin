@@ -12,7 +12,16 @@ import { fetchAllElements, fetchElementTypes, createGlobalElement, uploadThumbna
  * CLAUDE.md states the rule: "THE STUDIO IMPORTS THE GEOMETRY, IT DOES NOT CARRY A COPY OF IT … or
  * the tuned version and the rendered version drift." */
 import { normalizeArtwork, buildShellGeo, buildSwagRing, buildFestoons,
-         wallPerimeter, buildWrapBand, creamMaterialProps } from '@spattoo/designer';
+         wallPerimeter, buildWrapBand, creamMaterialProps,
+         /* ⚠️ THE PEN'S OWN RENDERER, IMPORTED. `side_rotation` is the attitude a HAND-PIPED piece
+            takes on a wall, and it cannot be tuned against a ring preview: a ring keeps the piece
+            upright in world space and yaws it outward, while the pen aligns its up-axis to the
+            surface normal. Calibrating one against the other is exactly how the pen came to be
+            reading the board's figure. A second stamp renderer here would reproduce that. */
+         StampStroke,
+         /* And core's own preparation, replacing a byte-identical local copy that sat in this file
+            — `check:no-geometry-copy` watches a named list and this one was not on it. */
+         extractGeo, SHELL_HEIGHT_FRAC } from '@spattoo/designer';
 import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
@@ -170,20 +179,6 @@ function circlePerimeter(r) {
 }
 
 // ── same extractGeo as CakeTier ───────────────────────────────────────────────
-function extractGeo(scene) {
-  let geo = null;
-  scene.traverse(obj => {
-    if (obj.isMesh && !geo) geo = obj.geometry.clone();
-  });
-  if (!geo) return null;
-  geo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-  geo.computeBoundingBox();
-  const box  = geo.boundingBox;
-  const size = new THREE.Vector3(); box.getSize(size);
-  const ctr  = new THREE.Vector3(); box.getCenter(ctr);
-  geo.translate(-ctr.x, -box.min.y, -ctr.z);
-  return { geo, sizeY: size.y };
-}
 
 // ── Single positioned piece / ring (with optional A/B alternation) ─────────────
 // MUST stay identical to BottomPipingRing/TopPipingRing in spattoo-core CakeTier.jsx.
@@ -450,6 +445,58 @@ const STANDARD_CAKE_COLOR = '#f5c6d0';
 // the element-colour picker existed.
 const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
 
+/* ── Hand-piped stamps on the wall, drawn by the designer's own StampStroke ──────────────────────
+ *
+ * ⚠️ NOT A PREVIEW OF A RING. A ring places a shell upright in world space and yaws it outward; the
+ * pen aligns the piece's up-axis to the SURFACE NORMAL, so on a wall "up" points out of the cake.
+ * The two frames give the same numbers different meanings, which is why `side_rotation` exists at
+ * all and why tuning it against the ring previews above would reproduce the original bug.
+ *
+ * The stroke is shaped exactly as CreamPen commits one: `kind` is implicit in StampStroke, `normal`
+ * is the wall's outward normal, `points` is a short run along it, `regular: true` means "behave like
+ * a ring" (faces across the run, not along it), and `rotation` is what we are tuning. Everything
+ * about how that becomes geometry — the +90° X bake, the footprint/height measurement, the seat
+ * after rotation — belongs to core and is not reproduced here.
+ */
+function WallStamps({ glbUrl, rot, color }) {
+  /* ⚠️ SIZED LIKE A RING, NOT PICKED. The pen sizes a `regular` stamp by HEIGHT (`target = 2 x
+     thickness`), and a ring normalises a shell to `radius x SHELL_HEIGHT_FRAC`. Deriving the
+     thickness from the same constant puts this run at exactly the scale of the rings beside it, so
+     the comparison is honest; a guessed 0.1 rendered specks you could not judge an attitude from.
+     INVARIANTS #8 — a studio must not hardcode a world dimension it can derive. */
+  const thickness = (CAKE_RADIUS * SHELL_HEIGHT_FRAC) / 2;
+
+  /* A short arc across the camera-FACING side of the wall at mid-height: enough pieces to read the
+     attitude, few enough to stay legible while a slider is moving.
+     ⚠️ +Z, BECAUSE THE PREVIEW CAMERA SITS AT [0, 5.5, 7.9]. The first cut put the run at -Z and
+     every piece hid behind the cake — one speck on the silhouette, which looks exactly like a
+     broken preview rather than a mis-aimed one. */
+  const stroke = useMemo(() => {
+    const y = Y_BASE + CAKE_HEIGHT * 0.5;
+    /* ⚠️ ON THE CENTRELINE, NOT ON THE SURFACE. `stampTransforms` seats a piece at `-th + seatDrop`
+       because a pen stroke's stored points are its rope's CENTRE, one radius proud of what the
+       pointer hit ("the stored centerline is lifted one radius"). Handing it points that already sit
+       on the cylinder makes that -th push every piece a radius INTO the wall — at [0,0,0] the disc
+       is thin enough that some still showed, and at [-90,0,0] the run vanished completely, which
+       reads as "the rotation broke it" rather than "the preview fed it the wrong points". */
+    const r = CAKE_RADIUS + thickness;
+    const pts = [];
+    for (let i = -4; i <= 4; i++) {
+      const a = Math.PI / 2 + i * 0.16;
+      pts.push([Math.cos(a) * r, y, Math.sin(a) * r]);
+    }
+    return {
+      points: pts,
+      // The outward normal at the middle of the run — the surface the pen seats against.
+      normal: [0, 0, 1],
+      thickness, spacing: 0.85, regular: true, seed: 1,
+      rotation: [rot.rx, rot.ry, rot.rz], lean: 0,
+    };
+  }, [rot.rx, rot.ry, rot.rz, thickness]);
+
+  return <StampStroke stroke={stroke} url={glbUrl} color={color} />;
+}
+
 function CakeScene({ shape = null, floor = true, cakeColor = STANDARD_CAKE_COLOR }) {
   const isRect = shape?.kind === 'rect';
   return (
@@ -631,6 +678,14 @@ export default function PipingCalibrator() {
   // when its zone is ticked or its tab is opened (render gate: includeRim || target === 'rim').
   const [includeRim,   setIncludeRim]   = useState(false);
 
+  /* ── Hand piping on the WALL — one key, not a third ring ────────────────────────────────────
+     `side_rotation` is a single rotation, so it gets a compact block rather than a Board/Rim-style
+     tab: none of the ring controls (flip, radial, swag, alternation) mean anything to a pen stroke.
+     Off by default — an element that authors nothing falls back to `bottom_rotation`, which is the
+     behaviour every element shipped before this had. */
+  const [sideRot,     setSideRot]     = useState({ rx: 0, ry: 0, rz: 0 });
+  const [includeSide, setIncludeSide] = useState(false);
+
   // ── Create-pattern mode: load an existing block element from the library by id,
   // tune the alternating pattern against its R2 GLB, capture a building-block thumbnail,
   // and save a new piping_pattern element that references the block (no new file). ──
@@ -752,6 +807,9 @@ export default function PipingCalibrator() {
   const valuesJson = JSON.stringify({
     ...(includeBoard ? sectionFor('bottom', boardCfg) : {}),
     ...(includeRim   ? sectionFor('top',    rimCfg)   : {}),
+    // Not a `sectionFor` prefix: `side_rotation` has no top_/bottom_ twin, because there is no wall
+    // above the rim. Emitted only when ticked, so a paste never silently overrides the fallback.
+    ...(includeSide ? { side_rotation: [Math.round(sideRot.rx), Math.round(sideRot.ry), Math.round(sideRot.rz)] } : {}),
   }, null, 2);
 
   return (
@@ -891,6 +949,23 @@ export default function PipingCalibrator() {
                 {cfg.flipBottom ? 'ON' : 'OFF'}
               </button>
             </div>
+
+            {/* ── Hand piping on the wall ────────────────────────────────────────────────────
+                A pen stroke on a wall is a THIRD surface, not a variant of the board: the piece's
+                up-axis aligns to the surface normal there, so the board's numbers do not transfer.
+                Left unticked, an element falls back to `bottom_rotation` exactly as before. */}
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', marginBottom: 4, marginTop: 14, textTransform: 'uppercase', letterSpacing: 0.8 }}>Hand piping on the wall</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#6B8C74', marginBottom: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={includeSide} onChange={e => setIncludeSide(e.target.checked)} />
+              <span>Set <code>side_rotation</code> (else it follows the board)</span>
+            </label>
+            {includeSide && (
+              <>
+                <Slider label="Side X" value={sideRot.rx} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rx: v }))} color="#e05252" />
+                <Slider label="Side Y" value={sideRot.ry} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, ry: v }))} color="#52c452" />
+                <Slider label="Side Z" value={sideRot.rz} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rz: v }))} color="#5252e0" />
+              </>
+            )}
 
             {/* Rotation */}
             <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', marginBottom: 6, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>Rotation (degrees)</div>
@@ -1141,6 +1216,11 @@ export default function PipingCalibrator() {
             )}
             {activeGlbUrl && (includeRim || target === 'rim') && (
               <CalibScene glbUrl={activeGlbUrl} cfg={rimCfg} showRing={showRing} anchorY={Y_BASE + CAKE_HEIGHT} inward={true} altGlbUrl={altBlobUrl} shape={shape} color={elementColor} />
+            )}
+            {/* The wall run appears only while `side_rotation` is being authored — it is a hand-piped
+                stroke, not a ring, and leaving it on the cake would misread as a third border. */}
+            {activeGlbUrl && includeSide && (
+              <WallStamps glbUrl={activeGlbUrl} rot={sideRot} color={elementColor} />
             )}
           </Suspense>
 
