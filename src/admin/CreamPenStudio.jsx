@@ -13,6 +13,12 @@ import creamFonts   from './creamFonts.json';
 import gentilis     from 'three/examples/fonts/gentilis_regular.typeface.json';
 import gentilisBold from 'three/examples/fonts/gentilis_bold.typeface.json';
 import optimer      from 'three/examples/fonts/optimer_regular.typeface.json';
+/* ⚠️ CREAM'S MATERIAL COMES FROM CORE. This file had its own `creamMaterialProps`, and it had
+ * drifted where it matters most — it passed the raw hex through as `color`/`sheenColor`, while core
+ * runs it through `creamAlbedo`, the correction for cream's own measured reference light, and adds
+ * `specularIntensity`. So the SAME hex rendered as two different colours here and on the cake, in a
+ * tool whose job is judging colour. One definition, imported. */
+import { creamMaterialProps } from '@spattoo/designer';
 
 // ── Cake stage — mirrors PipingCalibrator so the preview reads like the designer ──
 const CAKE_RADIUS = 1.2;
@@ -22,10 +28,6 @@ const TOP_Y       = Y_BASE + CAKE_HEIGHT;   // the writable top surface
 const DEG         = Math.PI / 180;
 
 const PIPING_SOFTNESS_DEFAULT = 0.7;
-function creamMaterialProps(softness, color) {
-  const s = Math.min(1, Math.max(0, softness ?? PIPING_SOFTNESS_DEFAULT));
-  return { color, roughness: 0.5 + 0.5 * s, sheen: (0.4 / 0.7) * s, sheenRoughness: 0.9, sheenColor: color };
-}
 
 const STANDARD_CAKE_COLOR = '#f5c6d0';
 function CakeScene({ cakeColor = STANDARD_CAKE_COLOR }) {

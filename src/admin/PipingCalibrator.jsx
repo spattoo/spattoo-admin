@@ -4,7 +4,15 @@ import { OrbitControls, Environment, RoundedBox } from '@react-three/drei';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { fetchAllElements, fetchElementTypes, createGlobalElement, uploadThumbnail } from '../lib/api';
-import { normalizeArtwork } from '@spattoo/designer';
+/* ⚠️ THE GEOMETRY COMES FROM CORE, IT IS NOT REIMPLEMENTED HERE. This file used to carry its own
+ * `buildShellGeo`, and the two drifted in a way that cost a day of tuning: core caps a shell's scale
+ * against the tier radius (`capShellScale`) and this copy did not, so past about 1.15x the tool
+ * showed a size the cake would never render. Sandeep, after tuning here and getting something else
+ * on the cake: *"i loaded this in piping calibrator. and it landed perfectly fine."*
+ * CLAUDE.md states the rule: "THE STUDIO IMPORTS THE GEOMETRY, IT DOES NOT CARRY A COPY OF IT … or
+ * the tuned version and the rendered version drift." */
+import { normalizeArtwork, buildShellGeo, buildSwagRing, buildFestoons,
+         wallPerimeter, buildWrapBand, creamMaterialProps } from '@spattoo/designer';
 import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
@@ -13,50 +21,11 @@ const DEG = Math.PI / 180;
 // spattoo-core CakeTier.jsx so this preview matches the designer exactly. 0 = glossy/wet,
 // 1 = matte/whipped; the default 0.7 reproduces the original look (roughness 0.85, sheen 0.4).
 const PIPING_SOFTNESS_DEFAULT = 0.7;
-function creamMaterialProps(softness, color) {
-  const s = Math.min(1, Math.max(0, softness ?? PIPING_SOFTNESS_DEFAULT));
-  return {
-    color,
-    roughness:      0.5 + 0.5 * s,
-    sheen:          (0.4 / 0.7) * s,
-    sheenRoughness: 0.9,
-    sheenColor:     color,
-  };
-}
 
 // Bend a flat ring into `swagCount` scalloped drapes (garland/swag look).
 // MUST stay identical to buildSwagRing() in spattoo-core CakeTier.jsx so this
 // preview matches the designer exactly. Shells are spaced by arc-length along the
 // draped curve; tq pitches each about the world radial axis to follow the slope.
-function buildSwagRing({ r, baseY, step, swagCount, swagDepth, swagTilt = 0.5 }) {
-  const dipAt = a => -swagDepth * (1 - Math.cos(a * swagCount)) / 2;
-  const N = 1440;
-  const cum = [0];
-  let px = r, py = baseY + dipAt(0), pz = 0;
-  for (let s = 1; s <= N; s++) {
-    const a = (s / N) * Math.PI * 2;
-    const cx = Math.cos(a) * r, cy = baseY + dipAt(a), cz = Math.sin(a) * r;
-    cum.push(cum[s - 1] + Math.hypot(cx - px, cy - py, cz - pz));
-    px = cx; py = cy; pz = cz;
-  }
-  const total = cum[N];
-  const count = Math.max(6, Math.round(total / step));
-  const out = [];
-  let seg = 0;
-  for (let j = 0; j < count; j++) {
-    const target = (j / count) * total;
-    while (seg < N && cum[seg + 1] < target) seg++;
-    const a0 = (seg / N) * Math.PI * 2, a1 = ((seg + 1) / N) * Math.PI * 2;
-    const f  = (target - cum[seg]) / Math.max(1e-9, cum[seg + 1] - cum[seg]);
-    const a  = a0 + (a1 - a0) * f;
-    const slope = -(swagDepth * swagCount / 2) * Math.sin(a * swagCount);
-    const tilt  = -swagTilt * Math.atan2(slope, r);
-    const sh = Math.sin(tilt / 2), ch = Math.cos(tilt / 2);
-    const tq = [Math.cos(a) * sh, 0, Math.sin(a) * sh, ch];
-    out.push({ pos: [Math.cos(a) * r, baseY + dipAt(a), Math.sin(a) * r], rotY: a, tq });
-  }
-  return out;
-}
 
 // Match the designer's default cake so the calibrator is to scale.
 const CAKE_RADIUS = 1.2;   // designer TIER_RADII[0]
@@ -190,13 +159,6 @@ function bendOneFestoon(srcGeo, { th0, span, depth, attachY, radius, tilt = 0 })
   return g;
 }
 
-function buildFestoons(scene, { flip, festoons, depth, attachY, radius, spread = 0.96, tilt = 0 }) {
-  const src = bakeStrip(scene, flip);
-  if (!src) return [];
-  const span = (2 * Math.PI / festoons) * spread; // each U spans its share of the ring (small gap)
-  return Array.from({ length: festoons }, (_, k) =>
-    bendOneFestoon(src, { th0: Math.PI / 2 + k * (2 * Math.PI / festoons), span, depth, attachY, radius, tilt }));
-}
 
 // ── Wrap a pre-formed RING GLB around the wall (round OR rect) ─────────────────
 // MUST stay identical to circlePerimeter / buildWrapBand in spattoo-core (surface.js /
@@ -205,45 +167,6 @@ function buildFestoons(scene, { flip, festoons, depth, attachY, radius, spread =
 // its height — so a ring GLB hugs a round wall as a circle and a sheet wall as a rounded-rect.
 function circlePerimeter(r) {
   return { length: 2 * Math.PI * r, at(s) { const a = s / r, nx = Math.cos(a), nz = Math.sin(a); return { x: nx * r, z: nz * r, nx, nz }; } };
-}
-function wallPerimeter(shape) {
-  return shape?.kind === 'rect' ? roundedRectPerimeter(shape.halfW, shape.halfD, shape.cornerR) : circlePerimeter(CAKE_RADIUS);
-}
-function buildWrapBand(scene, { perim, anchorY = 0, heightFrac = 0.4, sizeFactor = 1, radius = CAKE_RADIUS, outset = 0.01, tilt = 0 }) {
-  const g = bakeStrip(scene, false);
-  if (!g || !perim) return null;
-  g.computeBoundingBox();
-  let size = new THREE.Vector3(); g.boundingBox.getSize(size);
-  const thin = (size.x <= size.y && size.x <= size.z) ? 'x' : (size.z <= size.y ? 'z' : 'y');
-  if (thin === 'x') g.applyMatrix4(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
-  else if (thin === 'z') g.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-  g.computeBoundingBox();
-  const c = new THREE.Vector3(); g.boundingBox.getCenter(c);
-  g.translate(-c.x, 0, -c.z);
-  g.computeBoundingBox();
-  const yMin = g.boundingBox.min.y;
-  size = new THREE.Vector3(); g.boundingBox.getSize(size);
-  const ringH = size.y || 1e-3;
-  const pos = g.attributes.position;
-  let rInner = Infinity;
-  for (let i = 0; i < pos.count; i++) { const rho = Math.hypot(pos.getX(i), pos.getZ(i)); if (rho < rInner) rInner = rho; }
-  const cs = (radius * heightFrac / ringH) * Math.max(0.05, sizeFactor);
-  const L = perim.length, v = new THREE.Vector3();
-  const cb = Math.cos(tilt), sb = Math.sin(tilt);                          // tilt about the wall tangent
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const f = (((Math.atan2(z, x) / (2 * Math.PI)) % 1) + 1) % 1;
-    const P = perim.at(f * L);
-    const rRel = (Math.hypot(x, z) - rInner) * cs;                         // radial dist from inner face
-    const h    = (y - yMin) * cs;                                          // height above the band base
-    const out  = rRel * cb + h * sb + outset;                            // tilt rotates the cross-section
-    const hT   = h * cb - rRel * sb;                                      //   about the inner-bottom edge
-    v.set(P.x + P.nx * out, anchorY + hT, P.z + P.nz * out);
-    pos.setXYZ(i, v.x, v.y, v.z);
-  }
-  pos.needsUpdate = true;
-  g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
-  return g;
 }
 
 // ── same extractGeo as CakeTier ───────────────────────────────────────────────
@@ -264,27 +187,13 @@ function extractGeo(scene) {
 
 // ── Single positioned piece / ring (with optional A/B alternation) ─────────────
 // MUST stay identical to BottomPipingRing/TopPipingRing in spattoo-core CakeTier.jsx.
-function buildShellGeo(scene, flip, sizeFactor = 1) {
-  const result = extractGeo(scene);
-  if (!result) return null;
-  const geo = result.geo;
-  if (flip) {
-    geo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI));
-    geo.computeBoundingBox();
-    geo.translate(0, -geo.boundingBox.min.y, 0);
-  }
-  const sc = (CAKE_RADIUS * 0.24) / result.sizeY * (sizeFactor ?? 1);
-  geo.computeBoundingBox();
-  const bb = new THREE.Vector3(); geo.boundingBox.getSize(bb);
-  return { geometry: geo, shellScale: sc, bbDepth: bb.z, bbWidth: bb.x };
-}
 
 function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape = null, color = DEFAULT_ELEMENT_COLOR }) {
   const { scene } = useGLTF(glbUrl);
   const { scene: sceneAlt } = useGLTF(altGlbUrl || glbUrl);
 
-  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
-  const B = useMemo(() => (cfg.altEnabled ? buildShellGeo(sceneAlt, cfg.altFlip, cfg.sizeFactor) : null),
+  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, CAKE_RADIUS, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
+  const B = useMemo(() => (cfg.altEnabled ? buildShellGeo(sceneAlt, cfg.altFlip, CAKE_RADIUS, cfg.sizeFactor) : null),
     [cfg.altEnabled, sceneAlt, cfg.altFlip, cfg.sizeFactor]);
 
   const pattern = patternStr(cfg);
@@ -341,7 +250,7 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape =
   const wrapGeo = useMemo(() => {
     if (!cfg.wrap) return null;
     return buildWrapBand(scene, {
-      perim: wallPerimeter(shape), anchorY: anchorY + cfg.yOffset,
+      perim: wallPerimeter(shape, CAKE_RADIUS), anchorY: anchorY + cfg.yOffset,
       heightFrac: 0.4, sizeFactor: cfg.wrapSize ?? 1, radius: CAKE_RADIUS,
       outset: 0.01 + cfg.radialOffset, tilt: (cfg.wrapTilt ?? 0) * DEG,
     });
@@ -412,8 +321,8 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape =
 export function BuildingBlockScene({ glbUrl, altGlbUrl, cfg, overlap = 0.9, shellCount = 2, color = '#f5e6c8' }) {
   const { scene }          = useGLTF(glbUrl);
   const { scene: sceneAlt } = useGLTF(altGlbUrl || glbUrl);
-  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
-  const B = useMemo(() => buildShellGeo(sceneAlt, cfg.altFlip, cfg.sizeFactor), [sceneAlt, cfg.altFlip, cfg.sizeFactor]);
+  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, CAKE_RADIUS, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
+  const B = useMemo(() => buildShellGeo(sceneAlt, cfg.altFlip, CAKE_RADIUS, cfg.sizeFactor), [sceneAlt, cfg.altFlip, cfg.sizeFactor]);
   if (!A) return null;
   const pattern = patternStr(cfg);
   const L = pattern.length;
@@ -473,8 +382,8 @@ export function PatternCakeThumb({
   const { scene }          = useGLTF(glbUrl);
   const { scene: sceneAlt } = useGLTF(altGlbUrl || glbUrl);
   const isTop = zone === 'rim';
-  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
-  const B = useMemo(() => buildShellGeo(sceneAlt, cfg.altFlip, cfg.sizeFactor), [sceneAlt, cfg.altFlip, cfg.sizeFactor]);
+  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, CAKE_RADIUS, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
+  const B = useMemo(() => buildShellGeo(sceneAlt, cfg.altFlip, CAKE_RADIUS, cfg.sizeFactor), [sceneAlt, cfg.altFlip, cfg.sizeFactor]);
   const pattern = patternStr(cfg);
   const L = pattern.length;
   const anchorY = isTop ? (Y_BASE + CAKE_HEIGHT) : Y_BASE;
