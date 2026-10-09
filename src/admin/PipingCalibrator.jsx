@@ -1286,73 +1286,82 @@ export default function PipingCalibrator() {
                 <Slider label="Side X" value={sideRot.rx} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rx: v }))} color="#e05252" />
                 <Slider label="Side Y" value={sideRot.ry} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, ry: v }))} color="#52c452" />
                 <Slider label="Side Z" value={sideRot.rz} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rz: v }))} color="#5252e0" />
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 13 }}>
-                  <input type="checkbox" checked={coat} onChange={e => setCoat(e.target.checked)} />
-                  <b>Cover the cake</b>
-                </label>
-                <div style={{ fontSize: 11.5, color: '#777', lineHeight: 1.45, margin: '4px 0 8px' }}>
-                  Packs this element over the whole top and side. Uses the <b>rim</b> rotation on the
-                  lid and the <b>side</b> rotation on the wall — the same pair the pen picks between.
-                </div>
-                {coat && (
-                  <Slider label="Piece size" value={coatRadius} min={0.08} max={0.5} step={0.005}
-                          onChange={setCoatRadius} color="#8a6fd0" />
-                )}
-                {coat && (
-                  <Slider label="Shape cover" value={coatCover} min={0.5} max={1} step={0.01}
-                          onChange={setCoatCover} color="#c06fa0" />
-                )}
-                {coat && (
-                  <Slider label="Rim stretch" value={coatRimStretch} min={1} max={2.5} step={0.02}
-                          onChange={setCoatRimStretch} color="#d0704f" />
-                )}
-                {coat && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}>
-                    <input type="checkbox" checked={coatSeats} onChange={e => setCoatSeats(e.target.checked)} />
-                    Show seats <span style={{ color: '#888', fontSize: 11 }}>(blue top · orange side · red rim)</span>
-                  </label>
-                )}
-                {coat && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                  fontSize: 11.5, color: '#555', marginBottom: 4 }}>
-                      <b>Top rotation</b>
-                      <button onClick={() => setCoatTopRot(null)}
-                              style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 5,
-                                       border: '1px solid #d9d9e0', background: coatTopRot ? '#fff' : '#eceaf2',
-                                       cursor: 'pointer' }}>
-                        {coatTopRot ? 'follow side' : 'following side'}
-                      </button>
-                    </div>
-                    <Slider label="Top X" value={(coatTopRot ?? sideRot).rx} min={-180} max={180}
-                            onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rx: v }))} color="#e05252" />
-                    <Slider label="Top Y" value={(coatTopRot ?? sideRot).ry} min={-180} max={180}
-                            onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), ry: v }))} color="#52c452" />
-                    <Slider label="Top Z" value={(coatTopRot ?? sideRot).rz} min={-180} max={180}
-                            onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rz: v }))} color="#5252e0" />
-                  </div>
-                )}
-                {coat && coatStat && (
-                  <div style={{ fontSize: 11, lineHeight: 1.5, padding: '7px 9px', borderRadius: 6,
-                                background: '#f3f1f7', color: '#4a4458', fontFamily: 'monospace' }}>
-                    <div><b>{coatStat.seats}</b> pieces · {coatStat.side.verts.toLocaleString()} verts each</div>
-                    <div>GLB box&nbsp;&nbsp;{coatStat.side.raw.map(n => n.toFixed(2)).join(' × ')}</div>
-                    <div>solid&nbsp;&nbsp;&nbsp;&nbsp;{coatStat.side.solid.map(n => n.toFixed(2)).join(' × ')}</div>
-                    <div>side fit {coatStat.side.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.side.scale.toFixed(3)})</div>
-                    <div>top&nbsp; fit {coatStat.top.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.top.scale.toFixed(3)})</div>
-                    <div style={{ marginTop: 3, fontWeight: 700,
-                                  color: coatStat.side.tileFloor ? '#a4252a' : '#2d6a4f' }}>
-                      tiles at {coatStat.side.tile.toFixed(3)} × width
-                      {coatStat.side.tileFloor && ' — has holes, cannot tile'}
-                    </div>
-                    <div style={{ opacity: 0.7 }}>
-                      seats W {Math.max(coatStat.side.fitted[0], coatStat.top.fitted[0]).toFixed(3)}
-                      · H {coatStat.side.fitted[2].toFixed(3)} · cake h 1.45
-                    </div>
-                  </div>
-                )}
               </>
             )}
+
+            {/* ── Cover the cake ───────────────────────────────────────────────────────────────
+                ⚠️ OUTSIDE the `target === 'side'` panel, deliberately. It lived in there because
+                it was built next to the Side rotation sliders it reads — and then vanished the
+                moment anyone switched to the rim or board tab, which is most of the time. A coat
+                is the whole cake; it is not a property of one zone. It still reads the side and
+                rim figures from state, which do not care which tab is showing. */}
+            <div style={{ borderTop: '1px solid #e6e0e6', marginTop: 12, paddingTop: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 13 }}>
+                <input type="checkbox" checked={coat} onChange={e => setCoat(e.target.checked)} />
+                <b>Cover the cake</b>
+              </label>
+              <div style={{ fontSize: 11.5, color: '#777', lineHeight: 1.45, margin: '4px 0 8px' }}>
+                Packs this element over the whole top and side. Uses the <b>rim</b> rotation on the
+                lid and the <b>side</b> rotation on the wall — the same pair the pen picks between.
+              </div>
+              {coat && (
+                <Slider label="Piece size" value={coatRadius} min={0.08} max={0.5} step={0.005}
+                        onChange={setCoatRadius} color="#8a6fd0" />
+              )}
+              {coat && (
+                <Slider label="Shape cover" value={coatCover} min={0.5} max={1} step={0.01}
+                        onChange={setCoatCover} color="#c06fa0" />
+              )}
+              {coat && (
+                <Slider label="Rim stretch" value={coatRimStretch} min={1} max={2.5} step={0.02}
+                        onChange={setCoatRimStretch} color="#d0704f" />
+              )}
+              {coat && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}>
+                  <input type="checkbox" checked={coatSeats} onChange={e => setCoatSeats(e.target.checked)} />
+                  Show seats <span style={{ color: '#888', fontSize: 11 }}>(blue top · orange side · red rim)</span>
+                </label>
+              )}
+              {coat && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                fontSize: 11.5, color: '#555', marginBottom: 4 }}>
+                    <b>Top rotation</b>
+                    <button onClick={() => setCoatTopRot(null)}
+                            style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 5,
+                                     border: '1px solid #d9d9e0', background: coatTopRot ? '#fff' : '#eceaf2',
+                                     cursor: 'pointer' }}>
+                      {coatTopRot ? 'follow side' : 'following side'}
+                    </button>
+                  </div>
+                  <Slider label="Top X" value={(coatTopRot ?? sideRot).rx} min={-180} max={180}
+                          onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rx: v }))} color="#e05252" />
+                  <Slider label="Top Y" value={(coatTopRot ?? sideRot).ry} min={-180} max={180}
+                          onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), ry: v }))} color="#52c452" />
+                  <Slider label="Top Z" value={(coatTopRot ?? sideRot).rz} min={-180} max={180}
+                          onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rz: v }))} color="#5252e0" />
+                </div>
+              )}
+              {coat && coatStat && (
+                <div style={{ fontSize: 11, lineHeight: 1.5, padding: '7px 9px', borderRadius: 6,
+                              background: '#f3f1f7', color: '#4a4458', fontFamily: 'monospace' }}>
+                  <div><b>{coatStat.seats}</b> pieces · {coatStat.side.verts.toLocaleString()} verts each</div>
+                  <div>GLB box&nbsp;&nbsp;{coatStat.side.raw.map(n => n.toFixed(2)).join(' × ')}</div>
+                  <div>solid&nbsp;&nbsp;&nbsp;&nbsp;{coatStat.side.solid.map(n => n.toFixed(2)).join(' × ')}</div>
+                  <div>side fit {coatStat.side.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.side.scale.toFixed(3)})</div>
+                  <div>top&nbsp; fit {coatStat.top.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.top.scale.toFixed(3)})</div>
+                  <div style={{ marginTop: 3, fontWeight: 700,
+                                color: coatStat.side.tileFloor ? '#a4252a' : '#2d6a4f' }}>
+                    tiles at {coatStat.side.tile.toFixed(3)} × width
+                    {coatStat.side.tileFloor && ' — has holes, cannot tile'}
+                  </div>
+                  <div style={{ opacity: 0.7 }}>
+                    seats W {Math.max(coatStat.side.fitted[0], coatStat.top.fitted[0]).toFixed(3)}
+                    · H {coatStat.side.fitted[2].toFixed(3)} · cake h 1.45
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* ── Ring controls — board and rim only ─────────────────────────────────────────── */}
             {target !== 'side' && (<>
