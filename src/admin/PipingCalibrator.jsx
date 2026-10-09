@@ -481,10 +481,39 @@ const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
  * horizontal extent AFTER its surface rotation. Size it by height and the roses either collide or
  * leave cake showing, depending on how tall the model happens to be.
  */
-function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats }) {
+function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats, cover }) {
   const { scene } = useGLTF(glbUrl);
 
   const base = useMemo(() => extractGeo(scene), [scene]);
+
+  /* ── How far the SHAPE reaches, not its box ────────────────────────────────────────────────
+   *
+   * ⚠️ THE BOUNDING BOX IS THE WRONG RULER FOR PACKING, and this cost four rounds to find. The
+   * seat arithmetic was measured correct — the side's top piece overlaps the rim's reach by
+   * 0.002, and the rim row is present — yet a band of bare cake stayed under the shoulder. That
+   * leaves one explanation: the rose does not FILL its box. A spike, a tail or a few stray
+   * petals push min/max out past where the cream actually ends, every piece is seated as though
+   * it were that big, and the shortfall appears twice over at every seam.
+   *
+   * So extents come from a PERCENTILE of the vertices rather than their extremes: the span that
+   * holds all but the outermost `1 - COVER` of them on each axis. A handful of outlying vertices
+   * stop dictating the packing for the whole cake, while the bulk of the shape still does.
+   *
+   * COVER is deliberately a knob and not a constant — how much of a model is "the shape" depends
+   * on the model, and this is the first one. */
+  const extent = (geo, cover) => {
+    const pos = geo.getAttribute('position');
+    const lo = (1 - cover) / 2, hi = 1 - lo;
+    const out = [];
+    for (let axis = 0; axis < 3; axis++) {
+      const v = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) v[i] = pos.getComponent(i, axis);
+      v.sort();
+      const a = v[Math.floor(lo * (v.length - 1))], b = v[Math.ceil(hi * (v.length - 1))];
+      out.push({ min: a, max: b, size: b - a });
+    }
+    return out;
+  };
 
 
   /* One geometry per surface, each already carrying its own rotation baked in — so the instance
@@ -495,7 +524,11 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
     g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(
       new THREE.Euler(rot.rx * DEG, rot.ry * DEG, rot.rz * DEG)));
     g.computeBoundingBox();
-    const size = new THREE.Vector3(); g.boundingBox.getSize(size);
+    const box = new THREE.Vector3(); g.boundingBox.getSize(box);
+    /* Scaled and seated on the SOLID extent. Scaling on the box would also shrink the rose to fit
+       a width most of it never uses, so both numbers come from the same ruler. */
+    const ext = extent(g, cover);
+    const size = new THREE.Vector3(ext[0].size, ext[1].size, ext[2].size);
     const footprint = Math.max(size.x, size.z) || 1;
     const scale = (2 * roseRadius) / footprint;
     /* ⚠️ RAW SIZE IS REPORTED, not just the scale. The first GLB coat came out with pieces far
@@ -513,16 +546,17 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
      *
      * X and Z are centred because the seat is the middle of the patch the piece covers; Y goes to
      * its MINIMUM because that is the face resting on the cake. */
-    const c = new THREE.Vector3(); g.boundingBox.getCenter(c);
-    g.translate(-c.x, -g.boundingBox.min.y, -c.z);
+    /* Centred and seated on the solid extent too, so an outlying spike cannot shove the piece off
+       its seat — the same reason the sizes come from it. */
+    g.translate(-(ext[0].min + ext[0].max) / 2, -ext[1].min, -(ext[2].min + ext[2].max) / 2);
     g.computeBoundingBox();
     return { geo: g, scale, verts: g.getAttribute('position').count,
-             raw: [size.x, size.y, size.z], footprint,
+             raw: [box.x, box.y, box.z], solid: [size.x, size.y, size.z], footprint,
              fitted: [size.x * scale, size.y * scale, size.z * scale] };
   };
 
-  const top  = useMemo(() => forSurface(topRot),  [base, topRot.rx, topRot.ry, topRot.rz, roseRadius]);
-  const side = useMemo(() => forSurface(sideRot), [base, sideRot.rx, sideRot.ry, sideRot.rz, roseRadius]);
+  const top  = useMemo(() => forSurface(topRot),  [base, topRot.rx, topRot.ry, topRot.rz, roseRadius, cover]);
+  const side = useMemo(() => forSurface(sideRot), [base, sideRot.rx, sideRot.ry, sideRot.rz, roseRadius, cover]);
 
   /* ⚠️ SEATED FROM THE PIECE'S MEASURED SIZE, NOT FROM THE SIZE SLIDER. The slider asks for a
    * radius; what the packing needs is how far this particular GLB actually reaches across the
@@ -893,6 +927,7 @@ export default function PipingCalibrator() {
   const [coatTopRot,  setCoatTopRot]  = useState(null);   // null = follow the side rotation
   const [coatStat,    setCoatStat]    = useState(null);
   const [coatSeats,   setCoatSeats]   = useState(false);
+  const [coatCover,   setCoatCover]   = useState(0.9);
   const onCoatMeasure = useCallback(setCoatStat, []);
   const [includeSide, setIncludeSide] = useState(false);
 
@@ -1234,6 +1269,10 @@ export default function PipingCalibrator() {
                           onChange={setCoatRadius} color="#8a6fd0" />
                 )}
                 {coat && (
+                  <Slider label="Shape cover" value={coatCover} min={0.5} max={1} step={0.01}
+                          onChange={setCoatCover} color="#c06fa0" />
+                )}
+                {coat && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}>
                     <input type="checkbox" checked={coatSeats} onChange={e => setCoatSeats(e.target.checked)} />
                     Show seats <span style={{ color: '#888', fontSize: 11 }}>(blue top · orange side · red rim)</span>
@@ -1263,7 +1302,8 @@ export default function PipingCalibrator() {
                   <div style={{ fontSize: 11, lineHeight: 1.5, padding: '7px 9px', borderRadius: 6,
                                 background: '#f3f1f7', color: '#4a4458', fontFamily: 'monospace' }}>
                     <div><b>{coatStat.seats}</b> pieces · {coatStat.side.verts.toLocaleString()} verts each</div>
-                    <div>GLB raw {coatStat.side.raw.map(n => n.toFixed(2)).join(' × ')}</div>
+                    <div>GLB box&nbsp;&nbsp;{coatStat.side.raw.map(n => n.toFixed(2)).join(' × ')}</div>
+                    <div>solid&nbsp;&nbsp;&nbsp;&nbsp;{coatStat.side.solid.map(n => n.toFixed(2)).join(' × ')}</div>
                     <div>side fit {coatStat.side.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.side.scale.toFixed(3)})</div>
                     <div>top&nbsp; fit {coatStat.top.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.top.scale.toFixed(3)})</div>
                     <div style={{ opacity: 0.7, marginTop: 3 }}>
@@ -1557,7 +1597,7 @@ export default function PipingCalibrator() {
               <CoatScene glbUrl={activeGlbUrl} roseRadius={coatRadius}
                          topRot={coatTopRot ?? sideRot} sideRot={sideRot}
                          color={elementColor} softness={rimCfg.softness}
-                         onMeasure={onCoatMeasure} showSeats={coatSeats} />
+                         onMeasure={onCoatMeasure} showSeats={coatSeats} cover={coatCover} />
             )}
           </Suspense>
 
