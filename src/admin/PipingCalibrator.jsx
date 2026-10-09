@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, Suspense } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, RoundedBox } from '@react-three/drei';
 import { useGLTF } from '@react-three/drei';
@@ -481,7 +481,7 @@ const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
  * horizontal extent AFTER its surface rotation. Size it by height and the roses either collide or
  * leave cake showing, depending on how tall the model happens to be.
  */
-function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness }) {
+function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure }) {
   const { scene } = useGLTF(glbUrl);
 
   const base = useMemo(() => extractGeo(scene), [scene]);
@@ -502,14 +502,25 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness }) {
     const size = new THREE.Vector3(); g.boundingBox.getSize(size);
     const footprint = Math.max(size.x, size.z) || 1;
     const scale = (2 * roseRadius) / footprint;
+    /* ⚠️ RAW SIZE IS REPORTED, not just the scale. The first GLB coat came out with pieces far
+       larger than their seats — they hung below the board and still left cake showing, which is
+       the signature of a bounding box bigger than the shape inside it (spiky petals, a stem, or
+       an unbaked node transform in the model). Without the measured numbers on screen that is
+       indistinguishable from the scale maths being wrong, and we spent a round guessing. */
     /* Seat the piece on the surface it will sit on: y = 0 is the cake, so its lowest point goes
        there. Measured after rotation for the same reason the scale is. */
     g.translate(0, -g.boundingBox.min.y, 0);
-    return { geo: g, scale, verts: g.getAttribute('position').count };
+    return { geo: g, scale, verts: g.getAttribute('position').count,
+             raw: [size.x, size.y, size.z], footprint,
+             fitted: [size.x * scale, size.y * scale, size.z * scale] };
   };
 
   const top  = useMemo(() => forSurface(topRot),  [base, topRot.rx, topRot.ry, topRot.rz, roseRadius]);
   const side = useMemo(() => forSurface(sideRot), [base, sideRot.rx, sideRot.ry, sideRot.rz, roseRadius]);
+
+  useEffect(() => {
+    if (top && side && onMeasure) onMeasure({ top, side, seats: seats.length });
+  }, [top, side, seats.length, onMeasure]);
 
   if (!base) return null;
   return (
@@ -801,6 +812,8 @@ export default function PipingCalibrator() {
    * screen. A separate page would have meant tuning blind and checking elsewhere. */
   const [coat,        setCoat]        = useState(false);
   const [coatRadius,  setCoatRadius]  = useState(ROSETTE_DEFAULTS.rosetteRadius);
+  const [coatStat,    setCoatStat]    = useState(null);
+  const onCoatMeasure = useCallback(setCoatStat, []);
   const [includeSide, setIncludeSide] = useState(false);
 
   // ── Create-pattern mode: load an existing block element from the library by id,
@@ -1140,6 +1153,18 @@ export default function PipingCalibrator() {
                   <Slider label="Piece size" value={coatRadius} min={0.08} max={0.5} step={0.005}
                           onChange={setCoatRadius} color="#8a6fd0" />
                 )}
+                {coat && coatStat && (
+                  <div style={{ fontSize: 11, lineHeight: 1.5, padding: '7px 9px', borderRadius: 6,
+                                background: '#f3f1f7', color: '#4a4458', fontFamily: 'monospace' }}>
+                    <div><b>{coatStat.seats}</b> pieces · {coatStat.side.verts.toLocaleString()} verts each</div>
+                    <div>GLB raw {coatStat.side.raw.map(n => n.toFixed(2)).join(' × ')}</div>
+                    <div>side fit {coatStat.side.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.side.scale.toFixed(3)})</div>
+                    <div>top&nbsp; fit {coatStat.top.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.top.scale.toFixed(3)})</div>
+                    <div style={{ opacity: 0.7, marginTop: 3 }}>
+                      seat spacing {(coatRadius * 1.2).toFixed(3)} · cake h 1.45
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -1423,7 +1448,8 @@ export default function PipingCalibrator() {
             {activeGlbUrl && coat && (
               <CoatScene glbUrl={activeGlbUrl} roseRadius={coatRadius}
                          topRot={rimCfg} sideRot={sideRot}
-                         color={elementColor} softness={rimCfg.softness} />
+                         color={elementColor} softness={rimCfg.softness}
+                         onMeasure={onCoatMeasure} />
             )}
           </Suspense>
 
