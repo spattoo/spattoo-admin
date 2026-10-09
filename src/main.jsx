@@ -52,6 +52,7 @@ const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
 const PatternBuilder        = lazy(() => import('./admin/PatternBuilder.jsx'));
 const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'));
+const RosetteCoatStudio     = lazy(() => import('./admin/RosetteCoatStudio.jsx'));
 const PerchCalibrator       = lazy(() => import('./admin/PerchCalibrator.jsx'));
 const CreamPenStudio        = lazy(() => import('./admin/CreamPenStudio.jsx'));
 const ButterflyStudio       = lazy(() => import('./admin/ButterflyStudio.jsx'));
@@ -126,6 +127,7 @@ const ROUTES = {
   '/plans':               ManagePlans,
   '/pattern-builder':     PatternBuilder,
   '/elements/piping-calibrator': PipingCalibrator,
+  '/elements/rosette-coat':      RosetteCoatStudio,
   '/elements/perch-calibrator':  PerchCalibrator,
   '/elements/cream-pen':         CreamPenStudio,
   '/elements/folded-sticker':    ButterflyStudio,
@@ -189,6 +191,7 @@ const NAV_GROUPS = [
     { href: '/glb-studio',              label: 'GLB Studio' },
     { href: '/glb-recompose',           label: 'GLB Recompose' },
     { href: '/elements/piping-calibrator', label: 'Piping Calibrator' },
+    { href: '/elements/rosette-coat', label: 'Rosette Coat' },
     { href: '/elements/perch-calibrator',  label: 'Perch Calibrator' },
     { href: '/elements/texture-calibrator', label: 'Texture Calibrator' },
     { href: '/elements/palette-knife',  label: 'Palette-Knife Studio' },
