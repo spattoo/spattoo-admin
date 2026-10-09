@@ -552,6 +552,10 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
     <>
       <CoatSurface kind="top"  part={top}  seats={seats} color={color} softness={softness} />
       <CoatSurface kind="side" part={side} seats={seats} color={color} softness={softness} />
+      {/* The shoulder. It takes the SIDE's geometry — the rim seat's normal bisects up and
+          outward, so in the pen's frame it is asking the wall's question, not the lid's, and a
+          third rotation to calibrate would be a third thing to get wrong for no gain. */}
+      <CoatSurface kind="rim"  part={side} seats={seats} color={color} softness={softness} />
     </>
   );
 }
