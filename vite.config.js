@@ -10,6 +10,15 @@ import path from 'path';
 // Core's source, resolved RELATIVE to this file rather than hardcoded to one machine. Present on a
 // developer box with both repos checked out side by side; absent on any build server.
 const CORE_SRC = path.resolve(import.meta.dirname, '../spattoo-core/src/index.js');
+/* ⚠️ ONE BOOLEAN, TWO CONSEQUENCES, SO THEY CANNOT DRIFT. The same check that decides whether to
+   alias the designer to core's SOURCE also decides whether this build may stamp a template with a
+   renderer floor — because running source means `BUILD.version` names the last RELEASE, not the
+   code actually executing, and a floor stamped from it would be a confident lie.
+   Core cannot work this out for itself: pack-vendor.mjs requires the tarball's src/ to match
+   `git archive HEAD src` byte for byte, so nothing injected at pack time survives, and a committed
+   flag cannot tell a tarball from a working tree that has moved past the same commit. Admin is the
+   only place that knows, and it knows it HERE. See spattoo-docs/plans/renderer-version-floor.md. */
+const CORE_FROM_SOURCE = fs.existsSync(CORE_SRC);
 
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
@@ -72,6 +81,9 @@ export default defineConfig({
       },
     },
   },
+  /* Exposed so the catalogue action can refuse to stamp a renderer floor from an unreleased
+     build. Not an env var and not a mode: it is the filesystem fact above, handed through. */
+  define: { __CORE_FROM_SOURCE__: JSON.stringify(CORE_FROM_SOURCE) },
   appType: 'spa',
   resolve: {
     // ── Core from SOURCE when it is next door, from the vendored tarball otherwise ────────────
@@ -87,7 +99,7 @@ export default defineConfig({
     // vendor cannot be noticed by using the app. That is what makes vendoring into admin part of
     // `npm run release` rather than a thing to remember — see scripts/release.mjs in core.
     alias: {
-      ...(fs.existsSync(CORE_SRC) ? { '@spattoo/designer': CORE_SRC } : {}),
+      ...(CORE_FROM_SOURCE ? { '@spattoo/designer': CORE_SRC } : {}),
     },
     dedupe: ['react', 'react-dom', 'three', '@react-three/fiber', '@react-three/drei'],
   },
