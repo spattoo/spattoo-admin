@@ -1767,15 +1767,20 @@ export default function PipingCalibrator() {
 
           <Suspense fallback={null}>
             {/* Both rings render together; a ring shows when it's included OR being edited. */}
-            {activeGlbUrl && (includeBoard || target === 'board') && (
+            {activeGlbUrl && !coat && (includeBoard || target === 'board') && (
               <CalibScene glbUrl={activeGlbUrl} cfg={boardCfg} showRing={showRing} anchorY={Y_BASE} inward={false} altGlbUrl={altBlobUrl} shape={shape} color={elementColor} />
             )}
-            {activeGlbUrl && (includeRim || target === 'rim') && (
+            {activeGlbUrl && !coat && (includeRim || target === 'rim') && (
               <CalibScene glbUrl={activeGlbUrl} cfg={rimCfg} showRing={showRing} anchorY={Y_BASE + CAKE_HEIGHT} inward={true} altGlbUrl={altBlobUrl} shape={shape} color={elementColor} />
             )}
             {/* The wall run appears only while `side_rotation` is being authored — it is a hand-piped
-                stroke, not a ring, and leaving it on the cake would misread as a third border. */}
-            {activeGlbUrl && (includeSide || target === 'side') && (
+                stroke, not a ring, and leaving it on the cake would misread as a third border.
+                ⚠️ AND NOT AT ALL WHILE THE CAKE IS COATED. Its own comment predicted this and I
+                still missed it: a nine-piece run across the wall, in the flat element colour
+                rather than the coat's, reads as a pale horizontal strip of the wrong shade sitting
+                on top of the roses. Reported as exactly that. The coat already covers every
+                surface this was sampling, so there is nothing left for it to show. */}
+            {activeGlbUrl && !coat && (includeSide || target === 'side') && (
               <WallStamps glbUrl={activeGlbUrl} rot={sideRot} color={elementColor} />
             )}
             {/* The coat is the whole cake, so it replaces the rings visually rather than joining
