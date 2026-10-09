@@ -7,6 +7,7 @@ import { captureThumbnailBlob, thumbnailFromImage,
          REQUIRED_TAG_CATEGORIES, missingRequiredCategories, requiredTagMessage, ageRangeProblem } from '@spattoo/designer';
 import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, fetchTemplateTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
 } from '../lib/api.js';
+import { rendererFloor, stampBlockedReason } from '../lib/designerBuild.js';
 
 const SHAPES = [
   { value: 'round',      label: 'Round' },
@@ -675,6 +676,104 @@ function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
   );
 }
 
+/* ── The renderer floor, confirmed at the moment a template becomes everyone's ───────────────────
+ *
+ * A template is data, but it does not render itself — it renders on whatever build of
+ * @spattoo/designer the viewer has, and those diverge: prod web trails dev because production is a
+ * deliberate deploy, and a phone carries whatever build it last updated to. Three things can make a
+ * template need a newer renderer, and only the third forces a human: a new procedural control
+ * (derivable), a new placement_config key (derivable), and a plain BUGFIX — no new key, no new
+ * control, the renderer simply got more correct. Nothing in the data distinguishes the third.
+ *
+ * ⚠️ WHY HERE AND NOT AT EXPORT. Cataloguing is the moment the template stops being one bakery's
+ * and becomes everyone's, so it is the last moment the author is still looking at the cake they are
+ * making a claim about. By export time the decision is made and they have moved on.
+ *
+ * ⚠️ RAISING IS FREE; LOWERING IS A CLAIM. Raising only over-blocks. Lowering asserts the template
+ * renders correctly on builds the author is not running, and that is the direction that reaches a
+ * customer as a wrong cake — so the dialog says so in words rather than just offering a field.
+ *
+ * spattoo-docs/plans/renderer-version-floor.md
+ */
+function PublishDialog({ template, autoVersion, blockedReason, busy, onCancel, onConfirm }) {
+  const [floor, setFloor] = useState(autoVersion ?? '');
+  const trimmed = floor.trim();
+  const malformed = trimmed !== '' && !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(trimmed);
+  const lowered = !!autoVersion && trimmed !== '' && trimmed !== autoVersion;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={busy ? undefined : onCancel}>
+      <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: 520, maxWidth: 'calc(100vw - 40px)', maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#2C4433' }}>Move into the catalogue</div>
+
+        {/* The move itself — the warning that was already here, kept word for word. "Publish" alone
+            reads as additive, and this is not: their row is the row that moves. */}
+        <div style={{ fontSize: 13, color: '#3D5A44', lineHeight: 1.55 }}>
+          <b>{template.name}</b> leaves {template.owner_name}&rsquo;s library and becomes available
+          to every bakery.
+        </div>
+
+        <div style={{ height: 1, background: '#E8EFE9' }} />
+
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', textTransform: 'uppercase', letterSpacing: 0.8 }}>Renderer this design needs</div>
+
+        {blockedReason ? (
+          /* Not a warning to click past. An unreleased or unnameable build cannot produce a true
+             number, and a false floor is worse than none: everything downstream enforces it as
+             though somebody had checked. */
+          <div style={{ fontSize: 12, color: '#9B3F4F', background: '#FDF3F4', border: '1.5px solid #F0D4D8', borderRadius: 8, padding: '10px 12px', lineHeight: 1.55 }}>
+            {blockedReason}
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, color: '#6B8C74', lineHeight: 1.55 }}>
+              Stamped automatically from the designer this admin is running
+              (<code>{autoVersion}</code>). An older app will show this design in the library and ask
+              the customer to update rather than drawing it wrongly.
+            </div>
+            <input
+              value={floor}
+              onChange={e => setFloor(e.target.value)}
+              placeholder="0.0.0 — or empty for: renders anywhere"
+              style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, fontFamily: 'monospace', padding: '8px 10px', borderRadius: 8, border: `2px solid ${malformed ? '#D98A94' : '#C5D4C8'}` }}
+            />
+            {malformed && (
+              <div style={{ fontSize: 12, color: '#9B3F4F' }}>Must be x.y.z, or empty.</div>
+            )}
+            {lowered && !malformed && (
+              <div style={{ fontSize: 12, color: '#8A6D1F', background: '#FDF8E8', border: '1.5px solid #EADFBC', borderRadius: 8, padding: '10px 12px', lineHeight: 1.55 }}>
+                You are changing this from <code>{autoVersion}</code> to <code>{trimmed}</code>.
+                Raising it only blocks more apps. <b>Lowering it claims this template renders
+                correctly on {trimmed}</b> — a build you are not running and have not seen it on.
+                That is the direction a customer meets as a wrong cake.
+              </div>
+            )}
+            {trimmed === '' && (
+              <div style={{ fontSize: 12, color: '#6B8C74', lineHeight: 1.55 }}>
+                Empty means <b>renders anywhere</b>. Right for a design that uses nothing new — and
+                wrong, silently, for one that does.
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <button onClick={onCancel} disabled={busy}
+            style={{ fontSize: 12, fontWeight: 700, padding: '8px 14px', borderRadius: 8, border: '2px solid #C5D4C8', background: '#fff', color: '#6B8C74', cursor: busy ? 'default' : 'pointer' }}>
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm({ min_core_version: trimmed || null, auto_core_version: autoVersion ?? null })}
+            disabled={busy || malformed || !!blockedReason}
+            style={{ fontSize: 12, fontWeight: 800, padding: '8px 14px', borderRadius: 8, border: 'none', background: (busy || malformed || blockedReason) ? '#A9BDAF' : '#3D5A44', color: '#fff', cursor: (busy || malformed || blockedReason) ? 'default' : 'pointer' }}>
+            {busy ? 'Moving…' : 'Move into catalogue'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ManageTemplates() {
   const [templates, setTemplates] = useState([]);
   // Which template's tags are open. One at a time: the vocabulary is 56 tags across seven groups,
@@ -698,6 +797,8 @@ export default function ManageTemplates() {
   const [picked, setPicked]       = useState(() => new Set());
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(null);
+  // Which template the catalogue dialog is open for, or null.
+  const [publishTarget, setPublishTarget] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [showForm, setShowForm]   = useState(false);
   const [msg, setMsg]             = useState(null);
@@ -767,21 +868,30 @@ export default function ManageTemplates() {
   // The failure worth handling is 409: the design uses decorations belonging to that bakery, which
   // no other bakery could resolve. It renders anyway (the designer tolerates a missing catalogue
   // row) with caps and clustering silently gone, so the route refuses and names them.
-  async function handlePublish(t) {
-    // Says that the template LEAVES the bakery's library. "Publish" alone reads as additive, and
-    // this is not — their row is the row that moves.
-    if (!window.confirm(
-      `Move "${t.name}" into the catalogue?\n\n`
-      + `It leaves ${t.owner_name}'s library and becomes available to every bakery.`
-    )) return;
+  /* ⚠️ A DIALOG, NOT window.confirm, AND THE REASON IS THE FLOOR. The move itself is a yes/no and
+     a confirm handled it fine; the renderer version is a value the author may change, which a
+     confirm cannot carry. Both now live in PublishDialog, so the warning about the row MOVING is
+     not lost on the way — it is the first thing in it. */
+  function handlePublish(t) { setPublishTarget(t); }
+
+  async function confirmPublish(floor) {
+    const t = publishTarget;
+    if (!t) return;
     setPublishing(t.id);
     try {
-      await publishTemplate(t.id);
-      setMsg({ ok: true, text: `"${t.name}" is now a catalogue template.` });
+      await publishTemplate(t.id, floor);
+      setMsg({
+        ok: true,
+        text: floor.min_core_version
+          ? `"${t.name}" is now a catalogue template, needing designer ${floor.min_core_version} or newer.`
+          : `"${t.name}" is now a catalogue template.`,
+      });
+      setPublishTarget(null);
       await load();
     } catch (e) {
       const names = e?.private_elements?.map(x => x.name).join(', ');
       setMsg({ ok: false, text: names ? `${e.message} — ${names}` : (e?.message ?? 'Publish failed') });
+      setPublishTarget(null);
     } finally {
       setPublishing(null);
     }
@@ -949,6 +1059,17 @@ export default function ManageTemplates() {
           )}
         </div>
       </div>
+
+      {publishTarget && (
+        <PublishDialog
+          template={publishTarget}
+          autoVersion={rendererFloor()}
+          blockedReason={stampBlockedReason()}
+          busy={publishing === publishTarget.id}
+          onCancel={() => setPublishTarget(null)}
+          onConfirm={confirmPublish}
+        />
+      )}
     </>
   );
 }

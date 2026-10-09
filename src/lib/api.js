@@ -363,8 +363,14 @@ export async function importElements(bundle, { dryRun = false } = {}) {
 // leaves that bakery's library. Refused unless that bakery is flagged is_catalog_author (migration
 // 070), which is what keeps other bakers' work theirs, and what makes this dev-only without an
 // environment check.
-export async function publishTemplate(id) {
-  return post(`/api/admin/templates/${id}/publish`, {});
+/* `floor` carries the renderer version this template needs — { min_core_version, auto_core_version },
+   both x.y.z or null. Omitted entirely leaves both NULL, which means "renders anywhere" and is what
+   every template before this has. See spattoo-docs/plans/renderer-version-floor.md. */
+export async function publishTemplate(id, floor = {}) {
+  return post(`/api/admin/templates/${id}/publish`, {
+    min_core_version:  floor.min_core_version  ?? null,
+    auto_core_version: floor.auto_core_version ?? null,
+  });
 }
 
 export async function exportTemplates(ids) {
