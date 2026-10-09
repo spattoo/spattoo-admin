@@ -812,6 +812,14 @@ export default function PipingCalibrator() {
    * screen. A separate page would have meant tuning blind and checking elsewhere. */
   const [coat,        setCoat]        = useState(false);
   const [coatRadius,  setCoatRadius]  = useState(ROSETTE_DEFAULTS.rosetteRadius);
+  /* ⚠️ THE COAT'S TOP NEEDS ITS OWN ROTATION, and the first cut wrongly reused the rim ring's.
+   * A coat lays a piece FACE-UP on the lid; a rim ring stands it UPRIGHT facing outward. Same
+   * surface, opposite poses — so `top_rotation`, which is authored for the ring, put every lid
+   * piece on its edge and the top rendered as a crater with the cake visible through the middle.
+   * PLACEMENT_CONFIG.md says as much in passing: "laid face-up with -90 about X a rosette spans
+   * Y -0.45…+0.45". Defaults to the SIDE figure, because in the pen's frame both surfaces are
+   * asking the same question — face along the normal — and the side one is already measured. */
+  const [coatTopRot,  setCoatTopRot]  = useState(null);   // null = follow the side rotation
   const [coatStat,    setCoatStat]    = useState(null);
   const onCoatMeasure = useCallback(setCoatStat, []);
   const [includeSide, setIncludeSide] = useState(false);
@@ -1153,6 +1161,26 @@ export default function PipingCalibrator() {
                   <Slider label="Piece size" value={coatRadius} min={0.08} max={0.5} step={0.005}
                           onChange={setCoatRadius} color="#8a6fd0" />
                 )}
+                {coat && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                  fontSize: 11.5, color: '#555', marginBottom: 4 }}>
+                      <b>Top rotation</b>
+                      <button onClick={() => setCoatTopRot(null)}
+                              style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 5,
+                                       border: '1px solid #d9d9e0', background: coatTopRot ? '#fff' : '#eceaf2',
+                                       cursor: 'pointer' }}>
+                        {coatTopRot ? 'follow side' : 'following side'}
+                      </button>
+                    </div>
+                    <Slider label="Top X" value={(coatTopRot ?? sideRot).rx} min={-180} max={180}
+                            onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rx: v }))} color="#e05252" />
+                    <Slider label="Top Y" value={(coatTopRot ?? sideRot).ry} min={-180} max={180}
+                            onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), ry: v }))} color="#52c452" />
+                    <Slider label="Top Z" value={(coatTopRot ?? sideRot).rz} min={-180} max={180}
+                            onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rz: v }))} color="#5252e0" />
+                  </div>
+                )}
                 {coat && coatStat && (
                   <div style={{ fontSize: 11, lineHeight: 1.5, padding: '7px 9px', borderRadius: 6,
                                 background: '#f3f1f7', color: '#4a4458', fontFamily: 'monospace' }}>
@@ -1447,7 +1475,7 @@ export default function PipingCalibrator() {
                 coat together is how you notice the two are reading the same rotation differently. */}
             {activeGlbUrl && coat && (
               <CoatScene glbUrl={activeGlbUrl} roseRadius={coatRadius}
-                         topRot={rimCfg} sideRot={sideRot}
+                         topRot={coatTopRot ?? sideRot} sideRot={sideRot}
                          color={elementColor} softness={rimCfg.softness}
                          onMeasure={onCoatMeasure} />
             )}
