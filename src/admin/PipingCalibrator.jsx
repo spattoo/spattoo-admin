@@ -33,7 +33,7 @@ import { normalizeArtwork, buildShellGeo, buildSwagRing, buildFestoons,
          silhouette, maxTileStep,
          /* The heart's footprint comes from core's own curve, not a copy of one here — the same
             generator the designer extrudes a heart tier from. */
-         scaledOutline } from '@spattoo/designer';
+         scaledOutline, coatShade } from '@spattoo/designer';
 import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
@@ -489,7 +489,8 @@ const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
  * horizontal extent AFTER its surface rotation. Size it by height and the roses either collide or
  * leave cake showing, depending on how tall the model happens to be.
  */
-function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats, cover, rimStretch, shape }) {
+function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats,
+                     cover, rimStretch, shape, shadeMode, palette, bands }) {
   const { scene } = useGLTF(glbUrl);
 
   const base = useMemo(() => extractGeo(scene), [scene]);
@@ -599,6 +600,13 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
     });
   }, [side, top, shape]);
 
+  /* The pattern parameter per seat. Core owns WHERE a piece sits in the pattern; the palette
+     lookup above turns that into a colour. */
+  const shades = useMemo(
+    () => coatShade(seats, { mode: shadeMode, baseY: Y_BASE, tierHeight: CAKE_HEIGHT,
+                             bands, palette: palette.length, seed: 1 }),
+    [seats, shadeMode, bands, palette.length]);
+
   useEffect(() => {
     if (top && side && onMeasure) onMeasure({ top, side, seats: seats.length });
   }, [top, side, seats.length, onMeasure]);
@@ -606,13 +614,15 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
   if (!base) return null;
   return (
     <>
-      <CoatSurface kind="top"  part={top}  seats={seats} color={color} softness={softness} />
-      <CoatSurface kind="side" part={side} seats={seats} color={color} softness={softness} />
+      <CoatSurface kind="top"  part={top}  seats={seats} color={color} softness={softness}
+                   shades={shades} palette={palette} />
+      <CoatSurface kind="side" part={side} seats={seats} color={color} softness={softness}
+                   shades={shades} palette={palette} />
       {/* The shoulder. It takes the SIDE's geometry — the rim seat's normal bisects up and
           outward, so in the pen's frame it is asking the wall's question, not the lid's, and a
           third rotation to calibrate would be a third thing to get wrong for no gain. */}
       <CoatSurface kind="rim"  part={side} seats={seats} color={color} softness={softness}
-                   rimStretch={rimStretch} />
+                   rimStretch={rimStretch} shades={shades} palette={palette} />
       {showSeats && <SeatMarkers seats={seats} pieceW={Math.max(side.fitted[0], top.fitted[0])} />}
     </>
   );
@@ -659,15 +669,20 @@ function SeatMarkers({ seats, pieceW }) {
   );
 }
 
-function CoatSurface({ kind, part, seats, color, softness, rimStretch = 1 }) {
-  const mine = useMemo(() => seats.filter(s => s.kind === kind), [seats, kind]);
+function CoatSurface({ kind, part, seats, color, softness, rimStretch = 1, shades = null, palette = null }) {
+  /* Indices kept alongside, because a shade is looked up by the seat's position in the WHOLE
+     coat — the ombré is one continuous run over all three surfaces, so a per-surface index would
+     restart it twice. */
+  const mine = useMemo(
+    () => seats.map((s, i) => ({ s, i })).filter(({ s }) => s.kind === kind),
+    [seats, kind]);
   const ref = useRef();
 
   useEffect(() => {
     if (!ref.current || !part || !mine.length) return;
     const m = new THREE.Matrix4(), basis = new THREE.Matrix4(), q = new THREE.Quaternion();
     const sc = new THREE.Vector3();
-    mine.forEach((s, i) => {
+    mine.forEach(({ s, i: seatIdx }, i) => {
       /* ⚠️ STRETCHED ALONG `v` ONLY. The shoulder row sizes itself to meet the side row below it
          and the top ring inside it — core computes the factor from where those actually reach, so
          a GLB that leaves a band gets a longer shoulder rather than a slider. Scaling the other
@@ -686,8 +701,27 @@ function CoatSurface({ kind, part, seats, color, softness, rimStretch = 1 }) {
       m.compose(new THREE.Vector3(...s.p), roll.multiply(q), sc);
       ref.current.setMatrixAt(i, m);
     });
+    /* ⚠️ ONE MESH, A COLOUR PER INSTANCE. Splitting by colour would multiply the draw calls by the
+       palette size on a coat that is already 200-odd pieces — and instanceColor is free. */
+    if (shades && palette) {
+      const c = new THREE.Color();
+      mine.forEach(({ i: seatIdx }, i) => {
+        const v = shades[seatIdx] ?? 0;
+        if (palette.length === 1) c.set(palette[0]);
+        else if (Number.isInteger(v)) c.set(palette[v % palette.length]);
+        else {
+          /* A gradient runs THROUGH the palette, not just between its ends — three stops means
+             two legs, and the reference ombrés are three colours deep. */
+          const span = (palette.length - 1) * Math.min(0.999999, Math.max(0, v));
+          const k = Math.floor(span);
+          c.set(palette[k]).lerp(new THREE.Color(palette[k + 1] ?? palette[k]), span - k);
+        }
+        ref.current.setColorAt(i, c);
+      });
+      if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
+    }
     ref.current.instanceMatrix.needsUpdate = true;
-  }, [part, mine, rimStretch]);
+  }, [part, mine, rimStretch, shades, palette]);
 
   if (!part || !mine.length) return null;
   /* No castShadow — the shadow pass re-renders every instance and self-shadowing between pieces is
@@ -1009,6 +1043,15 @@ export default function PipingCalibrator() {
    * percentile extent, and no arithmetic over seat positions can see how much. Automatic where it
    * can be computed, by hand where it cannot. */
   const [coatRimStretch, setCoatRimStretch] = useState(1);
+  /* ── Multi-colour ─────────────────────────────────────────────────────────────────────────────
+   * Sandeep, with three reference cakes: *"double color patterns. we should achieve this."* Two
+   * rules, not one: an OMBRÉ runs by position — palest at the middle of the lid, deepening down
+   * the wall, continuous across the top edge — and a SCATTER gives each piece one of the palette.
+   * Both are ONE instanced mesh with a colour per instance; a mesh per colour would multiply the
+   * draw calls on a coat that is already 200-odd pieces. */
+  const [coatShadeMode, setCoatShadeMode] = useState('single');
+  const [coatBands,     setCoatBands]     = useState(0);      // 0 = smooth gradient
+  const [coatPalette,   setCoatPalette]   = useState(['#FFFFFF', '#F6B3C4', '#D9486F']);
   const onCoatMeasure = useCallback(setCoatStat, []);
   const [includeSide, setIncludeSide] = useState(false);
 
@@ -1393,6 +1436,53 @@ export default function PipingCalibrator() {
                           onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rz: v }))} color="#5252e0" />
                 </div>
               )}
+              {coat && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 11.5, color: '#555', marginBottom: 4 }}><b>Colour</b></div>
+                  <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
+                    {[['single', 'One'], ['ombre', 'Ombré'], ['scatter', 'Scatter']].map(([v, label]) => (
+                      <button key={v} onClick={() => setCoatShadeMode(v)}
+                        style={{ flex: 1, fontSize: 11, padding: '5px 0', borderRadius: 6, cursor: 'pointer',
+                                 fontWeight: 700, border: `2px solid ${coatShadeMode === v ? '#8a6fd0' : '#d9d9e0'}`,
+                                 background: coatShadeMode === v ? '#8a6fd0' : '#fff',
+                                 color: coatShadeMode === v ? '#fff' : '#6B8C74' }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {coatShadeMode !== 'single' && (
+                    <>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                        {coatPalette.map((hex, i) => (
+                          <input key={i} type="color" value={hex} title={`Stop ${i + 1}`}
+                            onChange={e => setCoatPalette(p => p.map((h, j) => (j === i ? e.target.value : h)))}
+                            style={{ width: 34, height: 26, padding: 0, border: '1px solid #d9d9e0',
+                                     borderRadius: 5, cursor: 'pointer' }} />
+                        ))}
+                        <button onClick={() => setCoatPalette(p => (p.length > 2 ? p.slice(0, -1) : p))}
+                          disabled={coatPalette.length <= 2}
+                          style={{ fontSize: 13, width: 24, height: 26, borderRadius: 5, cursor: 'pointer',
+                                   border: '1px solid #d9d9e0', background: '#fff' }}>-</button>
+                        <button onClick={() => setCoatPalette(p => (p.length < 5 ? [...p, p[p.length - 1]] : p))}
+                          disabled={coatPalette.length >= 5}
+                          style={{ fontSize: 13, width: 24, height: 26, borderRadius: 5, cursor: 'pointer',
+                                   border: '1px solid #d9d9e0', background: '#fff' }}>+</button>
+                      </div>
+                      {coatShadeMode === 'ombre' && (
+                        <Slider label="Bands" value={coatBands} min={0} max={8} step={1}
+                                onChange={setCoatBands} color="#8a6fd0" />
+                      )}
+                      <div style={{ fontSize: 10.5, color: '#999', lineHeight: 1.4 }}>
+                        {coatShadeMode === 'ombre'
+                          ? (coatBands > 1
+                              ? `${coatBands} stepped bands, palest at the middle of the lid`
+                              : 'Smooth, palest at the middle of the lid')
+                          : 'Each piece takes one of the palette at random'}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               {coat && coatStat && (
                 <div style={{ fontSize: 11, lineHeight: 1.5, padding: '7px 9px', borderRadius: 6,
                               background: '#f3f1f7', color: '#4a4458', fontFamily: 'monospace' }}>
@@ -1696,7 +1786,8 @@ export default function PipingCalibrator() {
                          topRot={coatTopRot ?? sideRot} sideRot={sideRot}
                          color={elementColor} softness={rimCfg.softness}
                          onMeasure={onCoatMeasure} showSeats={coatSeats} cover={coatCover}
-                         rimStretch={coatRimStretch} shape={shape} />
+                         rimStretch={coatRimStretch} shape={shape}
+                         shadeMode={coatShadeMode} palette={coatPalette} bands={coatBands} />
             )}
           </Suspense>
 
