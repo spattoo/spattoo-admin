@@ -643,8 +643,14 @@ function CoatSurface({ kind, part, seats, color, softness }) {
   useEffect(() => {
     if (!ref.current || !part || !mine.length) return;
     const m = new THREE.Matrix4(), basis = new THREE.Matrix4(), q = new THREE.Quaternion();
-    const sc = new THREE.Vector3(part.scale, part.scale, part.scale);
+    const sc = new THREE.Vector3();
     mine.forEach((s, i) => {
+      /* ⚠️ STRETCHED ALONG `v` ONLY. The shoulder row sizes itself to meet the side row below it
+         and the top ring inside it — core computes the factor from where those actually reach, so
+         a GLB that leaves a band gets a longer shoulder rather than a slider. Scaling the other
+         two axes with it would make the rim pieces fatter than their neighbours and trade the gap
+         for a ridge. compose() applies scale in LOCAL axes, and local Z is `v`. */
+      sc.set(part.scale, part.scale, part.scale * (s.stretch ?? 1));
       const u = new THREE.Vector3(...s.u), n = new THREE.Vector3(...s.n), v = new THREE.Vector3(...s.v);
       /* (u, n, v): the piece was rotated with Y as its surface normal, so Y maps to n. Getting the
          column order wrong lays every wall piece flat against the cake, and it looks plausible
