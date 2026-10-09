@@ -21,7 +21,11 @@ import { normalizeArtwork, buildShellGeo, buildSwagRing, buildFestoons,
          StampStroke,
          /* And core's own preparation, replacing a byte-identical local copy that sat in this file
             — `check:no-geometry-copy` watches a named list and this one was not on it. */
-         extractGeo, SHELL_HEIGHT_FRAC } from '@spattoo/designer';
+         extractGeo, SHELL_HEIGHT_FRAC,
+         /* The coat's PACKING — where every rose sits on a tier and the frame it sits in.
+            Core owns it because a GLB rose and a procedural one are packed identically;
+            only the thing placed in each seat differs. */
+         rosetteSeats, ROSETTE_DEFAULTS } from '@spattoo/designer';
 import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
@@ -453,6 +457,103 @@ const STANDARD_CAKE_COLOR = '#f5c6d0';
 // the element-colour picker existed.
 const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
 
+/* ── The whole cake coated in this element ───────────────────────────────────────────────────────
+ *
+ * Sandeep, with a photograph of a rose-covered cake: *"cream piping is filled on entire cake."*
+ * This is the GLB answer to it; `rosetteCoat` in core carries a procedural one that proved the
+ * packing.
+ *
+ * ⚠️ IT USES THE PEN'S FRAME ON BOTH SURFACES, NOT THE RING'S. A coat seats every piece by the
+ * SURFACE NORMAL — up is out of the cake on the wall, up is up on the lid — which is the pen's
+ * frame, not the ring's "upright in world, yawed outward". So it reads the same pair the pen does:
+ * the rim figure (`top_rotation`, which is what the rx/ry/rz sliders author) on the top, and
+ * `side_rotation` on the wall. Feeding the ring figure to the wall is the exact bug recorded on
+ * `side_rotation` in PLACEMENT_CONFIG.md — every piece came out back-on and it read as the wrong
+ * element having been chosen.
+ *
+ * ⚠️ TWO INSTANCED MESHES, ONE PER SURFACE, and that falls out of the rotations rather than being
+ * a choice: the top and the wall apply different rotations, so they cannot share a matrix list.
+ * It also happens to be the shape multi-colour will need.
+ *
+ * ⚠️ SCALED BY FOOTPRINT, NOT BY HEIGHT. A ring sizes a shell by its HEIGHT (SHELL_HEIGHT_FRAC of
+ * the tier radius) because a border is read in silhouette. A coat is read as a TILING: what has to
+ * match the packing is how much surface one rose covers, so the scale comes from the piece's widest
+ * horizontal extent AFTER its surface rotation. Size it by height and the roses either collide or
+ * leave cake showing, depending on how tall the model happens to be.
+ */
+function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness }) {
+  const { scene } = useGLTF(glbUrl);
+
+  const base = useMemo(() => extractGeo(scene), [scene]);
+
+  const seats = useMemo(
+    () => rosetteSeats({ tierRadius: CAKE_RADIUS, tierHeight: CAKE_HEIGHT, baseY: Y_BASE,
+                         rosetteRadius: roseRadius, jitter: ROSETTE_DEFAULTS.jitter, seed: 1 }),
+    [roseRadius]);
+
+  /* One geometry per surface, each already carrying its own rotation baked in — so the instance
+     matrix only has to place and roll it, and the footprint can be measured on the rotated form. */
+  const forSurface = (rot) => {
+    if (!base) return null;
+    const g = base.geo.clone();
+    g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(
+      new THREE.Euler(rot.rx * DEG, rot.ry * DEG, rot.rz * DEG)));
+    g.computeBoundingBox();
+    const size = new THREE.Vector3(); g.boundingBox.getSize(size);
+    const footprint = Math.max(size.x, size.z) || 1;
+    const scale = (2 * roseRadius) / footprint;
+    /* Seat the piece on the surface it will sit on: y = 0 is the cake, so its lowest point goes
+       there. Measured after rotation for the same reason the scale is. */
+    g.translate(0, -g.boundingBox.min.y, 0);
+    return { geo: g, scale, verts: g.getAttribute('position').count };
+  };
+
+  const top  = useMemo(() => forSurface(topRot),  [base, topRot.rx, topRot.ry, topRot.rz, roseRadius]);
+  const side = useMemo(() => forSurface(sideRot), [base, sideRot.rx, sideRot.ry, sideRot.rz, roseRadius]);
+
+  if (!base) return null;
+  return (
+    <>
+      <CoatSurface kind="top"  part={top}  seats={seats} color={color} softness={softness} />
+      <CoatSurface kind="side" part={side} seats={seats} color={color} softness={softness} />
+    </>
+  );
+}
+
+function CoatSurface({ kind, part, seats, color, softness }) {
+  const mine = useMemo(() => seats.filter(s => s.kind === kind), [seats, kind]);
+  const ref = useRef();
+
+  useEffect(() => {
+    if (!ref.current || !part || !mine.length) return;
+    const m = new THREE.Matrix4(), basis = new THREE.Matrix4(), q = new THREE.Quaternion();
+    const sc = new THREE.Vector3(part.scale, part.scale, part.scale);
+    mine.forEach((s, i) => {
+      const u = new THREE.Vector3(...s.u), n = new THREE.Vector3(...s.n), v = new THREE.Vector3(...s.v);
+      /* (u, n, v): the piece was rotated with Y as its surface normal, so Y maps to n. Getting the
+         column order wrong lays every wall piece flat against the cake, and it looks plausible
+         from directly in front. */
+      basis.makeBasis(u, n, v);
+      q.setFromRotationMatrix(basis);
+      /* Variety is a roll about the normal. Doing it as a different model per piece would defeat
+         instancing, which is the only reason a coat renders at all. */
+      const roll = new THREE.Quaternion().setFromAxisAngle(n, (i * 2.399963) % (Math.PI * 2));
+      m.compose(new THREE.Vector3(...s.p), roll.multiply(q), sc);
+      ref.current.setMatrixAt(i, m);
+    });
+    ref.current.instanceMatrix.needsUpdate = true;
+  }, [part, mine]);
+
+  if (!part || !mine.length) return null;
+  /* No castShadow — the shadow pass re-renders every instance and self-shadowing between pieces is
+     not where the look comes from. Measured note in core's rosetteCoat.js. */
+  return (
+    <instancedMesh ref={ref} args={[part.geo, undefined, mine.length]} receiveShadow>
+      <meshPhysicalMaterial {...creamMaterialProps(softness, color)} />
+    </instancedMesh>
+  );
+}
+
 /* ── Hand-piped stamps on the wall, drawn by the designer's own StampStroke ──────────────────────
  *
  * ⚠️ NOT A PREVIEW OF A RING. A ring places a shell upright in world space and yaws it outward; the
@@ -692,6 +793,14 @@ export default function PipingCalibrator() {
      Off by default — an element that authors nothing falls back to `bottom_rotation`, which is the
      behaviour every element shipped before this had. */
   const [sideRot,     setSideRot]     = useState({ rx: 0, ry: 0, rz: 0 });
+  /* ── Cover the cake ───────────────────────────────────────────────────────────────────────────
+   * Sandeep: *"similarly we need to have a flag to cover the cake. once side and top calibration
+   * is done, we can do it."* It belongs here rather than in its own studio precisely because it
+   * consumes the two rotations this page already authors — the rim figure for the lid and
+   * `side_rotation` for the wall — so the calibration and the thing it calibrates are on one
+   * screen. A separate page would have meant tuning blind and checking elsewhere. */
+  const [coat,        setCoat]        = useState(false);
+  const [coatRadius,  setCoatRadius]  = useState(ROSETTE_DEFAULTS.rosetteRadius);
   const [includeSide, setIncludeSide] = useState(false);
 
   // ── Create-pattern mode: load an existing block element from the library by id,
@@ -1019,6 +1128,18 @@ export default function PipingCalibrator() {
                 <Slider label="Side X" value={sideRot.rx} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rx: v }))} color="#e05252" />
                 <Slider label="Side Y" value={sideRot.ry} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, ry: v }))} color="#52c452" />
                 <Slider label="Side Z" value={sideRot.rz} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rz: v }))} color="#5252e0" />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 13 }}>
+                  <input type="checkbox" checked={coat} onChange={e => setCoat(e.target.checked)} />
+                  <b>Cover the cake</b>
+                </label>
+                <div style={{ fontSize: 11.5, color: '#777', lineHeight: 1.45, margin: '4px 0 8px' }}>
+                  Packs this element over the whole top and side. Uses the <b>rim</b> rotation on the
+                  lid and the <b>side</b> rotation on the wall — the same pair the pen picks between.
+                </div>
+                {coat && (
+                  <Slider label="Piece size" value={coatRadius} min={0.08} max={0.5} step={0.005}
+                          onChange={setCoatRadius} color="#8a6fd0" />
+                )}
               </>
             )}
 
@@ -1295,6 +1416,14 @@ export default function PipingCalibrator() {
                 stroke, not a ring, and leaving it on the cake would misread as a third border. */}
             {activeGlbUrl && (includeSide || target === 'side') && (
               <WallStamps glbUrl={activeGlbUrl} rot={sideRot} color={elementColor} />
+            )}
+            {/* The coat is the whole cake, so it replaces the rings visually rather than joining
+                them — but it is left as an independent toggle on purpose: seeing a border and a
+                coat together is how you notice the two are reading the same rotation differently. */}
+            {activeGlbUrl && coat && (
+              <CoatScene glbUrl={activeGlbUrl} roseRadius={coatRadius}
+                         topRot={rimCfg} sideRot={sideRot}
+                         color={elementColor} softness={rimCfg.softness} />
             )}
           </Suspense>
 
