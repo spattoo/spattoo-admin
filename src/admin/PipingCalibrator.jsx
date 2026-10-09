@@ -481,7 +481,7 @@ const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
  * horizontal extent AFTER its surface rotation. Size it by height and the roses either collide or
  * leave cake showing, depending on how tall the model happens to be.
  */
-function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure }) {
+function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats }) {
   const { scene } = useGLTF(glbUrl);
 
   const base = useMemo(() => extractGeo(scene), [scene]);
@@ -556,7 +556,49 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
           outward, so in the pen's frame it is asking the wall's question, not the lid's, and a
           third rotation to calibrate would be a third thing to get wrong for no gain. */}
       <CoatSurface kind="rim"  part={side} seats={seats} color={color} softness={softness} />
+      {showSeats && <SeatMarkers seats={seats} pieceW={Math.max(side.fitted[0], top.fitted[0])} />}
     </>
+  );
+}
+
+/* ── Seat markers ────────────────────────────────────────────────────────────────────────────
+ *
+ * ⚠️ A DIAGNOSTIC, AND IT EXISTS BECAUSE GUESSING FROM SCREENSHOTS FAILED THREE TIMES. The seam
+ * under the rim survived a re-centring fix, a seat-height rewrite and a rounding fix, each of
+ * which was a real bug and none of which was THE bug. The arithmetic says the rim's lowest point
+ * and the side's highest land within 0.004 of each other, so either the frame maths is wrong or
+ * the bounding box is taller than the rose inside it — and a photograph of roses cannot tell
+ * those apart.
+ *
+ * This draws the SEAT itself: a flat disc of the piece's own width, lying in the piece's own
+ * tangent plane, plus a stub along the normal. If the discs meet at the rim and the roses do not,
+ * the box is bigger than the shape and the fix is to measure the shape. If the discs themselves
+ * leave a gap, the arithmetic is wrong and the fix is mine. */
+function SeatMarkers({ seats, pieceW }) {
+  const ref = useRef();
+  const COLOUR = { top: '#2d7ff9', side: '#f9a52d', rim: '#e0392d' };
+  useEffect(() => {
+    if (!ref.current || !seats.length) return;
+    const m = new THREE.Matrix4(), basis = new THREE.Matrix4(), q = new THREE.Quaternion();
+    const one = new THREE.Vector3(1, 1, 1);
+    seats.forEach((s, i) => {
+      basis.makeBasis(new THREE.Vector3(...s.u), new THREE.Vector3(...s.n), new THREE.Vector3(...s.v));
+      q.setFromRotationMatrix(basis);
+      m.compose(new THREE.Vector3(...s.p), q, one);
+      ref.current.setMatrixAt(i, m);
+      ref.current.setColorAt(i, new THREE.Color(COLOUR[s.kind] ?? '#888'));
+    });
+    ref.current.instanceMatrix.needsUpdate = true;
+    if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
+  }, [seats, pieceW]);
+  if (!seats.length) return null;
+  /* A disc of the piece's WIDTH, in the piece's own plane — cylinderGeometry's axis is +Y, which
+     is the seat normal, so the disc lies flat on the surface exactly as a piece's footprint does. */
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, seats.length]}>
+      <cylinderGeometry args={[pieceW / 2, pieceW / 2, 0.004, 20]} />
+      <meshBasicMaterial transparent opacity={0.55} />
+    </instancedMesh>
   );
 }
 
@@ -850,6 +892,7 @@ export default function PipingCalibrator() {
    * asking the same question — face along the normal — and the side one is already measured. */
   const [coatTopRot,  setCoatTopRot]  = useState(null);   // null = follow the side rotation
   const [coatStat,    setCoatStat]    = useState(null);
+  const [coatSeats,   setCoatSeats]   = useState(false);
   const onCoatMeasure = useCallback(setCoatStat, []);
   const [includeSide, setIncludeSide] = useState(false);
 
@@ -1191,6 +1234,12 @@ export default function PipingCalibrator() {
                           onChange={setCoatRadius} color="#8a6fd0" />
                 )}
                 {coat && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}>
+                    <input type="checkbox" checked={coatSeats} onChange={e => setCoatSeats(e.target.checked)} />
+                    Show seats <span style={{ color: '#888', fontSize: 11 }}>(blue top · orange side · red rim)</span>
+                  </label>
+                )}
+                {coat && (
                   <div style={{ marginTop: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                                   fontSize: 11.5, color: '#555', marginBottom: 4 }}>
@@ -1508,7 +1557,7 @@ export default function PipingCalibrator() {
               <CoatScene glbUrl={activeGlbUrl} roseRadius={coatRadius}
                          topRot={coatTopRot ?? sideRot} sideRot={sideRot}
                          color={elementColor} softness={rimCfg.softness}
-                         onMeasure={onCoatMeasure} />
+                         onMeasure={onCoatMeasure} showSeats={coatSeats} />
             )}
           </Suspense>
 
