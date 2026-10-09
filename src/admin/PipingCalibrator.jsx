@@ -757,10 +757,16 @@ function WallStamps({ glbUrl, rot, color }) {
 function OutlinePrism({ outline, height, y, color }) {
   const geo = useMemo(() => {
     const sh = new THREE.Shape();
-    outline.forEach((pt, i) => (i ? sh.lineTo(pt.x, pt.z) : sh.moveTo(pt.x, pt.z)));
+    /* ⚠️ THE SHAPE'S Y IS THE OUTLINE'S NEGATIVE Z, and the sign is the whole point. Extrude builds
+     * in the XY plane along +Z, and standing it up with rotateX(-90°) maps (x, y, z) → (x, z, -y)
+     * — so a shape built with y = outline.z lands at world z = -outline.z. MIRRORED. The cake then
+     * renders a heart pointing one way while the coat packs the other, reported as the heart being
+     * "in the opposite direction": core's heart has its point at +z and its lobes at -z (measured,
+     * not assumed). Negating here cancels the rotation's flip, so the prism and the packing are the
+     * same heart. */
+    outline.forEach((pt, i) => (i ? sh.lineTo(pt.x, -pt.z) : sh.moveTo(pt.x, -pt.z)));
     sh.closePath();
     const g = new THREE.ExtrudeGeometry(sh, { depth: height, bevelEnabled: false, curveSegments: 24 });
-    /* Extrude builds along +Z from the XY plane; the cake wants it standing on XZ. */
     g.rotateX(-Math.PI / 2);
     g.computeVertexNormals();
     return g;
