@@ -30,7 +30,10 @@ import { normalizeArtwork, buildShellGeo, buildSwagRing, buildFestoons,
             a sharp star needs 0.54 — no constant is both, which is why every value picked for the
             rose left a band on the star. This rasterises the piece's silhouette and bisects for
             the widest lattice that still has no hole in it. */
-         silhouette, maxTileStep } from '@spattoo/designer';
+         silhouette, maxTileStep,
+         /* The heart's footprint comes from core's own curve, not a copy of one here — the same
+            generator the designer extrudes a heart tier from. */
+         scaledOutline } from '@spattoo/designer';
 import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
@@ -486,7 +489,7 @@ const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
  * horizontal extent AFTER its surface rotation. Size it by height and the roses either collide or
  * leave cake showing, depending on how tall the model happens to be.
  */
-function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats, cover, rimStretch }) {
+function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats, cover, rimStretch, shape }) {
   const { scene } = useGLTF(glbUrl);
 
   const base = useMemo(() => extractGeo(scene), [scene]);
@@ -585,13 +588,16 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
        can only ever push spacing up. The side governs, because the wall is what is looked at. */
     const step = Math.min(side.tile, top.tile) * 0.95;
     return rosetteSeats({
+      /* null ⇒ round, which rosetteSeats builds from tierRadius. A rect or a heart arrives as the
+         same descriptor the piping ring already walks, so nothing here knows what a heart is. */
+      shape,
       tierRadius: CAKE_RADIUS, tierHeight: CAKE_HEIGHT, baseY: Y_BASE,
       pieceW: Math.max(side.fitted[0], top.fitted[0]),
       pieceH: side.fitted[2],
       overlap: 1 - step,
       jitter: ROSETTE_DEFAULTS.jitter, seed: 1,
     });
-  }, [side, top]);
+  }, [side, top, shape]);
 
   useEffect(() => {
     if (top && side && onMeasure) onMeasure({ top, side, seats: seats.length });
@@ -745,8 +751,30 @@ function WallStamps({ glbUrl, rot, color }) {
   return <StampStroke stroke={stroke} url={glbUrl} color={color} />;
 }
 
+/* An outline footprint (heart, oval, polygon…) as a prism. ⚠️ Extruded from the SAME outline the
+ * coat is packed onto — if this drew its own heart, a gap between the cake and the pieces would be
+ * two different hearts rather than a packing fault, which is a day lost. */
+function OutlinePrism({ outline, height, y, color }) {
+  const geo = useMemo(() => {
+    const sh = new THREE.Shape();
+    outline.forEach((pt, i) => (i ? sh.lineTo(pt.x, pt.z) : sh.moveTo(pt.x, pt.z)));
+    sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: height, bevelEnabled: false, curveSegments: 24 });
+    /* Extrude builds along +Z from the XY plane; the cake wants it standing on XZ. */
+    g.rotateX(-Math.PI / 2);
+    g.computeVertexNormals();
+    return g;
+  }, [outline, height]);
+  return (
+    <mesh geometry={geo} position={[0, y, 0]} castShadow receiveShadow>
+      <meshStandardMaterial color={color} roughness={0.68} />
+    </mesh>
+  );
+}
+
 function CakeScene({ shape = null, floor = true, cakeColor = STANDARD_CAKE_COLOR }) {
   const isRect = shape?.kind === 'rect';
+  const outline = shape?.outline ?? null;
   return (
     <>
       {isRect ? (
@@ -759,6 +787,15 @@ function CakeScene({ shape = null, floor = true, cakeColor = STANDARD_CAKE_COLOR
           <RoundedBox position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]} args={[shape.halfW * 2, CAKE_HEIGHT, shape.halfD * 2]} radius={shape.cornerR} smoothness={4} castShadow receiveShadow>
             <meshStandardMaterial color={cakeColor} roughness={0.68} />
           </RoundedBox>
+        </>
+      ) : outline ? (
+        <>
+          {/* Board — round under an outline cake, as a real one is */}
+          <mesh position={[0, 0.05, 0]} receiveShadow>
+            <cylinderGeometry args={[CAKE_RADIUS + 0.6, CAKE_RADIUS + 0.6, 0.1, 64]} />
+            <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
+          </mesh>
+          <OutlinePrism outline={outline} height={CAKE_HEIGHT} y={Y_BASE} color={cakeColor} />
         </>
       ) : (
         <>
@@ -909,9 +946,17 @@ export default function PipingCalibrator() {
 
   // Preview shape passed to the cake + rings. null = round; else the sheet's rounded-rect.
   const shape = useMemo(() => {
-    if (sampleShape !== 'rect') return null;
-    const sz = SHEET_SIZES.find(z => z.key === sheetKey) ?? SHEET_SIZES[1];
-    return { kind: 'rect', halfW: sz.w / 2, halfD: sz.d / 2, cornerR: SHEET_CORNER_R };
+    if (sampleShape === 'rect') {
+      const sz = SHEET_SIZES.find(z => z.key === sheetKey) ?? SHEET_SIZES[1];
+      return { kind: 'rect', halfW: sz.w / 2, halfD: sz.d / 2, cornerR: SHEET_CORNER_R };
+    }
+    /* ⚠️ The outline comes from CORE's heart curve, at the tier's own size. Drawing a heart here
+       would be a second heart, and the coat would then be calibrated against a footprint the
+       designer never renders. */
+    if (sampleShape === 'heart') {
+      return { outline: scaledOutline('heart', { plump: 1, cleft: 1 }, CAKE_RADIUS, CAKE_RADIUS) };
+    }
+    return null;
   }, [sampleShape, sheetKey]);
 
   // Independent configs — the board ring sits OUTSIDE the wall, the rim pulls INWARD,
@@ -1139,7 +1184,7 @@ export default function PipingCalibrator() {
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', marginBottom: 4 }}>Sample cake</div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {[{ v: 'cylinder', label: 'Round' }, { v: 'rect', label: 'Sheet' }].map(({ v, label }) => (
+            {[{ v: 'cylinder', label: 'Round' }, { v: 'heart', label: 'Heart' }, { v: 'rect', label: 'Sheet' }].map(({ v, label }) => (
               <button key={v} onClick={() => setSampleShape(v)}
                 style={{ flex: 1, fontSize: 11, padding: '6px 0', borderRadius: 6, border: `2px solid ${sampleShape === v ? '#3D5A44' : '#C5D4C8'}`, background: sampleShape === v ? '#3D5A44' : '#fff', color: sampleShape === v ? '#fff' : '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
                 {label}
@@ -1645,7 +1690,7 @@ export default function PipingCalibrator() {
                          topRot={coatTopRot ?? sideRot} sideRot={sideRot}
                          color={elementColor} softness={rimCfg.softness}
                          onMeasure={onCoatMeasure} showSeats={coatSeats} cover={coatCover}
-                         rimStretch={coatRimStretch} />
+                         rimStretch={coatRimStretch} shape={shape} />
             )}
           </Suspense>
 
