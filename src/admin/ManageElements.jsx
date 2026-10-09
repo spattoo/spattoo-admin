@@ -62,6 +62,7 @@ const DEFAULT_PIPING_PLACEMENT_CONFIG = {
   bottom_y_offset:        null,
   bottom_flip_adjustable: false,
   bottom_y_adjustable:    false,
+  can_coat:               false,
   // Shell spacing multiplier per ring (1 = touching/default; >1 = wider gaps, fewer
   // shells; <1 = tighter). Lets the rim match the board's gap independently.
   top_spacing:            1,
@@ -1519,6 +1520,22 @@ export default function ManageElements() {
       // Absent means OFF. An element that has never been considered does not get the feature by
       // default — see the designer's gate.
       { key: 'hand_piping', label: 'Allow hand piping (draw it on freehand)' },
+      // ── Coating the whole cake ──────────────────────────────────────────────────────────────
+      // Whether "Cover entire cake" is offered on this element's card — the piece packed over
+      // every surface, the way a rosette cake is piped, instead of ringed round one edge.
+      //
+      // ⚠️ NOT A ZONE, AND NOT AN ARRANGEMENT, for the same reason hand piping is neither: the
+      // *_arrangements_allowed lists are per-zone (rim vs board), and "can you coat the board?"
+      // is not a real question. A coat is the whole cake or it is nothing.
+      //
+      // ⚠️ AND IT IS PER ELEMENT BECAUSE MOST PIECES CANNOT DO IT. A coat tiles — the pieces have
+      // to interlock with their own neighbours on all sides. A rosette or a star does; a wrap band
+      // is one pre-formed ring and a drip is a procedural curtain, and packing either over a cake
+      // produces something nobody would pipe. Whoever calibrates the element decides, which is why
+      // this is a checkbox and not a rule in the designer.
+      //
+      // Absent means OFF — an element nobody has considered does not get the feature by default.
+      { key: 'can_coat', label: 'Can cover entire cake' },
       ...(isPattern ? [] : [{ key: 'pattern_only', label: 'Pattern-only (hide as individual)' }]),
     ];
     const updatePc = (patch) => {
