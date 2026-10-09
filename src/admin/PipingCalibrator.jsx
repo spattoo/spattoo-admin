@@ -481,7 +481,7 @@ const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
  * horizontal extent AFTER its surface rotation. Size it by height and the roses either collide or
  * leave cake showing, depending on how tall the model happens to be.
  */
-function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats, cover }) {
+function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats, cover, rimStretch }) {
   const { scene } = useGLTF(glbUrl);
 
   const base = useMemo(() => extractGeo(scene), [scene]);
@@ -589,7 +589,8 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
       {/* The shoulder. It takes the SIDE's geometry — the rim seat's normal bisects up and
           outward, so in the pen's frame it is asking the wall's question, not the lid's, and a
           third rotation to calibrate would be a third thing to get wrong for no gain. */}
-      <CoatSurface kind="rim"  part={side} seats={seats} color={color} softness={softness} />
+      <CoatSurface kind="rim"  part={side} seats={seats} color={color} softness={softness}
+                   rimStretch={rimStretch} />
       {showSeats && <SeatMarkers seats={seats} pieceW={Math.max(side.fitted[0], top.fitted[0])} />}
     </>
   );
@@ -636,7 +637,7 @@ function SeatMarkers({ seats, pieceW }) {
   );
 }
 
-function CoatSurface({ kind, part, seats, color, softness }) {
+function CoatSurface({ kind, part, seats, color, softness, rimStretch = 1 }) {
   const mine = useMemo(() => seats.filter(s => s.kind === kind), [seats, kind]);
   const ref = useRef();
 
@@ -650,7 +651,7 @@ function CoatSurface({ kind, part, seats, color, softness }) {
          a GLB that leaves a band gets a longer shoulder rather than a slider. Scaling the other
          two axes with it would make the rim pieces fatter than their neighbours and trade the gap
          for a ridge. compose() applies scale in LOCAL axes, and local Z is `v`. */
-      sc.set(part.scale, part.scale, part.scale * (s.stretch ?? 1));
+      sc.set(part.scale, part.scale, part.scale * (s.stretch ?? 1) * (s.kind === 'rim' ? rimStretch : 1));
       const u = new THREE.Vector3(...s.u), n = new THREE.Vector3(...s.n), v = new THREE.Vector3(...s.v);
       /* (u, n, v): the piece was rotated with Y as its surface normal, so Y maps to n. Getting the
          column order wrong lays every wall piece flat against the cake, and it looks plausible
@@ -664,7 +665,7 @@ function CoatSurface({ kind, part, seats, color, softness }) {
       ref.current.setMatrixAt(i, m);
     });
     ref.current.instanceMatrix.needsUpdate = true;
-  }, [part, mine]);
+  }, [part, mine, rimStretch]);
 
   if (!part || !mine.length) return null;
   /* No castShadow — the shadow pass re-renders every instance and self-shadowing between pieces is
@@ -934,6 +935,13 @@ export default function PipingCalibrator() {
   const [coatStat,    setCoatStat]    = useState(null);
   const [coatSeats,   setCoatSeats]   = useState(false);
   const [coatCover,   setCoatCover]   = useState(0.9);
+  /* ⚠️ ON TOP OF THE COMPUTED STRETCH, NOT INSTEAD OF IT — and the reason it exists is worth
+   * keeping. Core sizes the shoulder row from where its neighbours' SEATS reach, which is exactly
+   * right and, on a cake whose seats already overlap, correctly resolves to 1. The seam that
+   * survives that is a property of the MESH: a spiky model does not visually fill even its
+   * percentile extent, and no arithmetic over seat positions can see how much. Automatic where it
+   * can be computed, by hand where it cannot. */
+  const [coatRimStretch, setCoatRimStretch] = useState(1);
   const onCoatMeasure = useCallback(setCoatStat, []);
   const [includeSide, setIncludeSide] = useState(false);
 
@@ -1279,6 +1287,10 @@ export default function PipingCalibrator() {
                           onChange={setCoatCover} color="#c06fa0" />
                 )}
                 {coat && (
+                  <Slider label="Rim stretch" value={coatRimStretch} min={1} max={2.5} step={0.02}
+                          onChange={setCoatRimStretch} color="#d0704f" />
+                )}
+                {coat && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}>
                     <input type="checkbox" checked={coatSeats} onChange={e => setCoatSeats(e.target.checked)} />
                     Show seats <span style={{ color: '#888', fontSize: 11 }}>(blue top · orange side · red rim)</span>
@@ -1603,7 +1615,8 @@ export default function PipingCalibrator() {
               <CoatScene glbUrl={activeGlbUrl} roseRadius={coatRadius}
                          topRot={coatTopRot ?? sideRot} sideRot={sideRot}
                          color={elementColor} softness={rimCfg.softness}
-                         onMeasure={onCoatMeasure} showSeats={coatSeats} cover={coatCover} />
+                         onMeasure={onCoatMeasure} showSeats={coatSeats} cover={coatCover}
+                         rimStretch={coatRimStretch} />
             )}
           </Suspense>
 
