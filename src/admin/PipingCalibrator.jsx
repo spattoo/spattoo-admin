@@ -507,9 +507,19 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
        the signature of a bounding box bigger than the shape inside it (spiky petals, a stem, or
        an unbaked node transform in the model). Without the measured numbers on screen that is
        indistinguishable from the scale maths being wrong, and we spent a round guessing. */
-    /* Seat the piece on the surface it will sit on: y = 0 is the cake, so its lowest point goes
-       there. Measured after rotation for the same reason the scale is. */
-    g.translate(0, -g.boundingBox.min.y, 0);
+    /* ⚠️ RE-CENTRED ON ALL THREE AXES AFTER THE ROTATION, not just seated on Y — and the first
+     * version did only Y, which is the bug PLACEMENT_CONFIG.md already records for tilted shells:
+     * "a tilt moves the shell relative to its own origin, and the seat must follow it in BOTH
+     * axes … extractGeo seats the geometry at min Y and centres it on X/Z … a tilt breaks both."
+     * extractGeo centres X/Z BEFORE any rotation, so after one the piece hangs off its own
+     * origin. Placed at a seat it then dangles — visibly below the board — and leaves cake
+     * showing on the side it has moved away from. Both symptoms, one cause.
+     *
+     * X and Z are centred because the seat is the middle of the patch the piece covers; Y goes to
+     * its MINIMUM because that is the face resting on the cake. */
+    const c = new THREE.Vector3(); g.boundingBox.getCenter(c);
+    g.translate(-c.x, -g.boundingBox.min.y, -c.z);
+    g.computeBoundingBox();
     return { geo: g, scale, verts: g.getAttribute('position').count,
              raw: [size.x, size.y, size.z], footprint,
              fitted: [size.x * scale, size.y * scale, size.z * scale] };
