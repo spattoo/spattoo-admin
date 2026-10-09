@@ -486,10 +486,6 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
 
   const base = useMemo(() => extractGeo(scene), [scene]);
 
-  const seats = useMemo(
-    () => rosetteSeats({ tierRadius: CAKE_RADIUS, tierHeight: CAKE_HEIGHT, baseY: Y_BASE,
-                         rosetteRadius: roseRadius, jitter: ROSETTE_DEFAULTS.jitter, seed: 1 }),
-    [roseRadius]);
 
   /* One geometry per surface, each already carrying its own rotation baked in — so the instance
      matrix only has to place and roll it, and the footprint can be measured on the rotated form. */
@@ -527,6 +523,25 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
 
   const top  = useMemo(() => forSurface(topRot),  [base, topRot.rx, topRot.ry, topRot.rz, roseRadius]);
   const side = useMemo(() => forSurface(sideRot), [base, sideRot.rx, sideRot.ry, sideRot.rz, roseRadius]);
+
+  /* ⚠️ SEATED FROM THE PIECE'S MEASURED SIZE, NOT FROM THE SIZE SLIDER. The slider asks for a
+   * radius; what the packing needs is how far this particular GLB actually reaches across the
+   * surface and up the wall ONCE ROTATED AND SCALED — and those differ the moment a model is not
+   * square, which a rose with a tail is not. Seating from the nominal radius is what put the
+   * bottom row through the board. `fitted` is [x, y, z] in the piece's own frame, where x runs
+   * across the surface, z runs up the wall, and y is depth along the normal.
+   *
+   * The SIDE's measurement governs the rows because the wall is where height matters; the top's
+   * own width governs its rings. */
+  const seats = useMemo(() => {
+    if (!side || !top) return [];
+    return rosetteSeats({
+      tierRadius: CAKE_RADIUS, tierHeight: CAKE_HEIGHT, baseY: Y_BASE,
+      pieceW: Math.max(side.fitted[0], top.fitted[0]),
+      pieceH: side.fitted[2],
+      jitter: ROSETTE_DEFAULTS.jitter, seed: 1,
+    });
+  }, [side, top]);
 
   useEffect(() => {
     if (top && side && onMeasure) onMeasure({ top, side, seats: seats.length });
@@ -1199,7 +1214,9 @@ export default function PipingCalibrator() {
                     <div>side fit {coatStat.side.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.side.scale.toFixed(3)})</div>
                     <div>top&nbsp; fit {coatStat.top.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.top.scale.toFixed(3)})</div>
                     <div style={{ opacity: 0.7, marginTop: 3 }}>
-                      seat spacing {(coatRadius * 1.2).toFixed(3)} · cake h 1.45
+                      seats from W {Math.max(coatStat.side.fitted[0], coatStat.top.fitted[0]).toFixed(3)}
+                      · H {coatStat.side.fitted[2].toFixed(3)} · cake h 1.45
+                      → {Math.max(1, Math.round((1.45 - coatStat.side.fitted[2]) / (coatStat.side.fitted[2] * 0.6)) + 1)} rows
                     </div>
                   </div>
                 )}
