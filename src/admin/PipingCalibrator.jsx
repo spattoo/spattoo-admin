@@ -704,8 +704,11 @@ export default function PipingCalibrator() {
   // Element (cream) colour — drives the piped element in the preview + thumbnail.
   const [elementColor, setElementColor] = useState(DEFAULT_ELEMENT_COLOR);
 
-  const cfg    = target === 'board' ? boardCfg : rimCfg;
-  const setCfg = target === 'board' ? setBoardCfg : setRimCfg;
+  /* Ring configs only. The Side tab authors ONE key (`side_rotation`) and shows none of the
+     controls below, so it deliberately has no entry here — falling through to the rim would let a
+     slider on a hidden panel write to a ring nobody is looking at. */
+  const cfg    = target === 'rim' ? rimCfg    : boardCfg;
+  const setCfg = target === 'rim' ? setRimCfg : setBoardCfg;
 
   // Download the cake on its own — the full cake, board, and placed element with NO canvas
   // background or floor. Rendered on a dedicated offscreen canvas (transparent, no floor, framed
@@ -900,10 +903,22 @@ export default function PipingCalibrator() {
           <>
             {/* Target: rim (top edge) vs board (base) */}
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', marginBottom: 4 }}>Edit values for (both rings shown)</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', marginBottom: 4 }}>Edit values for</div>
               <div style={{ display: 'flex', gap: 6 }}>
-                {[{ v: 'board', label: 'Board (base)' }, { v: 'rim', label: 'Rim (top edge)' }].map(({ v, label }) => (
-                  <button key={v} onClick={() => setTarget(v)}
+                {/* ⚠️ THREE SURFACES. The wall began as a tick-box below the ring controls and that
+                    was wrong: "which surface am I tuning" is the question this selector answers, and
+                    burying one of the three answers somewhere else means nobody finds it. Sandeep:
+                    *"board and ring, we should add side option. how would i calibrate otherwise"*. */}
+                {[{ v: 'board', label: 'Board (base)' }, { v: 'rim', label: 'Rim (top edge)' },
+                  { v: 'side', label: 'Side (wall)' }].map(({ v, label }) => (
+                  /* ⚠️ OPENING THE WALL TAB TICKS IT FOR OUTPUT. Without this you can select Side,
+                     move all three sliders, watch the cake change — and copy a JSON with no
+                     `side_rotation` in it, because the tick lives further down the panel. A control
+                     that visibly works while its value is silently dropped is the exact fault this
+                     whole key exists to fix; reproducing it in the tool that authors it would be
+                     absurd. It is a tick, not a lock: untick it and the element goes back to
+                     following the board. */
+                  <button key={v} onClick={() => { setTarget(v); if (v === 'side') setIncludeSide(true); }}
                     style={{ flex: 1, fontSize: 11, padding: '6px 0', borderRadius: 6, border: `2px solid ${target === v ? '#3D5A44' : '#C5D4C8'}`, background: target === v ? '#3D5A44' : '#fff', color: target === v ? '#fff' : '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
                     {label}
                   </button>
@@ -941,6 +956,29 @@ export default function PipingCalibrator() {
               </div>
             </div>
 
+            {/* ── The wall: ONE key, so one short panel ──────────────────────────────────────
+                `side_rotation` is the whole of what a wall authors. Every ring control below —
+                flip, radial, y-offset, size, spacing, swag, wrap, alternation — describes a BORDER,
+                and a hand-piped stroke has none of them: the customer draws where it goes and the
+                pen card carries size and spacing. Showing them here would offer settings that reach
+                nothing, which is worse than not offering them (INVARIANTS #12 — lay a surface out
+                by what it actually does). */}
+            {target === 'side' && (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', marginBottom: 4, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>Hand piping on the wall</div>
+                <div style={{ fontSize: 10.5, color: '#6B8C74', lineHeight: 1.5, marginBottom: 8 }}>
+                  How a piece stands when a customer pipes it on the SIDE with the pen. The rings
+                  above keep a piece upright and face it outward; the pen lines its up-axis up with
+                  the surface, so a wall needs its own number. Left out, it follows the board.
+                </div>
+                <Slider label="Side X" value={sideRot.rx} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rx: v }))} color="#e05252" />
+                <Slider label="Side Y" value={sideRot.ry} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, ry: v }))} color="#52c452" />
+                <Slider label="Side Z" value={sideRot.rz} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rz: v }))} color="#5252e0" />
+              </>
+            )}
+
+            {/* ── Ring controls — board and rim only ─────────────────────────────────────────── */}
+            {target !== 'side' && (<>
             {/* Flip */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44' }}>Flip (180° X on geometry)</span>
@@ -949,23 +987,6 @@ export default function PipingCalibrator() {
                 {cfg.flipBottom ? 'ON' : 'OFF'}
               </button>
             </div>
-
-            {/* ── Hand piping on the wall ────────────────────────────────────────────────────
-                A pen stroke on a wall is a THIRD surface, not a variant of the board: the piece's
-                up-axis aligns to the surface normal there, so the board's numbers do not transfer.
-                Left unticked, an element falls back to `bottom_rotation` exactly as before. */}
-            <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', marginBottom: 4, marginTop: 14, textTransform: 'uppercase', letterSpacing: 0.8 }}>Hand piping on the wall</div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#6B8C74', marginBottom: 6, cursor: 'pointer' }}>
-              <input type="checkbox" checked={includeSide} onChange={e => setIncludeSide(e.target.checked)} />
-              <span>Set <code>side_rotation</code> (else it follows the board)</span>
-            </label>
-            {includeSide && (
-              <>
-                <Slider label="Side X" value={sideRot.rx} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rx: v }))} color="#e05252" />
-                <Slider label="Side Y" value={sideRot.ry} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, ry: v }))} color="#52c452" />
-                <Slider label="Side Z" value={sideRot.rz} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rz: v }))} color="#5252e0" />
-              </>
-            )}
 
             {/* Rotation */}
             <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', marginBottom: 6, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>Rotation (degrees)</div>
@@ -1130,7 +1151,10 @@ export default function PipingCalibrator() {
               </div>
             </>}
 
-            {/* Ring toggle */}
+            </>)}
+
+            {/* Ring toggle — a RING preview switch, so it has no meaning on the wall tab. */}
+            {target !== 'side' && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44' }}>Show full ring</span>
               <button onClick={() => setShowRing(r => !r)}
@@ -1138,19 +1162,24 @@ export default function PipingCalibrator() {
                 {showRing ? 'ON' : 'OFF'}
               </button>
             </div>
+            )}
 
             {/* Include in output — board-only / rim-only / both */}
             <div style={{ marginTop: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Include in JSON</div>
               {[{ k: 'board', on: includeBoard, setter: setIncludeBoard, label: 'Board (base)' },
-                { k: 'rim',   on: includeRim,   setter: setIncludeRim,   label: 'Rim (top edge)' }].map(row => (
+                { k: 'rim',   on: includeRim,   setter: setIncludeRim,   label: 'Rim (top edge)' },
+                /* Unticked writes nothing, and nothing is the right default: an element with no
+                   `side_rotation` falls back to `bottom_rotation`, which is what every element
+                   shipped before this key did. A paste must never silently take that away. */
+                { k: 'side',  on: includeSide,  setter: setIncludeSide,  label: 'Side (wall)' }].map(row => (
                 <label key={row.k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, cursor: 'pointer' }}>
                   <input type="checkbox" checked={row.on} onChange={e => row.setter(e.target.checked)} style={{ accentColor: '#3D5A44', width: 15, height: 15 }} />
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44', fontFamily: "'Quicksand',sans-serif" }}>{row.label}</span>
                 </label>
               ))}
               <div style={{ fontSize: 10, color: '#9BB5A2', marginTop: 2, lineHeight: 1.5 }}>
-                Only checked sections are written. Board → <code>bottom_*</code>, Rim → <code>top_*</code>.
+                Only checked sections are written. Board → <code>bottom_*</code>, Rim → <code>top_*</code>, Side → <code>side_rotation</code> (absent = follows the board).
               </div>
             </div>
 
@@ -1219,7 +1248,7 @@ export default function PipingCalibrator() {
             )}
             {/* The wall run appears only while `side_rotation` is being authored — it is a hand-piped
                 stroke, not a ring, and leaving it on the cake would misread as a third border. */}
-            {activeGlbUrl && includeSide && (
+            {activeGlbUrl && (includeSide || target === 'side') && (
               <WallStamps glbUrl={activeGlbUrl} rot={sideRot} color={elementColor} />
             )}
           </Suspense>
