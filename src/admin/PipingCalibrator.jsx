@@ -279,7 +279,15 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape =
   const dRadialB = altActive ? (cfg.altRadialOffset - cfg.radialOffset) : 0;
   const dYB = altActive ? (cfg.altYOffset - cfg.yOffset) : 0;
   const L = pattern.length || 1;
-  const pts = showRing ? positions : (positions.length ? [positions[0]] : []);
+  /* ⚠️ THE ONE PIECE FACES THE CAMERA. `positions[0]` is angle 0 — the +X side — while the preview
+     camera sits at +Z, so the single calibration piece was always edge-on at the right of the
+     frame, and zooming in pushed it out of view entirely. Picking the piece nearest the front puts
+     the subject where the viewer is already looking, which is the whole job of this screen.
+     Unchanged when "Show full ring" is on: then every piece renders and there is no one subject. */
+  const frontMost = positions.length
+    ? positions.reduce((best, q) => (q.pos[2] > best.pos[2] ? q : best), positions[0])
+    : null;
+  const pts = showRing ? positions : (frontMost ? [frontMost] : []);
 
   return (
     <>
@@ -804,6 +812,32 @@ export default function PipingCalibrator() {
 
   function set(key) { return v => setCfg(prev => ({ ...prev, [key]: v })); }
 
+  /* ── Zoom toward the piping, not toward the air above it ────────────────────────────────────
+   * The orbit target was fixed at [0, 2, 0] — ABOVE the top of the cake (Y_BASE + CAKE_HEIGHT =
+   * 1.55). Dollying in converges on the target, so zooming walked the camera into empty space over
+   * the lid while the thing being calibrated slid off the bottom of the frame. Sandeep: *"when i
+   * zoom in, i cant see the actual piping. to calibrate better i need to be able to see"*.
+   * The target follows the surface being edited, so close inspection is just scroll-to-zoom.
+   */
+  const focusY = target === 'rim'  ? Y_BASE + CAKE_HEIGHT
+               : target === 'side' ? Y_BASE + CAKE_HEIGHT * 0.5
+               :                     Y_BASE + CAKE_HEIGHT * 0.08;   // board ring sits just off the plate
+  /* ⚠️ AND THE FRONT OF THE CAKE, NOT ITS AXIS. Aiming at [0, y, 0] fixed the HEIGHT but still
+     converged on the centre column, so a rim or board piece — which lives out at the radius —
+     drifted off the edge as you zoomed. Every subject here sits at the front: the rings show their
+     one piece there now, and the wall run is drawn there. Target the subject. */
+  const focusZ = CAKE_RADIUS;
+  const orbitRef = useRef(null);
+  /* ⚠️ SET THROUGH THE REF, NOT ONLY THE PROP. drei applies `target` when the controls are created;
+     a later change to the array does not move an existing instance, so switching tabs would leave
+     the camera aimed at the surface you just left. `update()` is what makes the change take. */
+  useEffect(() => {
+    const c = orbitRef.current;
+    if (!c?.target) return;
+    c.target.set(0, focusY, focusZ);
+    c.update();
+  }, [focusY, focusZ]);
+
   // One combined placement_config fragment — only the checked sections are written, so
   // the same paste covers board-only, rim-only, or both. Merge it straight into an
   // element's placement_config (ManageElements "Paste from Piping Calibrator").
@@ -1264,7 +1298,9 @@ export default function PipingCalibrator() {
             )}
           </Suspense>
 
-          <OrbitControls makeDefault target={[0, 2, 0]} />
+          {/* minDistance lets the camera get inside a shell's own scale — the default 0 is fine but
+              a floor stops a scroll flick from flying through the cake and losing the piece. */}
+          <OrbitControls ref={orbitRef} makeDefault target={[0, focusY, focusZ]} minDistance={0.55} maxDistance={16} />
         </Canvas>
 
         {!activeGlbUrl && (
