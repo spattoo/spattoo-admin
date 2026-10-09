@@ -25,7 +25,12 @@ import { normalizeArtwork, buildShellGeo, buildSwagRing, buildFestoons,
          /* The coat's PACKING — where every rose sits on a tier and the frame it sits in.
             Core owns it because a GLB rose and a procedural one are packed identically;
             only the thing placed in each seat differs. */
-         rosetteSeats, ROSETTE_DEFAULTS } from '@spattoo/designer';
+         rosetteSeats, ROSETTE_DEFAULTS,
+         /* ⚠️ THE SPACING IS MEASURED PER GLB, NOT CHOSEN. A disc tiles at 0.81 of its width and
+            a sharp star needs 0.54 — no constant is both, which is why every value picked for the
+            rose left a band on the star. This rasterises the piece's silhouette and bisects for
+            the widest lattice that still has no hole in it. */
+         silhouette, maxTileStep } from '@spattoo/designer';
 import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
@@ -550,8 +555,13 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
        its seat — the same reason the sizes come from it. */
     g.translate(-(ext[0].min + ext[0].max) / 2, -ext[1].min, -(ext[2].min + ext[2].max) / 2);
     g.computeBoundingBox();
+    /* Measured on the piece AS DRAWN — rotated, re-centred, before the uniform scale, which the
+       ratio is independent of because it is expressed as a fraction of the piece's own width. */
+    const sil = silhouette(g.getAttribute('position').array);
+    const tile = maxTileStep(sil);
     return { geo: g, scale, verts: g.getAttribute('position').count,
              raw: [box.x, box.y, box.z], solid: [size.x, size.y, size.z], footprint,
+             tile: tile.ratioX, tileFloor: !!tile.gapAtFloor,
              fitted: [size.x * scale, size.y * scale, size.z * scale] };
   };
 
@@ -569,10 +579,16 @@ function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMea
    * own width governs its rings. */
   const seats = useMemo(() => {
     if (!side || !top) return [];
+    /* ⚠️ OVERLAP COMES FROM THE MEASUREMENT, NOT FROM A DEFAULT. `tile` is the widest step this
+       particular silhouette tiles at, as a fraction of its width; overlap is one minus that. The
+       0.95 is a margin for the rounding that makes each ring take a whole number of pieces, which
+       can only ever push spacing up. The side governs, because the wall is what is looked at. */
+    const step = Math.min(side.tile, top.tile) * 0.95;
     return rosetteSeats({
       tierRadius: CAKE_RADIUS, tierHeight: CAKE_HEIGHT, baseY: Y_BASE,
       pieceW: Math.max(side.fitted[0], top.fitted[0]),
       pieceH: side.fitted[2],
+      overlap: 1 - step,
       jitter: ROSETTE_DEFAULTS.jitter, seed: 1,
     });
   }, [side, top]);
@@ -1324,10 +1340,14 @@ export default function PipingCalibrator() {
                     <div>solid&nbsp;&nbsp;&nbsp;&nbsp;{coatStat.side.solid.map(n => n.toFixed(2)).join(' × ')}</div>
                     <div>side fit {coatStat.side.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.side.scale.toFixed(3)})</div>
                     <div>top&nbsp; fit {coatStat.top.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.top.scale.toFixed(3)})</div>
-                    <div style={{ opacity: 0.7, marginTop: 3 }}>
-                      seats from W {Math.max(coatStat.side.fitted[0], coatStat.top.fitted[0]).toFixed(3)}
+                    <div style={{ marginTop: 3, fontWeight: 700,
+                                  color: coatStat.side.tileFloor ? '#a4252a' : '#2d6a4f' }}>
+                      tiles at {coatStat.side.tile.toFixed(3)} × width
+                      {coatStat.side.tileFloor && ' — has holes, cannot tile'}
+                    </div>
+                    <div style={{ opacity: 0.7 }}>
+                      seats W {Math.max(coatStat.side.fitted[0], coatStat.top.fitted[0]).toFixed(3)}
                       · H {coatStat.side.fitted[2].toFixed(3)} · cake h 1.45
-                      → {Math.max(1, Math.round((1.45 - coatStat.side.fitted[2]) / (coatStat.side.fitted[2] * 0.6)) + 1)} rows
                     </div>
                   </div>
                 )}
