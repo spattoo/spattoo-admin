@@ -807,13 +807,24 @@ export default function PipingCalibrator() {
   // One combined placement_config fragment — only the checked sections are written, so
   // the same paste covers board-only, rim-only, or both. Merge it straight into an
   // element's placement_config (ManageElements "Paste from Piping Calibrator").
-  const valuesJson = JSON.stringify({
-    ...(includeBoard ? sectionFor('bottom', boardCfg) : {}),
-    ...(includeRim   ? sectionFor('top',    rimCfg)   : {}),
+  /* ⚠️ THE SECTION YOU ARE EDITING COMES FIRST, and that is not cosmetic. With the sections in a
+     fixed board→rim→side order, `side_rotation` landed 84% of the way down a block whose bottom
+     143px sits below the fold — so you could tune the wall, watch the cake change, and read a JSON
+     box that appeared not to mention it. Sandeep: *"json field in the piping calibrator is not
+     adding side values"*. It was adding them; they were off-screen. Measured: block top 758px,
+     bottom 1123px, viewport 980px, panel scrolled to 0.
+     Key order carries no meaning in a paste, so the output can be ordered for the reader — and the
+     reader is always looking for what they just moved. */
+  const sections = {
+    board: includeBoard ? sectionFor('bottom', boardCfg) : {},
+    rim:   includeRim   ? sectionFor('top',    rimCfg)   : {},
     // Not a `sectionFor` prefix: `side_rotation` has no top_/bottom_ twin, because there is no wall
     // above the rim. Emitted only when ticked, so a paste never silently overrides the fallback.
-    ...(includeSide ? { side_rotation: [Math.round(sideRot.rx), Math.round(sideRot.ry), Math.round(sideRot.rz)] } : {}),
-  }, null, 2);
+    side:  includeSide  ? { side_rotation: [Math.round(sideRot.rx), Math.round(sideRot.ry), Math.round(sideRot.rz)] } : {},
+  };
+  const valuesJson = JSON.stringify(
+    Object.assign({}, ...[target, 'board', 'rim', 'side'].filter((k, i, a) => a.indexOf(k) === i).map(k => sections[k] ?? {})),
+    null, 2);
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 56px)', fontFamily: "'Quicksand',sans-serif", background: '#EDEAE2' }}>
