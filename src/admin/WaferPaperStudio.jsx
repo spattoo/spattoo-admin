@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
-import * as THREE from 'three';
 import {
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
-  buildWaferSkirt, WAFER_DEFAULTS, WAFER_PRESETS, WAFER_CONTROLS, WAFER_PAPER_MATERIAL, waferFibreTexture,
+  buildWaferSkirt, WAFER_DEFAULTS, WAFER_PRESETS, WAFER_CONTROLS, WAFER_PAPER_MATERIAL,
+  WaferPaperMaterial,
 } from '@spattoo/designer';
 
 /* ── Wafer paper, cut into panels and stood around the cake ───────────────────────────────────────
@@ -75,30 +75,18 @@ const RANGE = Object.fromEntries(
 const bounds = (k) => ({ min: RANGE[k].min, max: RANGE[k].max, step: RANGE[k].step });
 
 function Skirt({ shape, p }) {
-  // Generated, not shipped: it is noise, and a procedural one scales to any panel without UVs.
-  const fibre = useMemo(() => waferFibreTexture({ strength: p.fibre }), [p.fibre]);
   const geom = useMemo(() => buildWaferSkirt({ shape, tierHeight: TIER.height, ...p }), [shape, p]);
   if (!geom) return null;
   return (
     <mesh geometry={geom} position={[0, TIER.height / 2, 0]} castShadow receiveShadow>
-      {/* ⚠️ DoubleSide: a sheet of paper has no back. Single-sided, every panel on the far side of
-          the cake vanishes the moment it turns — and that is half of them at any angle.
-
-          ⚠️ AND NO `transparent` / `opacity` WHILE TRANSMISSION IS ON. Sandeep, on the first
-          render: "may be geometrically fine, but it does not look like wafer paper." He was right
-          and the geometry was not the fault: setting that pair puts the mesh on the alpha-blended
-          path, so every pixel becomes a flat lerp toward what is behind it and the transmission is
-          thrown away. Two overlapping panels came out the same flat pink instead of getting denser
-          where they cross, which is the single most paper-like thing about the references.
-          The numbers live in core's WAFER_PAPER_MATERIAL so this studio and the cake agree. */}
-      <meshPhysicalMaterial
-        color={p.colour} side={THREE.DoubleSide}
-        roughness={p.roughness} transmission={p.transmission}
-        thickness={p.thickness} ior={WAFER_PAPER_MATERIAL.ior}
-        sheen={p.sheen} sheenRoughness={WAFER_PAPER_MATERIAL.sheenRoughness}
-        sheenColor={WAFER_PAPER_MATERIAL.sheenColor} specularIntensity={p.specular}
-        roughnessMap={p.fibre > 0 ? fibre : null}
-        metalness={WAFER_PAPER_MATERIAL.metalness} />
+      {/* ⚠️ CORE'S MATERIAL, MOUNTED — this file used to hand-write the `<meshPhysicalMaterial>`,
+          and it drifted: it had no `vertexColors`, so the baked gap occlusion was computed,
+          uploaded to the GPU and ignored. That occlusion is the whole reason a white skirt is
+          legible on a white cake, and without it the studio showed one flat field. Sandeep, on
+          this screen: *"the same over exposure problem. total white and i can hardly see the
+          paper."* The cake had the opposite hole — it was missing `sheenColor`. A tuner that can
+          disagree with the cake is not a tuner (root CLAUDE.md rule 1, INVARIANTS #15). */}
+      <WaferPaperMaterial p={p} geometry={geom} />
     </mesh>
   );
 }
