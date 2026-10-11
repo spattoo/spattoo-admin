@@ -96,9 +96,9 @@ function Skirt({ shape, p }) {
         roughness={p.roughness} transmission={p.transmission}
         thickness={p.thickness} ior={WAFER_PAPER_MATERIAL.ior}
         sheen={p.sheen} sheenRoughness={WAFER_PAPER_MATERIAL.sheenRoughness}
-        sheenColor="#ffffff" specularIntensity={p.specular}
+        sheenColor={WAFER_PAPER_MATERIAL.sheenColor} specularIntensity={p.specular}
         roughnessMap={p.fibre > 0 ? fibre : null}
-        metalness={0} />
+        metalness={WAFER_PAPER_MATERIAL.metalness} />
     </mesh>
   );
 }
