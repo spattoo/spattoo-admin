@@ -4,7 +4,7 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
-  buildWaferSkirt, WAFER_DEFAULTS, WAFER_PAPER_MATERIAL, waferFibreTexture,
+  buildWaferSkirt, WAFER_DEFAULTS, WAFER_PRESETS, WAFER_CONTROLS, WAFER_PAPER_MATERIAL, waferFibreTexture,
 } from '@spattoo/designer';
 
 /* ── Wafer paper, cut into panels and stood around the cake ───────────────────────────────────────
@@ -58,23 +58,21 @@ const SHAPES = {
   sheet: { kind: 'rect', halfW: 1.65, halfD: 1.1, cornerR: 0.2 },
 };
 
-/* Four starting points taken off four reference cakes. They are claims about what each cake IS —
-   how many sheets, how deeply pleated, how far the hem swings — so they are the fastest way to find
-   out whether a look is reachable at all before touching a slider. */
-const PRESETS = {
-  'Pink, notched hem': { count: 30, width: 2.0, height: 0.80, rise: 0.22, taper: 0.02, ripple: 0.16,
-    ripples: 2.4, sway: 0.05, curl: 0.12, splay: 0.06, lean: 0.03, jitter: 0.30,
-    hem: 'notch', notch: 0.18, colour: '#f2766d' },
-  'White, waved':      { count: 34, width: 2.3, height: 0.95, rise: 0.04, taper: 0.18, ripple: 0.30,
-    ripples: 6.0, sway: 0.10, curl: 0.22, splay: 0.08, lean: 0.05, jitter: 0.45,
-    hem: 'straight', notch: 0.10, colour: '#fbf7f2' },
-  'White, rippled':    { count: 44, width: 2.0, height: 0.92, rise: 0.02, taper: 0.22, ripple: 0.26,
-    ripples: 8.0, sway: 0.12, curl: 0.18, splay: 0.08, lean: 0.03, jitter: 0.50,
-    hem: 'torn', notch: 0.12, colour: '#fdfbf7' },
-  'White, broad':      { count: 20, width: 2.4, height: 0.98, rise: 0.06, taper: 0.06, ripple: 0.24,
-    ripples: 3.0, sway: 0.06, curl: 0.30, splay: 0.06, lean: 0.02, jitter: 0.35,
-    hem: 'straight', notch: 0.10, colour: '#ffffff' },
-};
+/* ⚠️ THE FOUR LOOKS LIVE IN CORE NOW, and they used to live here. They are four claims about four
+ * reference cakes — how many sheets, how deeply pleated, how far the hem swings — and since the
+ * tier card in the designer offers the same four by name, a copy here would be a second answer to
+ * "what is Pink, notched hem". The studio's whole premise is that what you tune is what the cake
+ * gets (root CLAUDE.md rule 1, INVARIANTS #15); a preset is a tuned thing.
+ *
+ * ⚠️ AND SO DO THE RANGES. A slider's ends are a claim about what the look can stand — `ripples`
+ * past 12 stops reading as folds, `width` under 0.6 opens daylight between the sheets. Two copies
+ * of that claim drift, and the one that drifts is whichever screen is edited second. `bounds` reads
+ * them off core's schema; the LABELS and the hints stay here, because naming a control for a baker
+ * is this screen's job and "Width × gap" says more to someone holding a slider than "Width" does. */
+const PRESETS = WAFER_PRESETS;
+const RANGE = Object.fromEntries(
+  [...WAFER_CONTROLS.sheets, ...WAFER_CONTROLS.pleat].map(c => [c.key, c]));
+const bounds = (k) => ({ min: RANGE[k].min, max: RANGE[k].max, step: RANGE[k].step });
 
 function Skirt({ shape, p }) {
   // Generated, not shipped: it is noise, and a procedural one scales to any panel without UVs.
@@ -155,26 +153,26 @@ export default function WaferPaperStudio() {
         </Row>
 
         <H>The sheets</H>
-        <Sl label="Panels"         v={p.count}  min={8} max={90} step={1} on={set('count')} int
+        <Sl label="Panels"         v={p.count}  {...bounds('count')} on={set('count')} int
             hint="How many strips go round." />
-        <Sl label="Width × gap"    v={p.width}  min={0.6} max={3.2} step={0.05} on={set('width')}
+        <Sl label="Width × gap"    v={p.width}  {...bounds('width')} on={set('width')}
             hint="Over 1 they overlap. Every reference does." />
-        <Sl label="Height × tier"  v={p.height} min={0.3} max={1.3} step={0.02} on={set('height')} />
-        <Sl label="Rise above rim" v={p.rise}   min={-0.1} max={0.4} step={0.01} on={set('rise')}
+        <Sl label="Height × tier"  v={p.height} {...bounds('height')} on={set('height')} />
+        <Sl label="Rise above rim" v={p.rise}   {...bounds('rise')} on={set('rise')}
             hint="How far the strips stand above the top edge." />
-        <Sl label="Taper"          v={p.taper}  min={0} max={0.7} step={0.02} on={set('taper')} />
+        <Sl label="Taper"          v={p.taper}  {...bounds('taper')} on={set('taper')} />
 
         <H>The pleat</H>
-        <Sl label="Fold depth"   v={p.ripple}  min={0} max={0.8} step={0.02} on={set('ripple')} />
-        <Sl label="Folds across" v={p.ripples} min={0.5} max={12} step={0.1} on={set('ripples')}
+        <Sl label="Fold depth"   v={p.ripple}  {...bounds('ripple')} on={set('ripple')} />
+        <Sl label="Folds across" v={p.ripples} {...bounds('ripples')} on={set('ripples')}
             hint="The fold lines ARE the ribbons." />
-        <Sl label="Curl"         v={p.curl}    min={0} max={1} step={0.02} on={set('curl')}
+        <Sl label="Curl"         v={p.curl}    {...bounds('curl')} on={set('curl')}
             hint="How much the sheet bows across its width." />
-        <Sl label="Drift"        v={p.sway}    min={0} max={0.5} step={0.02} on={set('sway')}
+        <Sl label="Drift"        v={p.sway}    {...bounds('sway')} on={set('sway')}
             hint="A lean left or right as it falls. Secondary — keep it small." />
-        <Sl label="Splay"        v={p.splay}   min={0} max={0.5} step={0.02} on={set('splay')}
+        <Sl label="Splay"        v={p.splay}   {...bounds('splay')} on={set('splay')}
             hint="Hem away from the wall. Paper hugs; a flare reads as a tutu." />
-        <Sl label="Lean"         v={p.lean}    min={-0.2} max={0.35} step={0.01} on={set('lean')} />
+        <Sl label="Lean"         v={p.lean}    {...bounds('lean')} on={set('lean')} />
 
         <H>Cut and variation</H>
         {/* ⚠️ Two of these are not a hem at all. `straight`, `notch` and `torn` trim the bottom of a
@@ -192,7 +190,7 @@ export default function WaferPaperStudio() {
             hint="Each sheet sits a little further out than the last, like roof tiles, so they have a front-to-back order." />
         <Sl label="Nest"      v={p.nest} min={0} max={1} step={0.05} on={set('nest')}
             hint="Ridge into valley. At 0 each sheet creases independently and they pass through one another." />
-        <Sl label="Jitter"    v={p.jitter} min={0} max={1} step={0.02} on={set('jitter')}
+        <Sl label="Jitter"    v={p.jitter} {...bounds('jitter')} on={set('jitter')}
             hint="How much the strips differ. At 0 the eye finds the repeat." />
         <Sl label="Seed"      v={p.seed}   min={1} max={40} step={1} on={set('seed')} int />
 
