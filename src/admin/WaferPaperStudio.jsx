@@ -71,7 +71,7 @@ const SHAPES = {
  * is this screen's job and "Width × gap" says more to someone holding a slider than "Width" does. */
 const PRESETS = WAFER_PRESETS;
 const RANGE = Object.fromEntries(
-  [...WAFER_CONTROLS.sheets, ...WAFER_CONTROLS.pleat].map(c => [c.key, c]));
+  [...WAFER_CONTROLS.sheets, ...WAFER_CONTROLS.pleat, ...WAFER_CONTROLS.mount].map(c => [c.key, c]));
 const bounds = (k) => ({ min: RANGE[k].min, max: RANGE[k].max, step: RANGE[k].step });
 
 function Skirt({ shape, p }) {
@@ -152,11 +152,26 @@ export default function WaferPaperStudio() {
           ))}
         </Row>
 
+        {/* ⚠️ THE FIRST CONTROL, because it changes what every slider below it MEANS. Flat lays the
+            sheet on the wall, so `width` is how much of the perimeter it covers; on edge the same
+            number is how far the strip reaches OUT. Sandeep, four renders in: "wafer paper strips
+            are perpendicularly added to the cake surface. your screenshot shows like the strips are
+            flat." Flat is the default because it is what every earlier preset was tuned as. */}
+        <Row label="Mounting">
+          <Btn on={!p.fin} onClick={() => setP(o => ({ ...o, fin: false }))}>flat on the wall</Btn>
+          <Btn on={!!p.fin} onClick={() => setP(o => ({ ...o, fin: true }))}>stood on edge</Btn>
+        </Row>
+        {p.fin && (
+          <Sl label="Edge angle" v={p.finAngle} {...bounds('finAngle')} on={set('finAngle')} int
+              hint="90° is square to the cake. Lower rakes the strips round, like feathers." />
+        )}
+
         <H>The sheets</H>
         <Sl label="Panels"         v={p.count}  {...bounds('count')} on={set('count')} int
             hint="How many strips go round." />
         <Sl label="Width × gap"    v={p.width}  {...bounds('width')} on={set('width')}
-            hint="Over 1 they overlap. Every reference does." />
+            hint={p.fin ? "Stood on edge this is how far the strip reaches OUT, not its share of the perimeter."
+                        : "Over 1 they overlap. Every reference does."} />
         <Sl label="Height × tier"  v={p.height} {...bounds('height')} on={set('height')} />
         <Sl label="Rise above rim" v={p.rise}   {...bounds('rise')} on={set('rise')}
             hint="How far the strips stand above the top edge." />
@@ -218,7 +233,8 @@ export default function WaferPaperStudio() {
                       color: '#555', overflowX: 'auto', border: '1px solid #eee' }}>
 {JSON.stringify({ count: p.count, width: p.width, height: p.height, rise: p.rise, taper: p.taper,
                   ripple: p.ripple, ripples: p.ripples, sway: p.sway, curl: p.curl,
-                  splay: p.splay, lean: p.lean, jitter: p.jitter, hem: p.hem, notch: p.notch }, null, 1)}
+                  splay: p.splay, lean: p.lean, jitter: p.jitter, hem: p.hem, notch: p.notch,
+                  fin: p.fin, finAngle: p.finAngle }, null, 1)}
         </pre>
       </div>
 
