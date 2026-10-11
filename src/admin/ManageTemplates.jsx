@@ -7,7 +7,7 @@ import { captureThumbnailBlob, thumbnailFromImage,
          REQUIRED_TAG_CATEGORIES, missingRequiredCategories, requiredTagMessage, ageRangeProblem } from '@spattoo/designer';
 import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, fetchTemplateTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
 } from '../lib/api.js';
-import { rendererFloor, stampBlockedReason } from '../lib/designerBuild.js';
+import { rendererFloor, stampWarning } from '../lib/designerBuild.js';
 
 const SHAPES = [
   { value: 'round',      label: 'Round' },
@@ -695,7 +695,7 @@ function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
  *
  * spattoo-docs/plans/renderer-version-floor.md
  */
-function PublishDialog({ template, autoVersion, blockedReason, busy, onCancel, onConfirm }) {
+function PublishDialog({ template, autoVersion, warning, busy, onCancel, onConfirm }) {
   const [floor, setFloor] = useState(autoVersion ?? '');
   const trimmed = floor.trim();
   const malformed = trimmed !== '' && !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(trimmed);
@@ -717,44 +717,44 @@ function PublishDialog({ template, autoVersion, blockedReason, busy, onCancel, o
 
         <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', textTransform: 'uppercase', letterSpacing: 0.8 }}>Renderer this design needs</div>
 
-        {blockedReason ? (
-          /* Not a warning to click past. An unreleased or unnameable build cannot produce a true
-             number, and a false floor is worse than none: everything downstream enforces it as
-             though somebody had checked. */
-          <div style={{ fontSize: 12, color: '#9B3F4F', background: '#FDF3F4', border: '1.5px solid #F0D4D8', borderRadius: 8, padding: '10px 12px', lineHeight: 1.55 }}>
-            {blockedReason}
+        {/* ⚠️ A WARNING ABOVE THE CONTROL, NOT INSTEAD OF IT. This branch used to REPLACE the whole
+            stamp section and disable the confirm button whenever admin ran core from source — which
+            on the machine this is used from is always, so "Move into catalogue" was permanently
+            dead. The caveat is real and the lock was not: the designer's reported version is the
+            last release, which is a true lower bound whatever the working tree has moved on to.
+            Narrating text goes BESIDE or BEFORE the thing it narrates (INVARIANTS #11). */}
+        {warning && (
+          <div style={{ fontSize: 12, color: '#8A6D1F', background: '#FDF8E8', border: '1.5px solid #EADFBC', borderRadius: 8, padding: '10px 12px', lineHeight: 1.55 }}>
+            {warning}
           </div>
-        ) : (
-          <>
-            <div style={{ fontSize: 12, color: '#6B8C74', lineHeight: 1.55 }}>
-              Stamped automatically from the designer this admin is running
-              (<code>{autoVersion}</code>). An older app will show this design in the library and ask
-              the customer to update rather than drawing it wrongly.
-            </div>
-            <input
-              value={floor}
-              onChange={e => setFloor(e.target.value)}
-              placeholder="0.0.0 — or empty for: renders anywhere"
-              style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, fontFamily: 'monospace', padding: '8px 10px', borderRadius: 8, border: `2px solid ${malformed ? '#D98A94' : '#C5D4C8'}` }}
-            />
-            {malformed && (
-              <div style={{ fontSize: 12, color: '#9B3F4F' }}>Must be x.y.z, or empty.</div>
-            )}
-            {lowered && !malformed && (
-              <div style={{ fontSize: 12, color: '#8A6D1F', background: '#FDF8E8', border: '1.5px solid #EADFBC', borderRadius: 8, padding: '10px 12px', lineHeight: 1.55 }}>
-                You are changing this from <code>{autoVersion}</code> to <code>{trimmed}</code>.
-                Raising it only blocks more apps. <b>Lowering it claims this template renders
-                correctly on {trimmed}</b> — a build you are not running and have not seen it on.
-                That is the direction a customer meets as a wrong cake.
-              </div>
-            )}
-            {trimmed === '' && (
-              <div style={{ fontSize: 12, color: '#6B8C74', lineHeight: 1.55 }}>
-                Empty means <b>renders anywhere</b>. Right for a design that uses nothing new — and
-                wrong, silently, for one that does.
-              </div>
-            )}
-          </>
+        )}
+        <div style={{ fontSize: 12, color: '#6B8C74', lineHeight: 1.55 }}>
+          Stamped automatically from the designer this admin is running
+          (<code>{autoVersion ?? 'not reported'}</code>). An older app will show this design in the
+          library and ask the customer to update rather than drawing it wrongly.
+        </div>
+        <input
+          value={floor}
+          onChange={e => setFloor(e.target.value)}
+          placeholder="0.0.0 — or empty for: renders anywhere"
+          style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, fontFamily: 'monospace', padding: '8px 10px', borderRadius: 8, border: `2px solid ${malformed ? '#D98A94' : '#C5D4C8'}` }}
+        />
+        {malformed && (
+          <div style={{ fontSize: 12, color: '#9B3F4F' }}>Must be x.y.z, or empty.</div>
+        )}
+        {lowered && !malformed && (
+          <div style={{ fontSize: 12, color: '#8A6D1F', background: '#FDF8E8', border: '1.5px solid #EADFBC', borderRadius: 8, padding: '10px 12px', lineHeight: 1.55 }}>
+            You are changing this from <code>{autoVersion}</code> to <code>{trimmed}</code>.
+            Raising it only blocks more apps. <b>Lowering it claims this template renders
+            correctly on {trimmed}</b> — a build you are not running and have not seen it on.
+            That is the direction a customer meets as a wrong cake.
+          </div>
+        )}
+        {trimmed === '' && (
+          <div style={{ fontSize: 12, color: '#6B8C74', lineHeight: 1.55 }}>
+            Empty means <b>renders anywhere</b>. Right for a design that uses nothing new — and
+            wrong, silently, for one that does.
+          </div>
         )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
@@ -764,8 +764,8 @@ function PublishDialog({ template, autoVersion, blockedReason, busy, onCancel, o
           </button>
           <button
             onClick={() => onConfirm({ min_core_version: trimmed || null, auto_core_version: autoVersion ?? null })}
-            disabled={busy || malformed || !!blockedReason}
-            style={{ fontSize: 12, fontWeight: 800, padding: '8px 14px', borderRadius: 8, border: 'none', background: (busy || malformed || blockedReason) ? '#A9BDAF' : '#3D5A44', color: '#fff', cursor: (busy || malformed || blockedReason) ? 'default' : 'pointer' }}>
+            disabled={busy || malformed}
+            style={{ fontSize: 12, fontWeight: 800, padding: '8px 14px', borderRadius: 8, border: 'none', background: (busy || malformed) ? '#A9BDAF' : '#3D5A44', color: '#fff', cursor: (busy || malformed) ? 'default' : 'pointer' }}>
             {busy ? 'Moving…' : 'Move into catalogue'}
           </button>
         </div>
@@ -1064,7 +1064,7 @@ export default function ManageTemplates() {
         <PublishDialog
           template={publishTarget}
           autoVersion={rendererFloor()}
-          blockedReason={stampBlockedReason()}
+          warning={stampWarning()}
           busy={publishing === publishTarget.id}
           onCancel={() => setPublishTarget(null)}
           onConfirm={confirmPublish}
