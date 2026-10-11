@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, useGLTF } from '@react-three/drei';
 import { HexColorPicker } from 'react-colorful';
 import * as THREE from 'three';
-import { buildPipingStroke, NOZZLES, NOZZLE_BY_KEY, DEFAULT_NOZZLE, PEN_FEEL } from '@spattoo/designer';
+import { buildPipingStroke, NOZZLES, NOZZLE_BY_KEY, DEFAULT_NOZZLE, PEN_FEEL, creamMaterialProps } from '@spattoo/designer';
 import { useElementSave } from '../lib/useElementSave.js';
 
 // ── Freehand cream pen ──────────────────────────────────────────────────────
@@ -21,10 +21,6 @@ const CAKE_HEIGHT = 1.45;
 const Y_BASE      = 0.1;
 
 const PIPING_SOFTNESS_DEFAULT = 0.7;
-function creamMaterialProps(softness, color) {
-  const s = Math.min(1, Math.max(0, softness ?? PIPING_SOFTNESS_DEFAULT));
-  return { color, roughness: 0.5 + 0.5 * s, sheen: (0.4 / 0.7) * s, sheenRoughness: 0.9, sheenColor: color };
-}
 
 const STANDARD_CAKE_COLOR = '#f5c6d0';
 

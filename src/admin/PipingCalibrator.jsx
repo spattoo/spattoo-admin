@@ -1,10 +1,39 @@
-import { useState, useMemo, useEffect, useRef, Suspense } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, RoundedBox } from '@react-three/drei';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { fetchAllElements, fetchElementTypes, createGlobalElement, uploadThumbnail } from '../lib/api';
-import { normalizeArtwork } from '@spattoo/designer';
+/* ⚠️ THE GEOMETRY COMES FROM CORE, IT IS NOT REIMPLEMENTED HERE. This file used to carry its own
+ * `buildShellGeo`, and the two drifted in a way that cost a day of tuning: core caps a shell's scale
+ * against the tier radius (`capShellScale`) and this copy did not, so past about 1.15x the tool
+ * showed a size the cake would never render. Sandeep, after tuning here and getting something else
+ * on the cake: *"i loaded this in piping calibrator. and it landed perfectly fine."*
+ * CLAUDE.md states the rule: "THE STUDIO IMPORTS THE GEOMETRY, IT DOES NOT CARRY A COPY OF IT … or
+ * the tuned version and the rendered version drift." */
+import { normalizeArtwork, buildShellGeo, buildSwagRing, buildFestoons,
+         wallPerimeter, buildWrapBand, creamMaterialProps,
+         /* ⚠️ THE PEN'S OWN RENDERER, IMPORTED. `side_rotation` is the attitude a HAND-PIPED piece
+            takes on a wall, and it cannot be tuned against a ring preview: a ring keeps the piece
+            upright in world space and yaws it outward, while the pen aligns its up-axis to the
+            surface normal. Calibrating one against the other is exactly how the pen came to be
+            reading the board's figure. A second stamp renderer here would reproduce that. */
+         StampStroke,
+         /* And core's own preparation, replacing a byte-identical local copy that sat in this file
+            — `check:no-geometry-copy` watches a named list and this one was not on it. */
+         extractGeo, SHELL_HEIGHT_FRAC,
+         /* The coat's PACKING — where every rose sits on a tier and the frame it sits in.
+            Core owns it because a GLB rose and a procedural one are packed identically;
+            only the thing placed in each seat differs. */
+         rosetteSeats, ROSETTE_DEFAULTS,
+         /* ⚠️ THE SPACING IS MEASURED PER GLB, NOT CHOSEN. A disc tiles at 0.81 of its width and
+            a sharp star needs 0.54 — no constant is both, which is why every value picked for the
+            rose left a band on the star. This rasterises the piece's silhouette and bisects for
+            the widest lattice that still has no hole in it. */
+         silhouette, maxTileStep,
+         /* The heart's footprint comes from core's own curve, not a copy of one here — the same
+            generator the designer extrudes a heart tier from. */
+         scaledOutline, coatShade } from '@spattoo/designer';
 import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
@@ -13,50 +42,11 @@ const DEG = Math.PI / 180;
 // spattoo-core CakeTier.jsx so this preview matches the designer exactly. 0 = glossy/wet,
 // 1 = matte/whipped; the default 0.7 reproduces the original look (roughness 0.85, sheen 0.4).
 const PIPING_SOFTNESS_DEFAULT = 0.7;
-function creamMaterialProps(softness, color) {
-  const s = Math.min(1, Math.max(0, softness ?? PIPING_SOFTNESS_DEFAULT));
-  return {
-    color,
-    roughness:      0.5 + 0.5 * s,
-    sheen:          (0.4 / 0.7) * s,
-    sheenRoughness: 0.9,
-    sheenColor:     color,
-  };
-}
 
 // Bend a flat ring into `swagCount` scalloped drapes (garland/swag look).
 // MUST stay identical to buildSwagRing() in spattoo-core CakeTier.jsx so this
 // preview matches the designer exactly. Shells are spaced by arc-length along the
 // draped curve; tq pitches each about the world radial axis to follow the slope.
-function buildSwagRing({ r, baseY, step, swagCount, swagDepth, swagTilt = 0.5 }) {
-  const dipAt = a => -swagDepth * (1 - Math.cos(a * swagCount)) / 2;
-  const N = 1440;
-  const cum = [0];
-  let px = r, py = baseY + dipAt(0), pz = 0;
-  for (let s = 1; s <= N; s++) {
-    const a = (s / N) * Math.PI * 2;
-    const cx = Math.cos(a) * r, cy = baseY + dipAt(a), cz = Math.sin(a) * r;
-    cum.push(cum[s - 1] + Math.hypot(cx - px, cy - py, cz - pz));
-    px = cx; py = cy; pz = cz;
-  }
-  const total = cum[N];
-  const count = Math.max(6, Math.round(total / step));
-  const out = [];
-  let seg = 0;
-  for (let j = 0; j < count; j++) {
-    const target = (j / count) * total;
-    while (seg < N && cum[seg + 1] < target) seg++;
-    const a0 = (seg / N) * Math.PI * 2, a1 = ((seg + 1) / N) * Math.PI * 2;
-    const f  = (target - cum[seg]) / Math.max(1e-9, cum[seg + 1] - cum[seg]);
-    const a  = a0 + (a1 - a0) * f;
-    const slope = -(swagDepth * swagCount / 2) * Math.sin(a * swagCount);
-    const tilt  = -swagTilt * Math.atan2(slope, r);
-    const sh = Math.sin(tilt / 2), ch = Math.cos(tilt / 2);
-    const tq = [Math.cos(a) * sh, 0, Math.sin(a) * sh, ch];
-    out.push({ pos: [Math.cos(a) * r, baseY + dipAt(a), Math.sin(a) * r], rotY: a, tq });
-  }
-  return out;
-}
 
 // Match the designer's default cake so the calibrator is to scale.
 const CAKE_RADIUS = 1.2;   // designer TIER_RADII[0]
@@ -190,13 +180,6 @@ function bendOneFestoon(srcGeo, { th0, span, depth, attachY, radius, tilt = 0 })
   return g;
 }
 
-function buildFestoons(scene, { flip, festoons, depth, attachY, radius, spread = 0.96, tilt = 0 }) {
-  const src = bakeStrip(scene, flip);
-  if (!src) return [];
-  const span = (2 * Math.PI / festoons) * spread; // each U spans its share of the ring (small gap)
-  return Array.from({ length: festoons }, (_, k) =>
-    bendOneFestoon(src, { th0: Math.PI / 2 + k * (2 * Math.PI / festoons), span, depth, attachY, radius, tilt }));
-}
 
 // ── Wrap a pre-formed RING GLB around the wall (round OR rect) ─────────────────
 // MUST stay identical to circlePerimeter / buildWrapBand in spattoo-core (surface.js /
@@ -206,85 +189,18 @@ function buildFestoons(scene, { flip, festoons, depth, attachY, radius, spread =
 function circlePerimeter(r) {
   return { length: 2 * Math.PI * r, at(s) { const a = s / r, nx = Math.cos(a), nz = Math.sin(a); return { x: nx * r, z: nz * r, nx, nz }; } };
 }
-function wallPerimeter(shape) {
-  return shape?.kind === 'rect' ? roundedRectPerimeter(shape.halfW, shape.halfD, shape.cornerR) : circlePerimeter(CAKE_RADIUS);
-}
-function buildWrapBand(scene, { perim, anchorY = 0, heightFrac = 0.4, sizeFactor = 1, radius = CAKE_RADIUS, outset = 0.01, tilt = 0 }) {
-  const g = bakeStrip(scene, false);
-  if (!g || !perim) return null;
-  g.computeBoundingBox();
-  let size = new THREE.Vector3(); g.boundingBox.getSize(size);
-  const thin = (size.x <= size.y && size.x <= size.z) ? 'x' : (size.z <= size.y ? 'z' : 'y');
-  if (thin === 'x') g.applyMatrix4(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
-  else if (thin === 'z') g.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-  g.computeBoundingBox();
-  const c = new THREE.Vector3(); g.boundingBox.getCenter(c);
-  g.translate(-c.x, 0, -c.z);
-  g.computeBoundingBox();
-  const yMin = g.boundingBox.min.y;
-  size = new THREE.Vector3(); g.boundingBox.getSize(size);
-  const ringH = size.y || 1e-3;
-  const pos = g.attributes.position;
-  let rInner = Infinity;
-  for (let i = 0; i < pos.count; i++) { const rho = Math.hypot(pos.getX(i), pos.getZ(i)); if (rho < rInner) rInner = rho; }
-  const cs = (radius * heightFrac / ringH) * Math.max(0.05, sizeFactor);
-  const L = perim.length, v = new THREE.Vector3();
-  const cb = Math.cos(tilt), sb = Math.sin(tilt);                          // tilt about the wall tangent
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const f = (((Math.atan2(z, x) / (2 * Math.PI)) % 1) + 1) % 1;
-    const P = perim.at(f * L);
-    const rRel = (Math.hypot(x, z) - rInner) * cs;                         // radial dist from inner face
-    const h    = (y - yMin) * cs;                                          // height above the band base
-    const out  = rRel * cb + h * sb + outset;                            // tilt rotates the cross-section
-    const hT   = h * cb - rRel * sb;                                      //   about the inner-bottom edge
-    v.set(P.x + P.nx * out, anchorY + hT, P.z + P.nz * out);
-    pos.setXYZ(i, v.x, v.y, v.z);
-  }
-  pos.needsUpdate = true;
-  g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
-  return g;
-}
 
 // ── same extractGeo as CakeTier ───────────────────────────────────────────────
-function extractGeo(scene) {
-  let geo = null;
-  scene.traverse(obj => {
-    if (obj.isMesh && !geo) geo = obj.geometry.clone();
-  });
-  if (!geo) return null;
-  geo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-  geo.computeBoundingBox();
-  const box  = geo.boundingBox;
-  const size = new THREE.Vector3(); box.getSize(size);
-  const ctr  = new THREE.Vector3(); box.getCenter(ctr);
-  geo.translate(-ctr.x, -box.min.y, -ctr.z);
-  return { geo, sizeY: size.y };
-}
 
 // ── Single positioned piece / ring (with optional A/B alternation) ─────────────
 // MUST stay identical to BottomPipingRing/TopPipingRing in spattoo-core CakeTier.jsx.
-function buildShellGeo(scene, flip, sizeFactor = 1) {
-  const result = extractGeo(scene);
-  if (!result) return null;
-  const geo = result.geo;
-  if (flip) {
-    geo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI));
-    geo.computeBoundingBox();
-    geo.translate(0, -geo.boundingBox.min.y, 0);
-  }
-  const sc = (CAKE_RADIUS * 0.24) / result.sizeY * (sizeFactor ?? 1);
-  geo.computeBoundingBox();
-  const bb = new THREE.Vector3(); geo.boundingBox.getSize(bb);
-  return { geometry: geo, shellScale: sc, bbDepth: bb.z, bbWidth: bb.x };
-}
 
 function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape = null, color = DEFAULT_ELEMENT_COLOR }) {
   const { scene } = useGLTF(glbUrl);
   const { scene: sceneAlt } = useGLTF(altGlbUrl || glbUrl);
 
-  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
-  const B = useMemo(() => (cfg.altEnabled ? buildShellGeo(sceneAlt, cfg.altFlip, cfg.sizeFactor) : null),
+  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, CAKE_RADIUS, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
+  const B = useMemo(() => (cfg.altEnabled ? buildShellGeo(sceneAlt, cfg.altFlip, CAKE_RADIUS, cfg.sizeFactor) : null),
     [cfg.altEnabled, sceneAlt, cfg.altFlip, cfg.sizeFactor]);
 
   const pattern = patternStr(cfg);
@@ -341,7 +257,7 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape =
   const wrapGeo = useMemo(() => {
     if (!cfg.wrap) return null;
     return buildWrapBand(scene, {
-      perim: wallPerimeter(shape), anchorY: anchorY + cfg.yOffset,
+      perim: wallPerimeter(shape, CAKE_RADIUS), anchorY: anchorY + cfg.yOffset,
       heightFrac: 0.4, sizeFactor: cfg.wrapSize ?? 1, radius: CAKE_RADIUS,
       outset: 0.01 + cfg.radialOffset, tilt: (cfg.wrapTilt ?? 0) * DEG,
     });
@@ -375,7 +291,15 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape =
   const dRadialB = altActive ? (cfg.altRadialOffset - cfg.radialOffset) : 0;
   const dYB = altActive ? (cfg.altYOffset - cfg.yOffset) : 0;
   const L = pattern.length || 1;
-  const pts = showRing ? positions : (positions.length ? [positions[0]] : []);
+  /* ⚠️ THE ONE PIECE FACES THE CAMERA. `positions[0]` is angle 0 — the +X side — while the preview
+     camera sits at +Z, so the single calibration piece was always edge-on at the right of the
+     frame, and zooming in pushed it out of view entirely. Picking the piece nearest the front puts
+     the subject where the viewer is already looking, which is the whole job of this screen.
+     Unchanged when "Show full ring" is on: then every piece renders and there is no one subject. */
+  const frontMost = positions.length
+    ? positions.reduce((best, q) => (q.pos[2] > best.pos[2] ? q : best), positions[0])
+    : null;
+  const pts = showRing ? positions : (frontMost ? [frontMost] : []);
 
   return (
     <>
@@ -412,8 +336,8 @@ function CalibScene({ glbUrl, cfg, showRing, anchorY, inward, altGlbUrl, shape =
 export function BuildingBlockScene({ glbUrl, altGlbUrl, cfg, overlap = 0.9, shellCount = 2, color = '#f5e6c8' }) {
   const { scene }          = useGLTF(glbUrl);
   const { scene: sceneAlt } = useGLTF(altGlbUrl || glbUrl);
-  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
-  const B = useMemo(() => buildShellGeo(sceneAlt, cfg.altFlip, cfg.sizeFactor), [sceneAlt, cfg.altFlip, cfg.sizeFactor]);
+  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, CAKE_RADIUS, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
+  const B = useMemo(() => buildShellGeo(sceneAlt, cfg.altFlip, CAKE_RADIUS, cfg.sizeFactor), [sceneAlt, cfg.altFlip, cfg.sizeFactor]);
   if (!A) return null;
   const pattern = patternStr(cfg);
   const L = pattern.length;
@@ -473,8 +397,8 @@ export function PatternCakeThumb({
   const { scene }          = useGLTF(glbUrl);
   const { scene: sceneAlt } = useGLTF(altGlbUrl || glbUrl);
   const isTop = zone === 'rim';
-  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
-  const B = useMemo(() => buildShellGeo(sceneAlt, cfg.altFlip, cfg.sizeFactor), [sceneAlt, cfg.altFlip, cfg.sizeFactor]);
+  const A = useMemo(() => buildShellGeo(scene, cfg.flipBottom, CAKE_RADIUS, cfg.sizeFactor), [scene, cfg.flipBottom, cfg.sizeFactor]);
+  const B = useMemo(() => buildShellGeo(sceneAlt, cfg.altFlip, CAKE_RADIUS, cfg.sizeFactor), [sceneAlt, cfg.altFlip, cfg.sizeFactor]);
   const pattern = patternStr(cfg);
   const L = pattern.length;
   const anchorY = isTop ? (Y_BASE + CAKE_HEIGHT) : Y_BASE;
@@ -541,8 +465,356 @@ const STANDARD_CAKE_COLOR = '#f5c6d0';
 // the element-colour picker existed.
 const DEFAULT_ELEMENT_COLOR = '#f5e6c8';
 
+/* ── The whole cake coated in this element ───────────────────────────────────────────────────────
+ *
+ * Sandeep, with a photograph of a rose-covered cake: *"cream piping is filled on entire cake."*
+ * This is the GLB answer to it; `rosetteCoat` in core carries a procedural one that proved the
+ * packing.
+ *
+ * ⚠️ IT USES THE PEN'S FRAME ON BOTH SURFACES, NOT THE RING'S. A coat seats every piece by the
+ * SURFACE NORMAL — up is out of the cake on the wall, up is up on the lid — which is the pen's
+ * frame, not the ring's "upright in world, yawed outward". So it reads the same pair the pen does:
+ * the rim figure (`top_rotation`, which is what the rx/ry/rz sliders author) on the top, and
+ * `side_rotation` on the wall. Feeding the ring figure to the wall is the exact bug recorded on
+ * `side_rotation` in PLACEMENT_CONFIG.md — every piece came out back-on and it read as the wrong
+ * element having been chosen.
+ *
+ * ⚠️ TWO INSTANCED MESHES, ONE PER SURFACE, and that falls out of the rotations rather than being
+ * a choice: the top and the wall apply different rotations, so they cannot share a matrix list.
+ * It also happens to be the shape multi-colour will need.
+ *
+ * ⚠️ SCALED BY FOOTPRINT, NOT BY HEIGHT. A ring sizes a shell by its HEIGHT (SHELL_HEIGHT_FRAC of
+ * the tier radius) because a border is read in silhouette. A coat is read as a TILING: what has to
+ * match the packing is how much surface one rose covers, so the scale comes from the piece's widest
+ * horizontal extent AFTER its surface rotation. Size it by height and the roses either collide or
+ * leave cake showing, depending on how tall the model happens to be.
+ */
+function CoatScene({ glbUrl, roseRadius, topRot, sideRot, color, softness, onMeasure, showSeats,
+                     cover, rimStretch, shape, shadeMode, palette, bands }) {
+  const { scene } = useGLTF(glbUrl);
+
+  const base = useMemo(() => extractGeo(scene), [scene]);
+
+  /* ── How far the SHAPE reaches, not its box ────────────────────────────────────────────────
+   *
+   * ⚠️ THE BOUNDING BOX IS THE WRONG RULER FOR PACKING, and this cost four rounds to find. The
+   * seat arithmetic was measured correct — the side's top piece overlaps the rim's reach by
+   * 0.002, and the rim row is present — yet a band of bare cake stayed under the shoulder. That
+   * leaves one explanation: the rose does not FILL its box. A spike, a tail or a few stray
+   * petals push min/max out past where the cream actually ends, every piece is seated as though
+   * it were that big, and the shortfall appears twice over at every seam.
+   *
+   * So extents come from a PERCENTILE of the vertices rather than their extremes: the span that
+   * holds all but the outermost `1 - COVER` of them on each axis. A handful of outlying vertices
+   * stop dictating the packing for the whole cake, while the bulk of the shape still does.
+   *
+   * COVER is deliberately a knob and not a constant — how much of a model is "the shape" depends
+   * on the model, and this is the first one. */
+  const extent = (geo, cover) => {
+    const pos = geo.getAttribute('position');
+    const lo = (1 - cover) / 2, hi = 1 - lo;
+    const out = [];
+    for (let axis = 0; axis < 3; axis++) {
+      const v = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) v[i] = pos.getComponent(i, axis);
+      v.sort();
+      const a = v[Math.floor(lo * (v.length - 1))], b = v[Math.ceil(hi * (v.length - 1))];
+      out.push({ min: a, max: b, size: b - a });
+    }
+    return out;
+  };
+
+
+  /* One geometry per surface, each already carrying its own rotation baked in — so the instance
+     matrix only has to place and roll it, and the footprint can be measured on the rotated form. */
+  const forSurface = (rot) => {
+    if (!base) return null;
+    const g = base.geo.clone();
+    g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(
+      new THREE.Euler(rot.rx * DEG, rot.ry * DEG, rot.rz * DEG)));
+    g.computeBoundingBox();
+    const box = new THREE.Vector3(); g.boundingBox.getSize(box);
+    /* Scaled and seated on the SOLID extent. Scaling on the box would also shrink the rose to fit
+       a width most of it never uses, so both numbers come from the same ruler. */
+    const ext = extent(g, cover);
+    const size = new THREE.Vector3(ext[0].size, ext[1].size, ext[2].size);
+    const footprint = Math.max(size.x, size.z) || 1;
+    const scale = (2 * roseRadius) / footprint;
+    /* ⚠️ RAW SIZE IS REPORTED, not just the scale. The first GLB coat came out with pieces far
+       larger than their seats — they hung below the board and still left cake showing, which is
+       the signature of a bounding box bigger than the shape inside it (spiky petals, a stem, or
+       an unbaked node transform in the model). Without the measured numbers on screen that is
+       indistinguishable from the scale maths being wrong, and we spent a round guessing. */
+    /* ⚠️ RE-CENTRED ON ALL THREE AXES AFTER THE ROTATION, not just seated on Y — and the first
+     * version did only Y, which is the bug PLACEMENT_CONFIG.md already records for tilted shells:
+     * "a tilt moves the shell relative to its own origin, and the seat must follow it in BOTH
+     * axes … extractGeo seats the geometry at min Y and centres it on X/Z … a tilt breaks both."
+     * extractGeo centres X/Z BEFORE any rotation, so after one the piece hangs off its own
+     * origin. Placed at a seat it then dangles — visibly below the board — and leaves cake
+     * showing on the side it has moved away from. Both symptoms, one cause.
+     *
+     * X and Z are centred because the seat is the middle of the patch the piece covers; Y goes to
+     * its MINIMUM because that is the face resting on the cake. */
+    /* Centred and seated on the solid extent too, so an outlying spike cannot shove the piece off
+       its seat — the same reason the sizes come from it. */
+    g.translate(-(ext[0].min + ext[0].max) / 2, -ext[1].min, -(ext[2].min + ext[2].max) / 2);
+    g.computeBoundingBox();
+    /* Measured on the piece AS DRAWN — rotated, re-centred, before the uniform scale, which the
+       ratio is independent of because it is expressed as a fraction of the piece's own width. */
+    const sil = silhouette(g.getAttribute('position').array);
+    const tile = maxTileStep(sil);
+    return { geo: g, scale, verts: g.getAttribute('position').count,
+             raw: [box.x, box.y, box.z], solid: [size.x, size.y, size.z], footprint,
+             tile: tile.ratioX, tileFloor: !!tile.gapAtFloor,
+             fitted: [size.x * scale, size.y * scale, size.z * scale] };
+  };
+
+  const top  = useMemo(() => forSurface(topRot),  [base, topRot.rx, topRot.ry, topRot.rz, roseRadius, cover]);
+  const side = useMemo(() => forSurface(sideRot), [base, sideRot.rx, sideRot.ry, sideRot.rz, roseRadius, cover]);
+
+  /* ⚠️ SEATED FROM THE PIECE'S MEASURED SIZE, NOT FROM THE SIZE SLIDER. The slider asks for a
+   * radius; what the packing needs is how far this particular GLB actually reaches across the
+   * surface and up the wall ONCE ROTATED AND SCALED — and those differ the moment a model is not
+   * square, which a rose with a tail is not. Seating from the nominal radius is what put the
+   * bottom row through the board. `fitted` is [x, y, z] in the piece's own frame, where x runs
+   * across the surface, z runs up the wall, and y is depth along the normal.
+   *
+   * The SIDE's measurement governs the rows because the wall is where height matters; the top's
+   * own width governs its rings. */
+  const seats = useMemo(() => {
+    if (!side || !top) return [];
+    /* ⚠️ OVERLAP COMES FROM THE MEASUREMENT, NOT FROM A DEFAULT. `tile` is the widest step this
+       particular silhouette tiles at, as a fraction of its width; overlap is one minus that. The
+       0.95 is a margin for the rounding that makes each ring take a whole number of pieces, which
+       can only ever push spacing up. The side governs, because the wall is what is looked at. */
+    const step = Math.min(side.tile, top.tile) * 0.95;
+    return rosetteSeats({
+      /* null ⇒ round, which rosetteSeats builds from tierRadius. A rect or a heart arrives as the
+         same descriptor the piping ring already walks, so nothing here knows what a heart is. */
+      shape,
+      tierRadius: CAKE_RADIUS, tierHeight: CAKE_HEIGHT, baseY: Y_BASE,
+      pieceW: Math.max(side.fitted[0], top.fitted[0]),
+      pieceH: side.fitted[2],
+      overlap: 1 - step,
+      jitter: ROSETTE_DEFAULTS.jitter, seed: 1,
+    });
+  }, [side, top, shape]);
+
+  /* The pattern parameter per seat. Core owns WHERE a piece sits in the pattern; the palette
+     lookup above turns that into a colour. */
+  const shades = useMemo(
+    () => coatShade(seats, { mode: shadeMode, baseY: Y_BASE, tierHeight: CAKE_HEIGHT,
+                             bands, palette: palette.length, seed: 1 }),
+    [seats, shadeMode, bands, palette.length]);
+
+  useEffect(() => {
+    if (top && side && onMeasure) onMeasure({ top, side, seats: seats.length });
+  }, [top, side, seats.length, onMeasure]);
+
+  if (!base) return null;
+  return (
+    <>
+      <CoatSurface kind="top"  part={top}  seats={seats} color={color} softness={softness}
+                   shades={shades} palette={palette} />
+      <CoatSurface kind="side" part={side} seats={seats} color={color} softness={softness}
+                   shades={shades} palette={palette} />
+      {/* The shoulder. It takes the SIDE's geometry — the rim seat's normal bisects up and
+          outward, so in the pen's frame it is asking the wall's question, not the lid's, and a
+          third rotation to calibrate would be a third thing to get wrong for no gain. */}
+      <CoatSurface kind="rim"  part={side} seats={seats} color={color} softness={softness}
+                   rimStretch={rimStretch} shades={shades} palette={palette} />
+      {showSeats && <SeatMarkers seats={seats} pieceW={Math.max(side.fitted[0], top.fitted[0])} />}
+    </>
+  );
+}
+
+/* ── Seat markers ────────────────────────────────────────────────────────────────────────────
+ *
+ * ⚠️ A DIAGNOSTIC, AND IT EXISTS BECAUSE GUESSING FROM SCREENSHOTS FAILED THREE TIMES. The seam
+ * under the rim survived a re-centring fix, a seat-height rewrite and a rounding fix, each of
+ * which was a real bug and none of which was THE bug. The arithmetic says the rim's lowest point
+ * and the side's highest land within 0.004 of each other, so either the frame maths is wrong or
+ * the bounding box is taller than the rose inside it — and a photograph of roses cannot tell
+ * those apart.
+ *
+ * This draws the SEAT itself: a flat disc of the piece's own width, lying in the piece's own
+ * tangent plane, plus a stub along the normal. If the discs meet at the rim and the roses do not,
+ * the box is bigger than the shape and the fix is to measure the shape. If the discs themselves
+ * leave a gap, the arithmetic is wrong and the fix is mine. */
+function SeatMarkers({ seats, pieceW }) {
+  const ref = useRef();
+  const COLOUR = { top: '#2d7ff9', side: '#f9a52d', rim: '#e0392d' };
+  useEffect(() => {
+    if (!ref.current || !seats.length) return;
+    const m = new THREE.Matrix4(), basis = new THREE.Matrix4(), q = new THREE.Quaternion();
+    const one = new THREE.Vector3(1, 1, 1);
+    seats.forEach((s, i) => {
+      basis.makeBasis(new THREE.Vector3(...s.u), new THREE.Vector3(...s.n), new THREE.Vector3(...s.v));
+      q.setFromRotationMatrix(basis);
+      m.compose(new THREE.Vector3(...s.p), q, one);
+      ref.current.setMatrixAt(i, m);
+      ref.current.setColorAt(i, new THREE.Color(COLOUR[s.kind] ?? '#888'));
+    });
+    ref.current.instanceMatrix.needsUpdate = true;
+    if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
+  }, [seats, pieceW]);
+  if (!seats.length) return null;
+  /* A disc of the piece's WIDTH, in the piece's own plane — cylinderGeometry's axis is +Y, which
+     is the seat normal, so the disc lies flat on the surface exactly as a piece's footprint does. */
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, seats.length]}>
+      <cylinderGeometry args={[pieceW / 2, pieceW / 2, 0.004, 20]} />
+      <meshBasicMaterial transparent opacity={0.55} />
+    </instancedMesh>
+  );
+}
+
+function CoatSurface({ kind, part, seats, color, softness, rimStretch = 1, shades = null, palette = null }) {
+  /* Indices kept alongside, because a shade is looked up by the seat's position in the WHOLE
+     coat — the ombré is one continuous run over all three surfaces, so a per-surface index would
+     restart it twice. */
+  const mine = useMemo(
+    () => seats.map((s, i) => ({ s, i })).filter(({ s }) => s.kind === kind),
+    [seats, kind]);
+  const ref = useRef();
+
+  useEffect(() => {
+    if (!ref.current || !part || !mine.length) return;
+    const m = new THREE.Matrix4(), basis = new THREE.Matrix4(), q = new THREE.Quaternion();
+    const sc = new THREE.Vector3();
+    mine.forEach(({ s, i: seatIdx }, i) => {
+      /* ⚠️ STRETCHED ALONG `v` ONLY. The shoulder row sizes itself to meet the side row below it
+         and the top ring inside it — core computes the factor from where those actually reach, so
+         a GLB that leaves a band gets a longer shoulder rather than a slider. Scaling the other
+         two axes with it would make the rim pieces fatter than their neighbours and trade the gap
+         for a ridge. compose() applies scale in LOCAL axes, and local Z is `v`. */
+      sc.set(part.scale, part.scale, part.scale * (s.stretch ?? 1) * (s.kind === 'rim' ? rimStretch : 1));
+      const u = new THREE.Vector3(...s.u), n = new THREE.Vector3(...s.n), v = new THREE.Vector3(...s.v);
+      /* (u, n, v): the piece was rotated with Y as its surface normal, so Y maps to n. Getting the
+         column order wrong lays every wall piece flat against the cake, and it looks plausible
+         from directly in front. */
+      basis.makeBasis(u, n, v);
+      q.setFromRotationMatrix(basis);
+      /* Variety is a roll about the normal. Doing it as a different model per piece would defeat
+         instancing, which is the only reason a coat renders at all. */
+      const roll = new THREE.Quaternion().setFromAxisAngle(n, (i * 2.399963) % (Math.PI * 2));
+      m.compose(new THREE.Vector3(...s.p), roll.multiply(q), sc);
+      ref.current.setMatrixAt(i, m);
+    });
+    /* ⚠️ ONE MESH, A COLOUR PER INSTANCE. Splitting by colour would multiply the draw calls by the
+       palette size on a coat that is already 200-odd pieces — and instanceColor is free. */
+    if (shades && palette) {
+      const c = new THREE.Color();
+      mine.forEach(({ i: seatIdx }, i) => {
+        const v = shades[seatIdx] ?? 0;
+        if (palette.length === 1) c.set(palette[0]);
+        else if (Number.isInteger(v)) c.set(palette[v % palette.length]);
+        else {
+          /* A gradient runs THROUGH the palette, not just between its ends — three stops means
+             two legs, and the reference ombrés are three colours deep. */
+          const span = (palette.length - 1) * Math.min(0.999999, Math.max(0, v));
+          const k = Math.floor(span);
+          c.set(palette[k]).lerp(new THREE.Color(palette[k + 1] ?? palette[k]), span - k);
+        }
+        ref.current.setColorAt(i, c);
+      });
+      if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
+    }
+    ref.current.instanceMatrix.needsUpdate = true;
+  }, [part, mine, rimStretch, shades, palette]);
+
+  if (!part || !mine.length) return null;
+  /* No castShadow — the shadow pass re-renders every instance and self-shadowing between pieces is
+     not where the look comes from. Measured note in core's rosetteCoat.js. */
+  return (
+    <instancedMesh ref={ref} args={[part.geo, undefined, mine.length]} receiveShadow>
+      <meshPhysicalMaterial {...creamMaterialProps(softness, color)} />
+    </instancedMesh>
+  );
+}
+
+/* ── Hand-piped stamps on the wall, drawn by the designer's own StampStroke ──────────────────────
+ *
+ * ⚠️ NOT A PREVIEW OF A RING. A ring places a shell upright in world space and yaws it outward; the
+ * pen aligns the piece's up-axis to the SURFACE NORMAL, so on a wall "up" points out of the cake.
+ * The two frames give the same numbers different meanings, which is why `side_rotation` exists at
+ * all and why tuning it against the ring previews above would reproduce the original bug.
+ *
+ * The stroke is shaped exactly as CreamPen commits one: `kind` is implicit in StampStroke, `normal`
+ * is the wall's outward normal, `points` is a short run along it, `regular: true` means "behave like
+ * a ring" (faces across the run, not along it), and `rotation` is what we are tuning. Everything
+ * about how that becomes geometry — the +90° X bake, the footprint/height measurement, the seat
+ * after rotation — belongs to core and is not reproduced here.
+ */
+function WallStamps({ glbUrl, rot, color }) {
+  /* ⚠️ SIZED LIKE A RING, NOT PICKED. The pen sizes a `regular` stamp by HEIGHT (`target = 2 x
+     thickness`), and a ring normalises a shell to `radius x SHELL_HEIGHT_FRAC`. Deriving the
+     thickness from the same constant puts this run at exactly the scale of the rings beside it, so
+     the comparison is honest; a guessed 0.1 rendered specks you could not judge an attitude from.
+     INVARIANTS #8 — a studio must not hardcode a world dimension it can derive. */
+  const thickness = (CAKE_RADIUS * SHELL_HEIGHT_FRAC) / 2;
+
+  /* A short arc across the camera-FACING side of the wall at mid-height: enough pieces to read the
+     attitude, few enough to stay legible while a slider is moving.
+     ⚠️ +Z, BECAUSE THE PREVIEW CAMERA SITS AT [0, 5.5, 7.9]. The first cut put the run at -Z and
+     every piece hid behind the cake — one speck on the silhouette, which looks exactly like a
+     broken preview rather than a mis-aimed one. */
+  const stroke = useMemo(() => {
+    const y = Y_BASE + CAKE_HEIGHT * 0.5;
+    /* ⚠️ ON THE CENTRELINE, NOT ON THE SURFACE. `stampTransforms` seats a piece at `-th + seatDrop`
+       because a pen stroke's stored points are its rope's CENTRE, one radius proud of what the
+       pointer hit ("the stored centerline is lifted one radius"). Handing it points that already sit
+       on the cylinder makes that -th push every piece a radius INTO the wall — at [0,0,0] the disc
+       is thin enough that some still showed, and at [-90,0,0] the run vanished completely, which
+       reads as "the rotation broke it" rather than "the preview fed it the wrong points". */
+    const r = CAKE_RADIUS + thickness;
+    const pts = [];
+    for (let i = -4; i <= 4; i++) {
+      const a = Math.PI / 2 + i * 0.16;
+      pts.push([Math.cos(a) * r, y, Math.sin(a) * r]);
+    }
+    return {
+      points: pts,
+      // The outward normal at the middle of the run — the surface the pen seats against.
+      normal: [0, 0, 1],
+      thickness, spacing: 0.85, regular: true, seed: 1,
+      rotation: [rot.rx, rot.ry, rot.rz], lean: 0,
+    };
+  }, [rot.rx, rot.ry, rot.rz, thickness]);
+
+  return <StampStroke stroke={stroke} url={glbUrl} color={color} />;
+}
+
+/* An outline footprint (heart, oval, polygon…) as a prism. ⚠️ Extruded from the SAME outline the
+ * coat is packed onto — if this drew its own heart, a gap between the cake and the pieces would be
+ * two different hearts rather than a packing fault, which is a day lost. */
+function OutlinePrism({ outline, height, y, color }) {
+  const geo = useMemo(() => {
+    const sh = new THREE.Shape();
+    /* ⚠️ THE SHAPE'S Y IS THE OUTLINE'S NEGATIVE Z, and the sign is the whole point. Extrude builds
+     * in the XY plane along +Z, and standing it up with rotateX(-90°) maps (x, y, z) → (x, z, -y)
+     * — so a shape built with y = outline.z lands at world z = -outline.z. MIRRORED. The cake then
+     * renders a heart pointing one way while the coat packs the other, reported as the heart being
+     * "in the opposite direction": core's heart has its point at +z and its lobes at -z (measured,
+     * not assumed). Negating here cancels the rotation's flip, so the prism and the packing are the
+     * same heart. */
+    outline.forEach((pt, i) => (i ? sh.lineTo(pt.x, -pt.z) : sh.moveTo(pt.x, -pt.z)));
+    sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: height, bevelEnabled: false, curveSegments: 24 });
+    g.rotateX(-Math.PI / 2);
+    g.computeVertexNormals();
+    return g;
+  }, [outline, height]);
+  return (
+    <mesh geometry={geo} position={[0, y, 0]} castShadow receiveShadow>
+      <meshStandardMaterial color={color} roughness={0.68} />
+    </mesh>
+  );
+}
+
 function CakeScene({ shape = null, floor = true, cakeColor = STANDARD_CAKE_COLOR }) {
   const isRect = shape?.kind === 'rect';
+  const outline = shape?.outline ?? null;
   return (
     <>
       {isRect ? (
@@ -555,6 +827,15 @@ function CakeScene({ shape = null, floor = true, cakeColor = STANDARD_CAKE_COLOR
           <RoundedBox position={[0, Y_BASE + CAKE_HEIGHT / 2, 0]} args={[shape.halfW * 2, CAKE_HEIGHT, shape.halfD * 2]} radius={shape.cornerR} smoothness={4} castShadow receiveShadow>
             <meshStandardMaterial color={cakeColor} roughness={0.68} />
           </RoundedBox>
+        </>
+      ) : outline ? (
+        <>
+          {/* Board — round under an outline cake, as a real one is */}
+          <mesh position={[0, 0.05, 0]} receiveShadow>
+            <cylinderGeometry args={[CAKE_RADIUS + 0.6, CAKE_RADIUS + 0.6, 0.1, 64]} />
+            <meshStandardMaterial color="#d4af37" roughness={0.15} metalness={0.75} />
+          </mesh>
+          <OutlinePrism outline={outline} height={CAKE_HEIGHT} y={Y_BASE} color={cakeColor} />
         </>
       ) : (
         <>
@@ -705,9 +986,17 @@ export default function PipingCalibrator() {
 
   // Preview shape passed to the cake + rings. null = round; else the sheet's rounded-rect.
   const shape = useMemo(() => {
-    if (sampleShape !== 'rect') return null;
-    const sz = SHEET_SIZES.find(z => z.key === sheetKey) ?? SHEET_SIZES[1];
-    return { kind: 'rect', halfW: sz.w / 2, halfD: sz.d / 2, cornerR: SHEET_CORNER_R };
+    if (sampleShape === 'rect') {
+      const sz = SHEET_SIZES.find(z => z.key === sheetKey) ?? SHEET_SIZES[1];
+      return { kind: 'rect', halfW: sz.w / 2, halfD: sz.d / 2, cornerR: SHEET_CORNER_R };
+    }
+    /* ⚠️ The outline comes from CORE's heart curve, at the tier's own size. Drawing a heart here
+       would be a second heart, and the coat would then be calibrated against a footprint the
+       designer never renders. */
+    if (sampleShape === 'heart') {
+      return { outline: scaledOutline('heart', { plump: 1, cleft: 1 }, CAKE_RADIUS, CAKE_RADIUS) };
+    }
+    return null;
   }, [sampleShape, sheetKey]);
 
   // Independent configs — the board ring sits OUTSIDE the wall, the rim pulls INWARD,
@@ -721,6 +1010,50 @@ export default function PipingCalibrator() {
   // Rim starts OFF so a freshly uploaded GLB only shows on the board — the rim ring appears
   // when its zone is ticked or its tab is opened (render gate: includeRim || target === 'rim').
   const [includeRim,   setIncludeRim]   = useState(false);
+
+  /* ── Hand piping on the WALL — one key, not a third ring ────────────────────────────────────
+     `side_rotation` is a single rotation, so it gets a compact block rather than a Board/Rim-style
+     tab: none of the ring controls (flip, radial, swag, alternation) mean anything to a pen stroke.
+     Off by default — an element that authors nothing falls back to `bottom_rotation`, which is the
+     behaviour every element shipped before this had. */
+  const [sideRot,     setSideRot]     = useState({ rx: 0, ry: 0, rz: 0 });
+  /* ── Cover the cake ───────────────────────────────────────────────────────────────────────────
+   * Sandeep: *"similarly we need to have a flag to cover the cake. once side and top calibration
+   * is done, we can do it."* It belongs here rather than in its own studio precisely because it
+   * consumes the two rotations this page already authors — the rim figure for the lid and
+   * `side_rotation` for the wall — so the calibration and the thing it calibrates are on one
+   * screen. A separate page would have meant tuning blind and checking elsewhere. */
+  const [coat,        setCoat]        = useState(false);
+  const [coatRadius,  setCoatRadius]  = useState(ROSETTE_DEFAULTS.rosetteRadius);
+  /* ⚠️ THE COAT'S TOP NEEDS ITS OWN ROTATION, and the first cut wrongly reused the rim ring's.
+   * A coat lays a piece FACE-UP on the lid; a rim ring stands it UPRIGHT facing outward. Same
+   * surface, opposite poses — so `top_rotation`, which is authored for the ring, put every lid
+   * piece on its edge and the top rendered as a crater with the cake visible through the middle.
+   * PLACEMENT_CONFIG.md says as much in passing: "laid face-up with -90 about X a rosette spans
+   * Y -0.45…+0.45". Defaults to the SIDE figure, because in the pen's frame both surfaces are
+   * asking the same question — face along the normal — and the side one is already measured. */
+  const [coatTopRot,  setCoatTopRot]  = useState(null);   // null = follow the side rotation
+  const [coatStat,    setCoatStat]    = useState(null);
+  const [coatSeats,   setCoatSeats]   = useState(false);
+  const [coatCover,   setCoatCover]   = useState(0.9);
+  /* ⚠️ ON TOP OF THE COMPUTED STRETCH, NOT INSTEAD OF IT — and the reason it exists is worth
+   * keeping. Core sizes the shoulder row from where its neighbours' SEATS reach, which is exactly
+   * right and, on a cake whose seats already overlap, correctly resolves to 1. The seam that
+   * survives that is a property of the MESH: a spiky model does not visually fill even its
+   * percentile extent, and no arithmetic over seat positions can see how much. Automatic where it
+   * can be computed, by hand where it cannot. */
+  const [coatRimStretch, setCoatRimStretch] = useState(1);
+  /* ── Multi-colour ─────────────────────────────────────────────────────────────────────────────
+   * Sandeep, with three reference cakes: *"double color patterns. we should achieve this."* Two
+   * rules, not one: an OMBRÉ runs by position — palest at the middle of the lid, deepening down
+   * the wall, continuous across the top edge — and a SCATTER gives each piece one of the palette.
+   * Both are ONE instanced mesh with a colour per instance; a mesh per colour would multiply the
+   * draw calls on a coat that is already 200-odd pieces. */
+  const [coatShadeMode, setCoatShadeMode] = useState('single');
+  const [coatBands,     setCoatBands]     = useState(0);      // 0 = smooth gradient
+  const [coatPalette,   setCoatPalette]   = useState(['#FFFFFF', '#F6B3C4', '#D9486F']);
+  const onCoatMeasure = useCallback(setCoatStat, []);
+  const [includeSide, setIncludeSide] = useState(false);
 
   // ── Create-pattern mode: load an existing block element from the library by id,
   // tune the alternating pattern against its R2 GLB, capture a building-block thumbnail,
@@ -740,8 +1073,11 @@ export default function PipingCalibrator() {
   // Element (cream) colour — drives the piped element in the preview + thumbnail.
   const [elementColor, setElementColor] = useState(DEFAULT_ELEMENT_COLOR);
 
-  const cfg    = target === 'board' ? boardCfg : rimCfg;
-  const setCfg = target === 'board' ? setBoardCfg : setRimCfg;
+  /* Ring configs only. The Side tab authors ONE key (`side_rotation`) and shows none of the
+     controls below, so it deliberately has no entry here — falling through to the rim would let a
+     slider on a hidden panel write to a ring nobody is looking at. */
+  const cfg    = target === 'rim' ? rimCfg    : boardCfg;
+  const setCfg = target === 'rim' ? setRimCfg : setBoardCfg;
 
   // Download the cake on its own — the full cake, board, and placed element with NO canvas
   // background or floor. Rendered on a dedicated offscreen canvas (transparent, no floor, framed
@@ -837,13 +1173,53 @@ export default function PipingCalibrator() {
 
   function set(key) { return v => setCfg(prev => ({ ...prev, [key]: v })); }
 
+  /* ── Zoom toward the piping, not toward the air above it ────────────────────────────────────
+   * The orbit target was fixed at [0, 2, 0] — ABOVE the top of the cake (Y_BASE + CAKE_HEIGHT =
+   * 1.55). Dollying in converges on the target, so zooming walked the camera into empty space over
+   * the lid while the thing being calibrated slid off the bottom of the frame. Sandeep: *"when i
+   * zoom in, i cant see the actual piping. to calibrate better i need to be able to see"*.
+   * The target follows the surface being edited, so close inspection is just scroll-to-zoom.
+   */
+  const focusY = target === 'rim'  ? Y_BASE + CAKE_HEIGHT
+               : target === 'side' ? Y_BASE + CAKE_HEIGHT * 0.5
+               :                     Y_BASE + CAKE_HEIGHT * 0.08;   // board ring sits just off the plate
+  /* ⚠️ AND THE FRONT OF THE CAKE, NOT ITS AXIS. Aiming at [0, y, 0] fixed the HEIGHT but still
+     converged on the centre column, so a rim or board piece — which lives out at the radius —
+     drifted off the edge as you zoomed. Every subject here sits at the front: the rings show their
+     one piece there now, and the wall run is drawn there. Target the subject. */
+  const focusZ = CAKE_RADIUS;
+  const orbitRef = useRef(null);
+  /* ⚠️ SET THROUGH THE REF, NOT ONLY THE PROP. drei applies `target` when the controls are created;
+     a later change to the array does not move an existing instance, so switching tabs would leave
+     the camera aimed at the surface you just left. `update()` is what makes the change take. */
+  useEffect(() => {
+    const c = orbitRef.current;
+    if (!c?.target) return;
+    c.target.set(0, focusY, focusZ);
+    c.update();
+  }, [focusY, focusZ]);
+
   // One combined placement_config fragment — only the checked sections are written, so
   // the same paste covers board-only, rim-only, or both. Merge it straight into an
   // element's placement_config (ManageElements "Paste from Piping Calibrator").
-  const valuesJson = JSON.stringify({
-    ...(includeBoard ? sectionFor('bottom', boardCfg) : {}),
-    ...(includeRim   ? sectionFor('top',    rimCfg)   : {}),
-  }, null, 2);
+  /* ⚠️ THE SECTION YOU ARE EDITING COMES FIRST, and that is not cosmetic. With the sections in a
+     fixed board→rim→side order, `side_rotation` landed 84% of the way down a block whose bottom
+     143px sits below the fold — so you could tune the wall, watch the cake change, and read a JSON
+     box that appeared not to mention it. Sandeep: *"json field in the piping calibrator is not
+     adding side values"*. It was adding them; they were off-screen. Measured: block top 758px,
+     bottom 1123px, viewport 980px, panel scrolled to 0.
+     Key order carries no meaning in a paste, so the output can be ordered for the reader — and the
+     reader is always looking for what they just moved. */
+  const sections = {
+    board: includeBoard ? sectionFor('bottom', boardCfg) : {},
+    rim:   includeRim   ? sectionFor('top',    rimCfg)   : {},
+    // Not a `sectionFor` prefix: `side_rotation` has no top_/bottom_ twin, because there is no wall
+    // above the rim. Emitted only when ticked, so a paste never silently overrides the fallback.
+    side:  includeSide  ? { side_rotation: [Math.round(sideRot.rx), Math.round(sideRot.ry), Math.round(sideRot.rz)] } : {},
+  };
+  const valuesJson = JSON.stringify(
+    Object.assign({}, ...[target, 'board', 'rim', 'side'].filter((k, i, a) => a.indexOf(k) === i).map(k => sections[k] ?? {})),
+    null, 2);
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 56px)', fontFamily: "'Quicksand',sans-serif", background: '#EDEAE2' }}>
@@ -857,7 +1233,7 @@ export default function PipingCalibrator() {
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', marginBottom: 4 }}>Sample cake</div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {[{ v: 'cylinder', label: 'Round' }, { v: 'rect', label: 'Sheet' }].map(({ v, label }) => (
+            {[{ v: 'cylinder', label: 'Round' }, { v: 'heart', label: 'Heart' }, { v: 'rect', label: 'Sheet' }].map(({ v, label }) => (
               <button key={v} onClick={() => setSampleShape(v)}
                 style={{ flex: 1, fontSize: 11, padding: '6px 0', borderRadius: 6, border: `2px solid ${sampleShape === v ? '#3D5A44' : '#C5D4C8'}`, background: sampleShape === v ? '#3D5A44' : '#fff', color: sampleShape === v ? '#fff' : '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
                 {label}
@@ -933,10 +1309,22 @@ export default function PipingCalibrator() {
           <>
             {/* Target: rim (top edge) vs board (base) */}
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', marginBottom: 4 }}>Edit values for (both rings shown)</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', marginBottom: 4 }}>Edit values for</div>
               <div style={{ display: 'flex', gap: 6 }}>
-                {[{ v: 'board', label: 'Board (base)' }, { v: 'rim', label: 'Rim (top edge)' }].map(({ v, label }) => (
-                  <button key={v} onClick={() => setTarget(v)}
+                {/* ⚠️ THREE SURFACES. The wall began as a tick-box below the ring controls and that
+                    was wrong: "which surface am I tuning" is the question this selector answers, and
+                    burying one of the three answers somewhere else means nobody finds it. Sandeep:
+                    *"board and ring, we should add side option. how would i calibrate otherwise"*. */}
+                {[{ v: 'board', label: 'Board (base)' }, { v: 'rim', label: 'Rim (top edge)' },
+                  { v: 'side', label: 'Side (wall)' }].map(({ v, label }) => (
+                  /* ⚠️ OPENING THE WALL TAB TICKS IT FOR OUTPUT. Without this you can select Side,
+                     move all three sliders, watch the cake change — and copy a JSON with no
+                     `side_rotation` in it, because the tick lives further down the panel. A control
+                     that visibly works while its value is silently dropped is the exact fault this
+                     whole key exists to fix; reproducing it in the tool that authors it would be
+                     absurd. It is a tick, not a lock: untick it and the element goes back to
+                     following the board. */
+                  <button key={v} onClick={() => { setTarget(v); if (v === 'side') setIncludeSide(true); }}
                     style={{ flex: 1, fontSize: 11, padding: '6px 0', borderRadius: 6, border: `2px solid ${target === v ? '#3D5A44' : '#C5D4C8'}`, background: target === v ? '#3D5A44' : '#fff', color: target === v ? '#fff' : '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
                     {label}
                   </button>
@@ -974,6 +1362,150 @@ export default function PipingCalibrator() {
               </div>
             </div>
 
+            {/* ── The wall: ONE key, so one short panel ──────────────────────────────────────
+                `side_rotation` is the whole of what a wall authors. Every ring control below —
+                flip, radial, y-offset, size, spacing, swag, wrap, alternation — describes a BORDER,
+                and a hand-piped stroke has none of them: the customer draws where it goes and the
+                pen card carries size and spacing. Showing them here would offer settings that reach
+                nothing, which is worse than not offering them (INVARIANTS #12 — lay a surface out
+                by what it actually does). */}
+            {target === 'side' && (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', marginBottom: 4, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>Hand piping on the wall</div>
+                <div style={{ fontSize: 10.5, color: '#6B8C74', lineHeight: 1.5, marginBottom: 8 }}>
+                  How a piece stands when a customer pipes it on the SIDE with the pen. The rings
+                  above keep a piece upright and face it outward; the pen lines its up-axis up with
+                  the surface, so a wall needs its own number. Left out, it follows the board.
+                </div>
+                <Slider label="Side X" value={sideRot.rx} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rx: v }))} color="#e05252" />
+                <Slider label="Side Y" value={sideRot.ry} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, ry: v }))} color="#52c452" />
+                <Slider label="Side Z" value={sideRot.rz} min={-180} max={180} onChange={v => setSideRot(p => ({ ...p, rz: v }))} color="#5252e0" />
+              </>
+            )}
+
+            {/* ── Cover the cake ───────────────────────────────────────────────────────────────
+                ⚠️ OUTSIDE the `target === 'side'` panel, deliberately. It lived in there because
+                it was built next to the Side rotation sliders it reads — and then vanished the
+                moment anyone switched to the rim or board tab, which is most of the time. A coat
+                is the whole cake; it is not a property of one zone. It still reads the side and
+                rim figures from state, which do not care which tab is showing. */}
+            <div style={{ borderTop: '1px solid #e6e0e6', marginTop: 12, paddingTop: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 13 }}>
+                <input type="checkbox" checked={coat} onChange={e => setCoat(e.target.checked)} />
+                <b>Cover the cake</b>
+              </label>
+              <div style={{ fontSize: 11.5, color: '#777', lineHeight: 1.45, margin: '4px 0 8px' }}>
+                Packs this element over the whole top and side. Uses the <b>rim</b> rotation on the
+                lid and the <b>side</b> rotation on the wall — the same pair the pen picks between.
+              </div>
+              {coat && (
+                <Slider label="Piece size" value={coatRadius} min={0.08} max={0.5} step={0.005}
+                        onChange={setCoatRadius} color="#8a6fd0" />
+              )}
+              {coat && (
+                <Slider label="Shape cover" value={coatCover} min={0.5} max={1} step={0.01}
+                        onChange={setCoatCover} color="#c06fa0" />
+              )}
+              {coat && (
+                <Slider label="Rim stretch" value={coatRimStretch} min={1} max={2.5} step={0.02}
+                        onChange={setCoatRimStretch} color="#d0704f" />
+              )}
+              {coat && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}>
+                  <input type="checkbox" checked={coatSeats} onChange={e => setCoatSeats(e.target.checked)} />
+                  Show seats <span style={{ color: '#888', fontSize: 11 }}>(blue top · orange side · red rim)</span>
+                </label>
+              )}
+              {coat && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                fontSize: 11.5, color: '#555', marginBottom: 4 }}>
+                    <b>Top rotation</b>
+                    <button onClick={() => setCoatTopRot(null)}
+                            style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 5,
+                                     border: '1px solid #d9d9e0', background: coatTopRot ? '#fff' : '#eceaf2',
+                                     cursor: 'pointer' }}>
+                      {coatTopRot ? 'follow side' : 'following side'}
+                    </button>
+                  </div>
+                  <Slider label="Top X" value={(coatTopRot ?? sideRot).rx} min={-180} max={180}
+                          onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rx: v }))} color="#e05252" />
+                  <Slider label="Top Y" value={(coatTopRot ?? sideRot).ry} min={-180} max={180}
+                          onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), ry: v }))} color="#52c452" />
+                  <Slider label="Top Z" value={(coatTopRot ?? sideRot).rz} min={-180} max={180}
+                          onChange={v => setCoatTopRot(p => ({ ...(p ?? sideRot), rz: v }))} color="#5252e0" />
+                </div>
+              )}
+              {coat && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 11.5, color: '#555', marginBottom: 4 }}><b>Colour</b></div>
+                  <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
+                    {[['single', 'One'], ['ombre', 'Ombré'], ['scatter', 'Scatter']].map(([v, label]) => (
+                      <button key={v} onClick={() => setCoatShadeMode(v)}
+                        style={{ flex: 1, fontSize: 11, padding: '5px 0', borderRadius: 6, cursor: 'pointer',
+                                 fontWeight: 700, border: `2px solid ${coatShadeMode === v ? '#8a6fd0' : '#d9d9e0'}`,
+                                 background: coatShadeMode === v ? '#8a6fd0' : '#fff',
+                                 color: coatShadeMode === v ? '#fff' : '#6B8C74' }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {coatShadeMode !== 'single' && (
+                    <>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                        {coatPalette.map((hex, i) => (
+                          <input key={i} type="color" value={hex} title={`Stop ${i + 1}`}
+                            onChange={e => setCoatPalette(p => p.map((h, j) => (j === i ? e.target.value : h)))}
+                            style={{ width: 34, height: 26, padding: 0, border: '1px solid #d9d9e0',
+                                     borderRadius: 5, cursor: 'pointer' }} />
+                        ))}
+                        <button onClick={() => setCoatPalette(p => (p.length > 2 ? p.slice(0, -1) : p))}
+                          disabled={coatPalette.length <= 2}
+                          style={{ fontSize: 13, width: 24, height: 26, borderRadius: 5, cursor: 'pointer',
+                                   border: '1px solid #d9d9e0', background: '#fff' }}>-</button>
+                        <button onClick={() => setCoatPalette(p => (p.length < 5 ? [...p, p[p.length - 1]] : p))}
+                          disabled={coatPalette.length >= 5}
+                          style={{ fontSize: 13, width: 24, height: 26, borderRadius: 5, cursor: 'pointer',
+                                   border: '1px solid #d9d9e0', background: '#fff' }}>+</button>
+                      </div>
+                      {coatShadeMode === 'ombre' && (
+                        <Slider label="Bands" value={coatBands} min={0} max={8} step={1}
+                                onChange={setCoatBands} color="#8a6fd0" />
+                      )}
+                      <div style={{ fontSize: 10.5, color: '#999', lineHeight: 1.4 }}>
+                        {coatShadeMode === 'ombre'
+                          ? (coatBands > 1
+                              ? `${coatBands} stepped bands, palest at the middle of the lid`
+                              : 'Smooth, palest at the middle of the lid')
+                          : 'Each piece takes one of the palette at random'}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              {coat && coatStat && (
+                <div style={{ fontSize: 11, lineHeight: 1.5, padding: '7px 9px', borderRadius: 6,
+                              background: '#f3f1f7', color: '#4a4458', fontFamily: 'monospace' }}>
+                  <div><b>{coatStat.seats}</b> pieces · {coatStat.side.verts.toLocaleString()} verts each</div>
+                  <div>GLB box&nbsp;&nbsp;{coatStat.side.raw.map(n => n.toFixed(2)).join(' × ')}</div>
+                  <div>solid&nbsp;&nbsp;&nbsp;&nbsp;{coatStat.side.solid.map(n => n.toFixed(2)).join(' × ')}</div>
+                  <div>side fit {coatStat.side.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.side.scale.toFixed(3)})</div>
+                  <div>top&nbsp; fit {coatStat.top.fitted.map(n => n.toFixed(2)).join(' × ')} (×{coatStat.top.scale.toFixed(3)})</div>
+                  <div style={{ marginTop: 3, fontWeight: 700,
+                                color: coatStat.side.tileFloor ? '#a4252a' : '#2d6a4f' }}>
+                    tiles at {coatStat.side.tile.toFixed(3)} × width
+                    {coatStat.side.tileFloor && ' — has holes, cannot tile'}
+                  </div>
+                  <div style={{ opacity: 0.7 }}>
+                    seats W {Math.max(coatStat.side.fitted[0], coatStat.top.fitted[0]).toFixed(3)}
+                    · H {coatStat.side.fitted[2].toFixed(3)} · cake h 1.45
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Ring controls — board and rim only ─────────────────────────────────────────── */}
+            {target !== 'side' && (<>
             {/* Flip */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44' }}>Flip (180° X on geometry)</span>
@@ -1146,7 +1678,10 @@ export default function PipingCalibrator() {
               </div>
             </>}
 
-            {/* Ring toggle */}
+            </>)}
+
+            {/* Ring toggle — a RING preview switch, so it has no meaning on the wall tab. */}
+            {target !== 'side' && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44' }}>Show full ring</span>
               <button onClick={() => setShowRing(r => !r)}
@@ -1154,19 +1689,24 @@ export default function PipingCalibrator() {
                 {showRing ? 'ON' : 'OFF'}
               </button>
             </div>
+            )}
 
             {/* Include in output — board-only / rim-only / both */}
             <div style={{ marginTop: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 800, color: '#9B5F72', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>Include in JSON</div>
               {[{ k: 'board', on: includeBoard, setter: setIncludeBoard, label: 'Board (base)' },
-                { k: 'rim',   on: includeRim,   setter: setIncludeRim,   label: 'Rim (top edge)' }].map(row => (
+                { k: 'rim',   on: includeRim,   setter: setIncludeRim,   label: 'Rim (top edge)' },
+                /* Unticked writes nothing, and nothing is the right default: an element with no
+                   `side_rotation` falls back to `bottom_rotation`, which is what every element
+                   shipped before this key did. A paste must never silently take that away. */
+                { k: 'side',  on: includeSide,  setter: setIncludeSide,  label: 'Side (wall)' }].map(row => (
                 <label key={row.k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, cursor: 'pointer' }}>
                   <input type="checkbox" checked={row.on} onChange={e => row.setter(e.target.checked)} style={{ accentColor: '#3D5A44', width: 15, height: 15 }} />
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44', fontFamily: "'Quicksand',sans-serif" }}>{row.label}</span>
                 </label>
               ))}
               <div style={{ fontSize: 10, color: '#9BB5A2', marginTop: 2, lineHeight: 1.5 }}>
-                Only checked sections are written. Board → <code>bottom_*</code>, Rim → <code>top_*</code>.
+                Only checked sections are written. Board → <code>bottom_*</code>, Rim → <code>top_*</code>, Side → <code>side_rotation</code> (absent = follows the board).
               </div>
             </div>
 
@@ -1227,15 +1767,38 @@ export default function PipingCalibrator() {
 
           <Suspense fallback={null}>
             {/* Both rings render together; a ring shows when it's included OR being edited. */}
-            {activeGlbUrl && (includeBoard || target === 'board') && (
+            {activeGlbUrl && !coat && (includeBoard || target === 'board') && (
               <CalibScene glbUrl={activeGlbUrl} cfg={boardCfg} showRing={showRing} anchorY={Y_BASE} inward={false} altGlbUrl={altBlobUrl} shape={shape} color={elementColor} />
             )}
-            {activeGlbUrl && (includeRim || target === 'rim') && (
+            {activeGlbUrl && !coat && (includeRim || target === 'rim') && (
               <CalibScene glbUrl={activeGlbUrl} cfg={rimCfg} showRing={showRing} anchorY={Y_BASE + CAKE_HEIGHT} inward={true} altGlbUrl={altBlobUrl} shape={shape} color={elementColor} />
+            )}
+            {/* The wall run appears only while `side_rotation` is being authored — it is a hand-piped
+                stroke, not a ring, and leaving it on the cake would misread as a third border.
+                ⚠️ AND NOT AT ALL WHILE THE CAKE IS COATED. Its own comment predicted this and I
+                still missed it: a nine-piece run across the wall, in the flat element colour
+                rather than the coat's, reads as a pale horizontal strip of the wrong shade sitting
+                on top of the roses. Reported as exactly that. The coat already covers every
+                surface this was sampling, so there is nothing left for it to show. */}
+            {activeGlbUrl && !coat && (includeSide || target === 'side') && (
+              <WallStamps glbUrl={activeGlbUrl} rot={sideRot} color={elementColor} />
+            )}
+            {/* The coat is the whole cake, so it replaces the rings visually rather than joining
+                them — but it is left as an independent toggle on purpose: seeing a border and a
+                coat together is how you notice the two are reading the same rotation differently. */}
+            {activeGlbUrl && coat && (
+              <CoatScene glbUrl={activeGlbUrl} roseRadius={coatRadius}
+                         topRot={coatTopRot ?? sideRot} sideRot={sideRot}
+                         color={elementColor} softness={rimCfg.softness}
+                         onMeasure={onCoatMeasure} showSeats={coatSeats} cover={coatCover}
+                         rimStretch={coatRimStretch} shape={shape}
+                         shadeMode={coatShadeMode} palette={coatPalette} bands={coatBands} />
             )}
           </Suspense>
 
-          <OrbitControls makeDefault target={[0, 2, 0]} />
+          {/* minDistance lets the camera get inside a shell's own scale — the default 0 is fine but
+              a floor stops a scroll flick from flying through the cake and losing the piece. */}
+          <OrbitControls ref={orbitRef} makeDefault target={[0, focusY, focusZ]} minDistance={0.55} maxDistance={16} />
         </Canvas>
 
         {!activeGlbUrl && (

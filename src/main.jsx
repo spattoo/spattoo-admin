@@ -52,6 +52,7 @@ const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
 const PatternBuilder        = lazy(() => import('./admin/PatternBuilder.jsx'));
 const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'));
+const RosetteCoatStudio     = lazy(() => import('./admin/RosetteCoatStudio.jsx'));
 const PerchCalibrator       = lazy(() => import('./admin/PerchCalibrator.jsx'));
 const CreamPenStudio        = lazy(() => import('./admin/CreamPenStudio.jsx'));
 const ButterflyStudio       = lazy(() => import('./admin/ButterflyStudio.jsx'));
@@ -61,6 +62,7 @@ const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx')
 const FlowerNailStudio      = lazy(() => import('./admin/FlowerNailStudio.jsx'));
 const CardCutoutStudio      = lazy(() => import('./admin/CardCutoutStudio.jsx'));
 const WaferPaperStudio      = lazy(() => import('./admin/WaferPaperStudio.jsx'));
+const BalloonStudio         = lazy(() => import('./admin/BalloonStudio.jsx'));
 const TopperComposer        = lazy(() => import('./admin/TopperComposer.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
 const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
@@ -125,6 +127,7 @@ const ROUTES = {
   '/plans':               ManagePlans,
   '/pattern-builder':     PatternBuilder,
   '/elements/piping-calibrator': PipingCalibrator,
+  '/elements/rosette-coat':      RosetteCoatStudio,
   '/elements/perch-calibrator':  PerchCalibrator,
   '/elements/cream-pen':         CreamPenStudio,
   '/elements/folded-sticker':    ButterflyStudio,
@@ -139,6 +142,7 @@ const ROUTES = {
   '/elements/flower-nail':       FlowerNailStudio,
   '/elements/card-cutout':       CardCutoutStudio,
   '/elements/wafer-paper':       WaferPaperStudio,
+  '/elements/balloon':           BalloonStudio,
   '/elements/topper-composer':   TopperComposer,
   '/elements/chocolate-drip':    ChocolateDripStudio,
   '/elements/grass':             GrassStudio,
@@ -187,6 +191,7 @@ const NAV_GROUPS = [
     { href: '/glb-studio',              label: 'GLB Studio' },
     { href: '/glb-recompose',           label: 'GLB Recompose' },
     { href: '/elements/piping-calibrator', label: 'Piping Calibrator' },
+    { href: '/elements/rosette-coat', label: 'Rosette Coat' },
     { href: '/elements/perch-calibrator',  label: 'Perch Calibrator' },
     { href: '/elements/texture-calibrator', label: 'Texture Calibrator' },
     { href: '/elements/palette-knife',  label: 'Palette-Knife Studio' },
@@ -197,6 +202,7 @@ const NAV_GROUPS = [
     { href: '/elements/flower-nail',    label: 'Flower Nail' },
     { href: '/elements/card-cutout',    label: 'Card Cutout' },
     { href: '/elements/wafer-paper',    label: 'Wafer Paper' },
+    { href: '/elements/balloon',        label: 'Balloons' },
     { href: '/elements/topper-composer', label: 'Topper Composer' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
     { href: '/elements/grass',          label: 'Grass' },
