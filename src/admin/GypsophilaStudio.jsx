@@ -73,7 +73,8 @@ export default function GypsophilaStudio() {
   const [shapeKey, setShapeKey] = useState('round');
   const [stats, setStats] = useState(null);
   const [p, setP] = useState({ ...GYP_DEFAULTS, ...GYP_COLOURS, spacing: 0.13, jitter: 0.7,
-                              ringWidth: 0.18, rimIn: 0.14, rimOut: 0.10, shadeVary: 0.35 });
+                              ringWidth: 0.18, rimIn: 0.14, rimOut: 0.10,
+                              shadeVary: 0.35, spacingScale: 1 });
   const set = (k) => (v) => setP(o => ({ ...o, [k]: v }));
   const L = LAYOUTS[layout];
   const soloTris = useMemo(() => (buildGypSprig(p).index?.count ?? 0) / 3, [p]);
@@ -124,8 +125,8 @@ export default function GypsophilaStudio() {
 
         <H>The blooms</H>
         <Sl label="Per cluster" v={p.florets} min={1} max={10} step={1} on={set('florets')} int />
-        <Sl label="Bloom size"  v={p.floretSize} min={0.003} max={0.024} step={0.0005} on={set('floretSize')}
-            hint="A radius. On a real stem a floret is about 3% of the sprig — bigger and it reads as berries." />
+        <Sl label="Bloom size"  v={p.floretSize} min={0.004} max={0.04} step={0.001} on={set('floretSize')}
+            hint="A radius. Measured off the reference cakes, a floret is about 1.45% of the cake's WIDTH — the default puts it there." />
         <Sl label="Size variety" v={p.floretVary} min={0} max={0.9} step={0.02} on={set('floretVary')}
             hint="Buds and open flowers sit together. At 0 it is a cluster of identical beads." />
         {/* ⚠️ THE TWO ANSWERS TO "IT IS ALL ONE FLAT WHITE". Depth shades a bloom by how low it
@@ -144,8 +145,11 @@ export default function GypsophilaStudio() {
 
         {!L.solo && (<>
           <H>The arrangement</H>
-          <Sl label="Spacing" v={p.spacing} min={0.05} max={0.5} step={0.01} on={set('spacing')}
-              hint="Centre to centre. Tight is a hedge, loose is a scatter." />
+          {/* ⚠️ A MULTIPLIER, NOT A VALUE. Each arrangement sets its own spacing — a rim band is
+              packed where a scatter is not — and the preset wins over the state, so a plain
+              Spacing slider was DEAD on every ring. Scaling what the preset asks for keeps both. */}
+          <Sl label="Spacing ×" v={p.spacingScale} min={0.5} max={2.5} step={0.05} on={set('spacingScale')}
+              hint="Scales whatever the arrangement asks for. Above 1 opens it up and lets the green show." />
           <Sl label="Wander"  v={p.jitter} min={0} max={1} step={0.02} on={set('jitter')}
               hint="How far a sprig may stray off its seat. At 0 the grid shows." />
           <Sl label="Rim: out past the edge" v={p.rimOut} min={0} max={0.4} step={0.01} on={set('rimOut')}
@@ -223,7 +227,9 @@ export default function GypsophilaStudio() {
                 hole={c.on === 'foot' ? holeForFoot : null}
                 patchRadius={c.on === 'foot' ? footBand.radius
                            : c.on === 'rim' ? rim.shape.radius : undefined}
-                {...p} {...c} seed={p.seed + i * 13}
+                {...p} {...c}
+                spacing={(c.spacing ?? p.spacing ?? 0.13) * (p.spacingScale ?? 1)}
+                seed={p.seed + i * 13}
                 onStats={i === 0 ? setStats : undefined} />
             ))}
           </>)}
