@@ -62,6 +62,7 @@ const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx')
 const FlowerNailStudio      = lazy(() => import('./admin/FlowerNailStudio.jsx'));
 const CardCutoutStudio      = lazy(() => import('./admin/CardCutoutStudio.jsx'));
 const WaferPaperStudio      = lazy(() => import('./admin/WaferPaperStudio.jsx'));
+const GypsophilaStudio      = lazy(() => import('./admin/GypsophilaStudio.jsx'));
 const BalloonStudio         = lazy(() => import('./admin/BalloonStudio.jsx'));
 const TopperComposer        = lazy(() => import('./admin/TopperComposer.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
@@ -142,6 +143,7 @@ const ROUTES = {
   '/elements/flower-nail':       FlowerNailStudio,
   '/elements/card-cutout':       CardCutoutStudio,
   '/elements/wafer-paper':       WaferPaperStudio,
+  '/elements/gypsophila':        GypsophilaStudio,
   '/elements/balloon':           BalloonStudio,
   '/elements/topper-composer':   TopperComposer,
   '/elements/chocolate-drip':    ChocolateDripStudio,
@@ -202,6 +204,7 @@ const NAV_GROUPS = [
     { href: '/elements/flower-nail',    label: 'Flower Nail' },
     { href: '/elements/card-cutout',    label: 'Card Cutout' },
     { href: '/elements/wafer-paper',    label: 'Wafer Paper' },
+    { href: '/elements/gypsophila',     label: 'Gypsophila' },
     { href: '/elements/balloon',        label: 'Balloons' },
     { href: '/elements/topper-composer', label: 'Topper Composer' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
