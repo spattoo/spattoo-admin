@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import {
-  GypCloud, buildGypSprig, GYP_DEFAULTS,
+  GypCloud, buildGypSprig, GYP_DEFAULTS, GYP_COLOURS,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
 } from '@spattoo/designer';
 
@@ -28,22 +28,39 @@ const SHAPES = {
   round: { kind: 'round', radius: TIER.radius },
   sheet: { kind: 'rect', halfW: 1.6, halfD: 1.15, cornerR: 0.2 },
 };
+/* The board is its own outline. A ring on it is bounded OUTSIDE by the board and INSIDE by the
+   cake — two different shapes, which is what `hole` is for and what `bandInner` cannot say. */
+const BOARD = { round: { kind: 'round', radius: TIER.radius * 1.34 },
+                sheet: { kind: 'rect', halfW: 2.15, halfD: 1.55, cornerR: 0.25 } };
 
 /* The arrangements the reference cakes actually show, named for what a baker would call them. */
+/* ⚠️ A LAYOUT IS A LIST OF CLOUDS. The reference cake wears TWO rings — one hugging the top edge
+   and one on the board round the base — and they are different seat problems, so one cloud could
+   not express it.
+   ⚠️ AND A RING USES SHORTER, DROOPIER SPRIGS than a standalone one. At the sprig's own default
+   the first stem is long and bare before it forks, so a packed ring reads as a fence of green
+   sticks with blooms on top; the reference is the other way round, a band of bloom with green
+   showing through. That belongs to the arrangement, not to the sprig. */
 const LAYOUTS = {
   'One sprig':      { solo: true },
-  'A few, close':   { spacing: 0.34, jitter: 0.8 },
-  'Ring the rim':   { spacing: 0.12, jitter: 0.7, bandInner: 0.82, overhang: 0.6 },
-  'Cover the top':  { spacing: 0.16, jitter: 0.75 },
-  'Clumps':         { spacing: 0.10, jitter: 0.8,
-                      patches: [{ u: 0.12, v: 0.55, r: 0.45 }, { u: 0.62, v: 0.5, r: 0.38 }] },
+  'A few, close':   { clouds: [{ spacing: 0.34, jitter: 0.8 }] },
+  'Ring the rim':   { clouds: [{ spacing: 0.075, jitter: 0.65, bandInner: 0.86, overhang: 0.8,
+                                 height: 0.20, droop: 0.6 }] },
+  'Rim and board':  { clouds: [{ spacing: 0.075, jitter: 0.65, bandInner: 0.86, overhang: 0.8,
+                                 height: 0.20, droop: 0.6 },
+                               { on: 'board', spacing: 0.085, jitter: 0.7,
+                                 height: 0.19, droop: 0.5 }] },
+  'Cover the top':  { clouds: [{ spacing: 0.16, jitter: 0.75 }] },
+  'Clumps':         { clouds: [{ spacing: 0.10, jitter: 0.8,
+                                 patches: [{ u: 0.12, v: 0.55, r: 0.45 },
+                                           { u: 0.62, v: 0.5, r: 0.38 }] }] },
 };
 
 export default function GypsophilaStudio() {
-  const [layout, setLayout] = useState('Ring the rim');
+  const [layout, setLayout] = useState('Rim and board');
   const [shapeKey, setShapeKey] = useState('round');
   const [stats, setStats] = useState(null);
-  const [p, setP] = useState({ ...GYP_DEFAULTS, colour: '#fdfdfb', spacing: 0.13, jitter: 0.7 });
+  const [p, setP] = useState({ ...GYP_DEFAULTS, ...GYP_COLOURS, spacing: 0.13, jitter: 0.7 });
   const set = (k) => (v) => setP(o => ({ ...o, [k]: v }));
   const L = LAYOUTS[layout];
   const soloTris = useMemo(() => (buildGypSprig(p).index?.count ?? 0) / 3, [p]);
@@ -99,11 +116,22 @@ export default function GypsophilaStudio() {
               hint="How far a sprig may stray off its seat. At 0 the grid shows." />
         </>)}
 
-        <Row label="Colour">
-          {['#fdfdfb', '#ffffff', '#f7f3e8', '#f2e4ea', '#eceff2'].map(c => (
-            <button key={c} onClick={() => setP(o => ({ ...o, colour: c }))}
+        {/* ⚠️ TWO COLOURS, AND THE GREEN IS NOT DECORATION. Every reference shows fine green stems
+            carrying white blooms, and the contrast between them is what gives the cloud its
+            structure — all-white it has nothing to separate it from a white cake under a bright
+            key. They ride one vertex attribute, so this is still one draw call. */}
+        <Row label="Bloom">
+          {['#fdfdfb', '#ffffff', '#f7f3e8', '#f2e4ea'].map(c => (
+            <button key={c} onClick={() => setP(o => ({ ...o, bloom: c }))}
               style={{ width: 26, height: 26, borderRadius: 5, background: c, cursor: 'pointer',
-                       border: p.colour === c ? '2.5px solid #1a1a1a' : '1px solid #ccc' }} />
+                       border: p.bloom === c ? '2.5px solid #1a1a1a' : '1px solid #ccc' }} />
+          ))}
+        </Row>
+        <Row label="Stem">
+          {['#8aa06a', '#6f8a54', '#a8b98c', '#c9c2a8'].map(c => (
+            <button key={c} onClick={() => setP(o => ({ ...o, stem: c }))}
+              style={{ width: 26, height: 26, borderRadius: 5, background: c, cursor: 'pointer',
+                       border: p.stem === c ? '2.5px solid #1a1a1a' : '1px solid #ccc' }} />
           ))}
         </Row>
 
@@ -131,17 +159,31 @@ export default function GypsophilaStudio() {
 
           {L.solo ? (
             <mesh geometry={useMemo(() => buildGypSprig(p), [p])} scale={3.2} castShadow receiveShadow>
-              <meshStandardMaterial color={p.colour} roughness={0.78} metalness={0} />
+              <meshStandardMaterial vertexColors color="#ffffff" roughness={0.78} metalness={0} />
             </mesh>
           ) : (<>
+            {/* The board, so a ring round the base has something to stand on. */}
+            <mesh position={[0, TIER.baseY - 0.03, 0]} receiveShadow>
+              {shapeKey === 'round'
+                ? <cylinderGeometry args={[BOARD.round.radius, BOARD.round.radius, 0.06, 72]} />
+                : <boxGeometry args={[BOARD.sheet.halfW * 2, 0.06, BOARD.sheet.halfD * 2]} />}
+              <meshStandardMaterial color="#efe3e8" roughness={0.85} />
+            </mesh>
             <mesh position={[0, TIER.baseY + TIER.height / 2, 0]} castShadow receiveShadow>
               {shapeKey === 'round'
                 ? <cylinderGeometry args={[TIER.radius, TIER.radius, TIER.height, 72]} />
                 : <boxGeometry args={[SHAPES.sheet.halfW * 2, TIER.height, SHAPES.sheet.halfD * 2]} />}
               <meshStandardMaterial color="#f6efe4" roughness={0.9} />
             </mesh>
-            <GypCloud shape={SHAPES[shapeKey]} topY={TOP_Y} color={p.colour}
-              {...p} {...L} onStats={setStats} />
+            {L.clouds.map((c, i) => (
+              <GypCloud key={i}
+                shape={c.on === 'board' ? BOARD[shapeKey] : SHAPES[shapeKey]}
+                topY={c.on === 'board' ? TIER.baseY + 0.005 : TOP_Y}
+                hole={c.on === 'board' ? { shape: SHAPES[shapeKey], scale: 1.0 } : null}
+                patchRadius={c.on === 'board' ? BOARD[shapeKey].radius : undefined}
+                {...p} {...c} seed={p.seed + i * 13}
+                onStats={i === 0 ? setStats : undefined} />
+            ))}
           </>)}
 
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, L.solo ? -0.4 : 0, 0]} receiveShadow>
