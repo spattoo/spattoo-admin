@@ -70,6 +70,10 @@ export default function GypsophilaStudio() {
   const set = (k) => (v) => setP(o => ({ ...o, [k]: v }));
   const L = LAYOUTS[layout];
   const soloTris = useMemo(() => (buildGypSprig(p).index?.count ?? 0) / 3, [p]);
+  /* ⚠️ A FRESH OBJECT LITERAL IS A NEW DEPENDENCY EVERY RENDER. `hole` feeds the seat memo inside
+     GypCloud, so writing it inline rebuilt every seat on every frame and the board ring shook. */
+  const shape = SHAPES[shapeKey];
+  const holeForBoard = useMemo(() => ({ shape, scale: 1.0 }), [shape]);
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 56px)', fontFamily: "'Quicksand',sans-serif" }}>
@@ -185,7 +189,7 @@ export default function GypsophilaStudio() {
               <GypCloud key={i}
                 shape={c.on === 'board' ? BOARD[shapeKey] : SHAPES[shapeKey]}
                 topY={c.on === 'board' ? TIER.baseY + 0.005 : TOP_Y}
-                hole={c.on === 'board' ? { shape: SHAPES[shapeKey], scale: 1.0 } : null}
+                hole={c.on === 'board' ? holeForBoard : null}
                 patchRadius={c.on === 'board' ? BOARD[shapeKey].radius : undefined}
                 {...p} {...c} seed={p.seed + i * 13}
                 onStats={i === 0 ? setStats : undefined} />
