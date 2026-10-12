@@ -44,12 +44,18 @@ const BOARD = { round: { kind: 'round', radius: TIER.radius * 1.34 },
 const LAYOUTS = {
   'One sprig':      { solo: true },
   'A few, close':   { clouds: [{ spacing: 0.34, jitter: 0.8 }] },
+  /* ⚠️ `lay` IS THE MOUNTING, and the board's is not a choice. A cake board is card or acrylic —
+     you cannot push a stem into it — so a ring round the base is LAID on it, tucked in sideways at
+     the join and resting against the cake's side. Seated upright it reads as a hedge round a
+     building: *"on the board, it looks more like a tree plantation."* The top ring's stems ARE
+     pushed into buttercream, so 45° there keeps them planted and still tips the band over, which
+     is what stops it showing a palisade of green stems round the inside of the rim. */
   'Ring the rim':   { clouds: [{ spacing: 0.075, jitter: 0.65, bandInner: 0.86, overhang: 0.8,
-                                 height: 0.20, droop: 0.6 }] },
+                                 height: 0.20, droop: 0.6, lay: 45 }] },
   'Rim and board':  { clouds: [{ spacing: 0.075, jitter: 0.65, bandInner: 0.86, overhang: 0.8,
-                                 height: 0.20, droop: 0.6 },
-                               { on: 'board', spacing: 0.085, jitter: 0.7,
-                                 height: 0.19, droop: 0.5 }] },
+                                 height: 0.20, droop: 0.6, lay: 45 },
+                               { on: 'board', spacing: 0.075, jitter: 0.7,
+                                 height: 0.22, droop: 0.3, lay: 78 }] },
   'Cover the top':  { clouds: [{ spacing: 0.16, jitter: 0.75 }] },
   'Clumps':         { clouds: [{ spacing: 0.10, jitter: 0.8,
                                  patches: [{ u: 0.12, v: 0.55, r: 0.45 },
