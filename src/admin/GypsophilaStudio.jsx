@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import {
-  GypCloud, buildGypSprig, GYP_DEFAULTS, GYP_COLOURS, outwardBand,
+  GypCloud, buildGypSprig, GYP_DEFAULTS, GYP_COLOURS, outwardBand, rimBand,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
 } from '@spattoo/designer';
 
@@ -51,9 +51,9 @@ const LAYOUTS = {
      building: *"on the board, it looks more like a tree plantation."* The top ring's stems ARE
      pushed into buttercream, so 45° there keeps them planted and still tips the band over, which
      is what stops it showing a palisade of green stems round the inside of the rim. */
-  'Ring the rim':   { clouds: [{ spacing: 0.075, jitter: 0.65, bandInner: 0.86, overhang: 0.8,
+  'Ring the rim':   { clouds: [{ on: 'rim', spacing: 0.075, jitter: 0.65, overhang: 0.8,
                                  height: 0.20, droop: 0.6, lay: 45, bury: 0.06 }] },
-  'Rim and board':  { clouds: [{ spacing: 0.075, jitter: 0.65, bandInner: 0.86, overhang: 0.8,
+  'Rim and board':  { clouds: [{ on: 'rim', spacing: 0.075, jitter: 0.65, overhang: 0.8,
                                  height: 0.20, droop: 0.6, lay: 45, bury: 0.06 },
                                /* ⚠️ NO `bury` at the foot. Burying moves a seat DOWN, which is
                                   right for a stem pushed into buttercream and wrong here — it put
@@ -72,7 +72,8 @@ export default function GypsophilaStudio() {
   const [layout, setLayout] = useState('Rim and board');
   const [shapeKey, setShapeKey] = useState('round');
   const [stats, setStats] = useState(null);
-  const [p, setP] = useState({ ...GYP_DEFAULTS, ...GYP_COLOURS, spacing: 0.13, jitter: 0.7, ringWidth: 0.18 });
+  const [p, setP] = useState({ ...GYP_DEFAULTS, ...GYP_COLOURS, spacing: 0.13, jitter: 0.7,
+                              ringWidth: 0.18, rimIn: 0.14, rimOut: 0.10, shadeVary: 0.35 });
   const set = (k) => (v) => setP(o => ({ ...o, [k]: v }));
   const L = LAYOUTS[layout];
   const soloTris = useMemo(() => (buildGypSprig(p).index?.count ?? 0) / 3, [p]);
@@ -81,6 +82,9 @@ export default function GypsophilaStudio() {
   const shape = SHAPES[shapeKey];
   const holeForFoot = useMemo(() => ({ shape, scale: 1.0 }), [shape]);
   const footBand = useMemo(() => outwardBand(shape, p.ringWidth ?? 0.18), [shape, p.ringWidth]);
+  /* The rim band has two edges and both are controls: how far in it starts, how far out it reaches. */
+  const rim = useMemo(() => rimBand(shape, { inn: p.rimIn, out: p.rimOut }),
+                      [shape, p.rimIn, p.rimOut]);
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 56px)', fontFamily: "'Quicksand',sans-serif" }}>
@@ -124,6 +128,18 @@ export default function GypsophilaStudio() {
             hint="A radius. On a real stem a floret is about 3% of the sprig — bigger and it reads as berries." />
         <Sl label="Size variety" v={p.floretVary} min={0} max={0.9} step={0.02} on={set('floretVary')}
             hint="Buds and open flowers sit together. At 0 it is a cluster of identical beads." />
+        {/* ⚠️ THE TWO ANSWERS TO "IT IS ALL ONE FLAT WHITE". Depth shades a bloom by how low it
+            sits in its own sprig — the crown sees sky, the bottom is roofed by the crowd. Crowd
+            depth gives each SPRIG its own brightness, which is the only lever an instanced field
+            has: every instance shares one geometry, so per-vertex shading paints the same gradient
+            on all of them and merely dims the whole band. Measured on the rim ring, tonal range
+            43 → 50 when the crowd varies; baking depth alone moved the median and not the range. */}
+        <Sl label="Depth"       v={p.ao} min={0} max={1.4} step={0.05} on={set('ao')}
+            hint="How much a bloom low in the sprig is darkened." />
+        <Sl label="Depth floor" v={p.aoFloor} min={0.2} max={0.9} step={0.02} on={set('aoFloor')}
+            hint="The darkest a bloom may go. White petals in shadow are grey, never black." />
+        <Sl label="Crowd depth" v={p.shadeVary} min={0} max={0.6} step={0.02} on={set('shadeVary')}
+            hint="How much sprigs differ in brightness. A real crowd has some lit and some in the shade of the rest." />
         <Sl label="Seed"        v={p.seed} min={1} max={40} step={1} on={set('seed')} int />
 
         {!L.solo && (<>
@@ -132,7 +148,11 @@ export default function GypsophilaStudio() {
               hint="Centre to centre. Tight is a hedge, loose is a scatter." />
           <Sl label="Wander"  v={p.jitter} min={0} max={1} step={0.02} on={set('jitter')}
               hint="How far a sprig may stray off its seat. At 0 the grid shows." />
-          <Sl label="Ring width" v={p.ringWidth} min={0.04} max={0.5} step={0.01} on={set('ringWidth')}
+          <Sl label="Rim: out past the edge" v={p.rimOut} min={0} max={0.4} step={0.01} on={set('rimOut')}
+              hint="How far the top ring reaches PAST the rim, × the tier." />
+          <Sl label="Rim: in from the edge" v={p.rimIn} min={0.03} max={0.6} step={0.01} on={set('rimIn')}
+              hint="How far in from the rim it starts. The two together are the band's width." />
+          <Sl label="Foot ring width" v={p.ringWidth} min={0.04} max={0.5} step={0.01} on={set('ringWidth')}
               hint="How far the base ring reaches out from the cake's foot, × the tier. It is a ring on the cake, not a field on the board." />
         </>)}
 
@@ -197,10 +217,12 @@ export default function GypsophilaStudio() {
             </mesh>
             {L.clouds.map((c, i) => (
               <GypCloud key={i}
-                shape={c.on === 'foot' ? footBand : SHAPES[shapeKey]}
+                shape={c.on === 'foot' ? footBand : c.on === 'rim' ? rim.shape : SHAPES[shapeKey]}
+                bandInner={c.on === 'rim' ? rim.bandInner : undefined}
                 topY={c.on === 'foot' ? TIER.baseY + 0.005 : TOP_Y}
                 hole={c.on === 'foot' ? holeForFoot : null}
-                patchRadius={c.on === 'foot' ? footBand.radius : undefined}
+                patchRadius={c.on === 'foot' ? footBand.radius
+                           : c.on === 'rim' ? rim.shape.radius : undefined}
                 {...p} {...c} seed={p.seed + i * 13}
                 onStats={i === 0 ? setStats : undefined} />
             ))}
