@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import {
-  GypCloud, buildGypSprig, GYP_DEFAULTS, GYP_COLOURS,
+  GypCloud, buildGypSprig, GYP_DEFAULTS, GYP_COLOURS, outwardBand,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
 } from '@spattoo/designer';
 
@@ -28,8 +28,9 @@ const SHAPES = {
   round: { kind: 'round', radius: TIER.radius },
   sheet: { kind: 'rect', halfW: 1.6, halfD: 1.15, cornerR: 0.2 },
 };
-/* The board is its own outline. A ring on it is bounded OUTSIDE by the board and INSIDE by the
-   cake — two different shapes, which is what `hole` is for and what `bandInner` cannot say. */
+/* The board, drawn so the base ring has something to sit against. ⚠️ It is NOT what the ring is
+   seated on: a band filling the board floods it and reads as flowers standing in card. The ring is
+   the cake's own outline grown outward by `ringWidth` — see `outwardBand`. */
 const BOARD = { round: { kind: 'round', radius: TIER.radius * 1.34 },
                 sheet: { kind: 'rect', halfW: 2.15, halfD: 1.55, cornerR: 0.25 } };
 
@@ -54,8 +55,13 @@ const LAYOUTS = {
                                  height: 0.20, droop: 0.6, lay: 45, bury: 0.06 }] },
   'Rim and board':  { clouds: [{ spacing: 0.075, jitter: 0.65, bandInner: 0.86, overhang: 0.8,
                                  height: 0.20, droop: 0.6, lay: 45, bury: 0.06 },
-                               { on: 'board', spacing: 0.075, jitter: 0.7,
-                                 height: 0.22, droop: 0.3, lay: 78, bury: 0.02 }] },
+                               /* ⚠️ NO `bury` at the foot. Burying moves a seat DOWN, which is
+                                  right for a stem pushed into buttercream and wrong here — it put
+                                  the whole ring inside the board slab, rendering perfectly and
+                                  never being seen. Laid against the join, the cut ends are already
+                                  hidden by the blooms in front of them. */
+                               { on: 'foot', spacing: 0.075, jitter: 0.7,
+                                 height: 0.22, droop: 0.3, lay: 78 }] },
   'Cover the top':  { clouds: [{ spacing: 0.16, jitter: 0.75 }] },
   'Clumps':         { clouds: [{ spacing: 0.10, jitter: 0.8,
                                  patches: [{ u: 0.12, v: 0.55, r: 0.45 },
@@ -66,14 +72,15 @@ export default function GypsophilaStudio() {
   const [layout, setLayout] = useState('Rim and board');
   const [shapeKey, setShapeKey] = useState('round');
   const [stats, setStats] = useState(null);
-  const [p, setP] = useState({ ...GYP_DEFAULTS, ...GYP_COLOURS, spacing: 0.13, jitter: 0.7 });
+  const [p, setP] = useState({ ...GYP_DEFAULTS, ...GYP_COLOURS, spacing: 0.13, jitter: 0.7, ringWidth: 0.18 });
   const set = (k) => (v) => setP(o => ({ ...o, [k]: v }));
   const L = LAYOUTS[layout];
   const soloTris = useMemo(() => (buildGypSprig(p).index?.count ?? 0) / 3, [p]);
   /* ⚠️ A FRESH OBJECT LITERAL IS A NEW DEPENDENCY EVERY RENDER. `hole` feeds the seat memo inside
      GypCloud, so writing it inline rebuilt every seat on every frame and the board ring shook. */
   const shape = SHAPES[shapeKey];
-  const holeForBoard = useMemo(() => ({ shape, scale: 1.0 }), [shape]);
+  const holeForFoot = useMemo(() => ({ shape, scale: 1.0 }), [shape]);
+  const footBand = useMemo(() => outwardBand(shape, p.ringWidth ?? 0.18), [shape, p.ringWidth]);
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 56px)', fontFamily: "'Quicksand',sans-serif" }}>
@@ -125,6 +132,8 @@ export default function GypsophilaStudio() {
               hint="Centre to centre. Tight is a hedge, loose is a scatter." />
           <Sl label="Wander"  v={p.jitter} min={0} max={1} step={0.02} on={set('jitter')}
               hint="How far a sprig may stray off its seat. At 0 the grid shows." />
+          <Sl label="Ring width" v={p.ringWidth} min={0.04} max={0.5} step={0.01} on={set('ringWidth')}
+              hint="How far the base ring reaches out from the cake's foot, × the tier. It is a ring on the cake, not a field on the board." />
         </>)}
 
         {/* ⚠️ TWO COLOURS, AND THE GREEN IS NOT DECORATION. Every reference shows fine green stems
@@ -188,10 +197,10 @@ export default function GypsophilaStudio() {
             </mesh>
             {L.clouds.map((c, i) => (
               <GypCloud key={i}
-                shape={c.on === 'board' ? BOARD[shapeKey] : SHAPES[shapeKey]}
-                topY={c.on === 'board' ? TIER.baseY + 0.005 : TOP_Y}
-                hole={c.on === 'board' ? holeForBoard : null}
-                patchRadius={c.on === 'board' ? BOARD[shapeKey].radius : undefined}
+                shape={c.on === 'foot' ? footBand : SHAPES[shapeKey]}
+                topY={c.on === 'foot' ? TIER.baseY + 0.005 : TOP_Y}
+                hole={c.on === 'foot' ? holeForFoot : null}
+                patchRadius={c.on === 'foot' ? footBand.radius : undefined}
                 {...p} {...c} seed={p.seed + i * 13}
                 onStats={i === 0 ? setStats : undefined} />
             ))}
