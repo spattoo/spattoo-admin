@@ -50,6 +50,19 @@ const POSY = [
   { u: 0.68, v: 0.30, size: 0.26 }, { u: 0.85, v: 0.50, size: 0.22 },
 ];
 
+/* The bunch as one shape, for the arrangement that rings the outside of it rather than filling
+   between its flowers. */
+const BUNCH = (() => {
+  const at = (r) => [r.v * Math.sin(r.u * Math.PI * 2), r.v * Math.cos(r.u * Math.PI * 2)];
+  const cx = POSY.reduce((a, r) => a + at(r)[0], 0) / POSY.length;
+  const cz = POSY.reduce((a, r) => a + at(r)[1], 0) / POSY.length;
+  const reach = Math.max(...POSY.map(r => {
+    const [x, z] = at(r);
+    return Math.hypot(x - cx, z - cz) * TIER.radius + r.size;
+  }));
+  return { u: Math.atan2(cx, cz) / (Math.PI * 2), v: Math.hypot(cx, cz), r: reach };
+})();
+
 const BOARD = { round: { kind: 'round', radius: TIER.radius * 1.34 },
                 sheet: { kind: 'rect', halfW: 2.15, halfD: 1.55, cornerR: 0.25 } };
 
@@ -88,26 +101,26 @@ const LAYOUTS = {
   /* ⚠️ A COLLAR IS A PATCH WITH A BITE OUT OF IT. Every florist-style reference puts gypsophila
      AROUND the roses — hugging each and radiating outward, so the rose reads as placed rather than
      stuck on. A plain patch would grow flowers through it. */
-  /* ⚠️ SURROUNDING AND MERGING ARE TWO DIFFERENT ARRANGEMENTS, and the references show both.
-     Surrounding rings each bloom and keeps off it; merging makes the filler part of the same mass,
-     with sprays lying ACROSS the roses and poking out between them.
-     ⚠️ BURIED DEEP AND CUT LONG either way. A posy's filler is pushed down between the roses, so
-     what shows is the bloom mass at their shoulder and none of the stem — seated shallow it stood
-     as a palisade of green sticks under the bunch, the "tree plantation" read all over again. */
+  /* ⚠️ BOTH CLEAR EVERY FOOTPRINT. Nothing a customer places may penetrate what is already there
+     (INVARIANTS #3b), and for a flower that is not negotiable — a stem through a rose petal is the
+     one thing that cannot happen on a real cake. What differs is WHERE the filler is allowed.
+     ⚠️ BURIED DEEP AND CUT LONG either way, or the sprigs stand as a palisade of green sticks under
+     the bunch — the "tree plantation" read all over again. */
+
+  /* SURROUND: the whole bunch is cleared, so the filler rings the OUTSIDE of it. */
   'Posy, surrounded': { roses: POSY,
-                      clouds: [{ spacing: 0.05, jitter: 0.9, lay: 14, layVary: 0.8,
-                                 height: 0.46, droop: 0.4, bury: 0.20,
-                                 collars: POSY.map(r => ({ ...r, r: r.size * 2.3,
-                                                           inner: r.size * 0.82 })) }] },
+                      clouds: [{ spacing: 0.05, jitter: 0.9, lay: 28, layVary: 0.8,
+                                 height: 0.40, droop: 0.45, bury: 0.16,
+                                 collars: [{ ...BUNCH, r: BUNCH.r * 1.5, inner: BUNCH.r }] }] },
+
+  /* MERGE: each rose is cleared separately, so the filler fills the GAPS BETWEEN them and the two
+     masses interlock without either entering the other. `inner` carries a margin because a sprig
+     has width of its own. */
   'Posy, merged':   { roses: POSY,
-                      clouds: [{ spacing: 0.055, jitter: 0.9, lay: 22, layVary: 0.85,
-                                 height: 0.42, droop: 0.5, bury: 0.18,
-                                 /* The patch covers the whole bunch — nothing is cleared, so the
-                                    filler fills the gaps AND rides over the blooms. */
-                                 patches: POSY.map(r => ({ ...r, r: r.size * 2.3 })),
-                                 mergeOver: POSY.map(r => ({ ...r, r: r.size * 1.05,
-                                                             height: r.size * 0.85 })),
-                                 mergeKeep: 0.18 }] },
+                      clouds: [{ spacing: 0.045, jitter: 0.9, lay: 16, layVary: 0.85,
+                                 height: 0.44, droop: 0.45, bury: 0.18,
+                                 collars: POSY.map(r => ({ ...r, r: r.size * 2.0,
+                                                           inner: r.size * 1.18 })) }] },
   'Around roses':   { roses: ROSES,
                       clouds: [{ spacing: 0.055, jitter: 0.85, lay: 55, height: 0.19, droop: 0.5,
                                  collars: ROSES.map(r => ({ ...r, r: r.halo, inner: r.size * 0.92 })) }] },
