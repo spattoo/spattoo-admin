@@ -31,6 +31,14 @@ const SHAPES = {
 /* The board, drawn so the base ring has something to sit against. ⚠️ It is NOT what the ring is
    seated on: a band filling the board floods it and reads as flowers standing in card. The ring is
    the cake's own outline grown outward by `ringWidth` — see `outwardBand`. */
+/* Stand-ins for placed roses. The real ones are catalogue GLBs the designer places; this screen
+   only needs something the right size in the right spot to judge how the filler sits around one. */
+const ROSES = [
+  { u: 0.06, v: 0.62, size: 0.30, halo: 0.56 },
+  { u: 0.40, v: 0.55, size: 0.26, halo: 0.50 },
+  { u: 0.74, v: 0.66, size: 0.22, halo: 0.44 },
+];
+
 const BOARD = { round: { kind: 'round', radius: TIER.radius * 1.34 },
                 sheet: { kind: 'rect', halfW: 2.15, halfD: 1.55, cornerR: 0.25 } };
 
@@ -66,6 +74,12 @@ const LAYOUTS = {
   'Clumps':         { clouds: [{ spacing: 0.10, jitter: 0.8,
                                  patches: [{ u: 0.12, v: 0.55, r: 0.45 },
                                            { u: 0.62, v: 0.5, r: 0.38 }] }] },
+  /* ⚠️ A COLLAR IS A PATCH WITH A BITE OUT OF IT. Every florist-style reference puts gypsophila
+     AROUND the roses — hugging each and radiating outward, so the rose reads as placed rather than
+     stuck on. A plain patch would grow flowers through it. */
+  'Around roses':   { roses: ROSES,
+                      clouds: [{ spacing: 0.055, jitter: 0.85, lay: 55, height: 0.19, droop: 0.5,
+                                 collars: ROSES.map(r => ({ ...r, r: r.halo, inner: r.size * 0.92 })) }] },
 };
 
 export default function GypsophilaStudio() {
@@ -219,6 +233,17 @@ export default function GypsophilaStudio() {
                 : <boxGeometry args={[SHAPES.sheet.halfW * 2, TIER.height, SHAPES.sheet.halfD * 2]} />}
               <meshStandardMaterial color="#f6efe4" roughness={0.9} />
             </mesh>
+            {(L.roses ?? []).map((r, i) => {
+              const R = SHAPES[shapeKey].radius ?? 1;
+              return (
+                <mesh key={`rose${i}`} castShadow receiveShadow
+                      position={[r.v * R * Math.sin(r.u * Math.PI * 2), TOP_Y + r.size * 0.45,
+                                 r.v * R * Math.cos(r.u * Math.PI * 2)]}>
+                  <sphereGeometry args={[r.size, 20, 14]} />
+                  <meshStandardMaterial color="#9d1b2f" roughness={0.55} />
+                </mesh>
+              );
+            })}
             {L.clouds.map((c, i) => (
               <GypCloud key={i}
                 shape={c.on === 'foot' ? footBand : c.on === 'rim' ? rim.shape : SHAPES[shapeKey]}
