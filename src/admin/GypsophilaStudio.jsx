@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import {
   GypCloud, buildGypSprig, GYP_DEFAULTS, GYP_COLOURS, outwardBand, rimBand,
   SceneLights, SceneEnv, SceneBackground, DESIGNER_GROUND,
 } from '@spattoo/designer';
+import { useElementSave } from '../lib/useElementSave.js';
 
 /* ── Gypsophila (baby's breath) ──────────────────────────────────────────────────────────────────
  *
@@ -130,6 +131,7 @@ export default function GypsophilaStudio() {
   const [layout, setLayout] = useState('Rim and board');
   const [shapeKey, setShapeKey] = useState('round');
   const [stats, setStats] = useState(null);
+  const canvasWrapRef = useRef(null);
   const [p, setP] = useState({ ...GYP_DEFAULTS, ...GYP_COLOURS, spacing: 0.13, jitter: 0.7,
                               ringWidth: 0.18, rimIn: 0.14, rimOut: 0.10,
                               shadeVary: 0.35, spacingScale: 1 });
@@ -144,6 +146,52 @@ export default function GypsophilaStudio() {
   /* The rim band has two edges and both are controls: how far in it starts, how far out it reaches. */
   const rim = useMemo(() => rimBand(shape, { inn: p.rimIn, out: p.rimOut }),
                       [shape, p.rimIn, p.rimOut]);
+
+  /* ── Saving it as a catalogue row ──────────────────────────────────────────────────────────────
+   *
+   * ⚠️ UNTIL THIS EXISTED THERE WAS NO GYPSOPHILA. The designer reaches a procedural element
+   * through `placement_config.procedural`, which lives on a `cake_elements` row — and this studio
+   * had no Save at all, so no row could be made. The only gypsophila anywhere was the `e-gyp`
+   * fixture in core's `dev/designer-mobile.jsx`, which is a test fixture and reaches no baker.
+   * Migration 076 says the shape of this outright: the element TYPE comes from a migration, and the
+   * row is "empty until somebody presses Save". That is rule 3 — a studio whose output can only be
+   * pasted into code is not authoring, it is a mock-up.
+   *
+   * ⚠️ `surface_treatment`, THE TYPE GRASS ALREADY USES, and no new migration. 076 created it for
+   * exactly this: things that COVER a surface rather than standing on one. A type per decoration is
+   * the mistake 073 corrected, and gypsophila behaves identically to grass — which is what
+   * element_types records (065).
+   *
+   * ⚠️ `useElementSave`, NOT A SAVE OF ITS OWN. The drip studio wrote one and shipped two faults;
+   * grass inherited both by copy-paste. The hook is where that was fixed, so a third copy would be
+   * the third set of the same bugs: every press making another row, and no way to correct one.
+   */
+  const { editing, saveName, setSaveName, busy, msg, save, startNew } = useElementSave({
+    typeSlug: 'surface_treatment',
+    categorySlug: 'flowers-leaves',   // it is greenery; Finishes is dust and foil
+    canvasRef: canvasWrapRef,
+    /* ⚠️ THE SPRIG, AND ONLY THE SPRIG. Where it goes, how wide the band is, the two colours and
+       the shuffle are all on the baker's card — freezing them here would take away a per-cake
+       choice, which is the same line the grass row draws. What this row fixes is what the flower
+       IS: "White, fine" and "Dense pompom" are two rows over one generator. */
+    buildPayload: () => ({
+      allowed_zones: ['top_surface', 'side', 'board'],
+      default_color: p.bloom,
+      placement_config: {
+        procedural: 'gypsophila',
+        gyp: {
+          height: +p.height.toFixed(3), levels: p.levels, forks: p.forks,
+          spread: +p.spread.toFixed(3), shrink: +p.shrink.toFixed(3), droop: +p.droop.toFixed(3),
+          thickness: +p.thickness.toFixed(4),
+          florets: p.florets, floretSize: +p.floretSize.toFixed(4),
+          floretVary: +p.floretVary.toFixed(3),
+          ao: +p.ao.toFixed(2), aoFloor: +p.aoFloor.toFixed(2), shadeVary: +p.shadeVary.toFixed(2),
+          bloom: p.bloom, stem: p.stem,
+        },
+      },
+    }),
+    onHydrate: (el) => setP(o => ({ ...o, ...(el.placement_config?.gyp ?? {}) })),
+  });
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 56px)', fontFamily: "'Quicksand',sans-serif" }}>
@@ -237,6 +285,56 @@ export default function GypsophilaStudio() {
           ))}
         </Row>
 
+        {/* ── Save it as a catalogue row ────────────────────────────────────────────────────────
+            The look has been judged; this is the step that makes it a real element — searchable,
+            taggable, and changeable without a deploy. Until a row exists, gypsophila reaches no
+            baker at all: the designer finds a procedural element through `placement_config`, which
+            only a row has.
+            ⚠️ `Start a new element instead` is rendered WHEREVER Save is, and the pair is the
+            point: saving writes `?element=<id>` into the address, so a reload revises that row
+            rather than quietly adding a second. Without the way out, authoring a second variant
+            would overwrite the first — and an overwrite cannot be undone by deleting a duplicate. */}
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #f0e2e7' }}>
+          <div style={{ fontSize: 10.5, color: '#a98', marginBottom: 4, letterSpacing: 0.3 }}>
+            {editing ? 'EDITING A SAVED ELEMENT' : 'SAVE AS ELEMENT'}
+          </div>
+          {editing && (
+            <p style={{ fontSize: 10.5, color: '#9b5f72', margin: '0 0 6px', lineHeight: 1.45 }}>
+              Revising <b>{editing.name}</b> — saving replaces its settings and thumbnail rather
+              than adding another row.
+            </p>
+          )}
+          <input value={saveName} onChange={e => setSaveName(e.target.value)}
+            placeholder="e.g. Baby's breath, fine"
+            style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontFamily: 'inherit',
+              border: '1.5px solid #999', borderRadius: 7, boxSizing: 'border-box' }} />
+          <button onClick={save} disabled={busy || !saveName.trim()}
+            style={{ marginTop: 8, width: '100%', padding: '8px 0', fontSize: 12.5, borderRadius: 7,
+              border: '1.5px solid #1a1a1a', background: busy || !saveName.trim() ? '#e8e2e4' : '#1a1a1a',
+              color: busy || !saveName.trim() ? '#aaa' : '#fff', fontWeight: 700, fontFamily: 'inherit',
+              cursor: busy || !saveName.trim() ? 'default' : 'pointer' }}>
+            {busy ? (editing ? 'Updating...' : 'Saving...') : (editing ? 'Update this element' : 'Save to catalogue')}
+          </button>
+          {msg && (
+            <p style={{ fontSize: 11, marginTop: 8, lineHeight: 1.45, color: msg.ok ? '#2e7d32' : '#c0392b' }}>
+              {msg.text}
+            </p>
+          )}
+          {editing && (
+            <button onClick={startNew}
+              style={{ marginTop: 6, width: '100%', padding: '6px 0', fontSize: 11.5, borderRadius: 7,
+                border: '1.5px solid #C9C1B4', background: '#fff', color: '#5B6B60', fontWeight: 700,
+                fontFamily: 'inherit', cursor: 'pointer' }}>
+              Start a new element instead
+            </button>
+          )}
+          <p style={{ fontSize: 10.5, color: '#a98', marginTop: 8, lineHeight: 1.5 }}>
+            The SPRIG is what this row fixes. Where it goes, how wide the band is, the two colours
+            and the shuffle are the baker&rsquo;s — freezing them here would take away a per-cake
+            choice. &ldquo;Fine&rdquo; and &ldquo;dense pompom&rdquo; are two rows over one generator.
+          </p>
+        </div>
+
         <div style={{ marginTop: 14, padding: 10, background: '#fff', borderRadius: 8, fontSize: 11,
                       color: '#555', border: '1px solid #eee', lineHeight: 1.6 }}>
           {L.solo
@@ -248,7 +346,7 @@ export default function GypsophilaStudio() {
         </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+      <div ref={canvasWrapRef} style={{ flex: 1, minWidth: 0, position: 'relative' }}>
         {/* ⚠️ The designer's own rig and ground (INVARIANTS #17): a studio is lit like the cake it
             authors for, or every reading here describes a scene no customer sees. Keyed on the
             view because R3F reads `camera` once, at mount. */}
