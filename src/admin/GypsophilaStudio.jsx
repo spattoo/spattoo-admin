@@ -137,7 +137,18 @@ export default function GypsophilaStudio() {
                               shadeVary: 0.35, spacingScale: 1 });
   const set = (k) => (v) => setP(o => ({ ...o, [k]: v }));
   const L = LAYOUTS[layout];
-  const soloTris = useMemo(() => (buildGypSprig(p).index?.count ?? 0) / 3, [p]);
+  /* ⚠️ THE SPRIG IS BUILT AT THE TOP LEVEL, AND THAT IS NOT A TIDY-UP. It used to be built twice:
+     once here for the triangle count, and once inside the JSX as
+     `geometry={useMemo(() => buildGypSprig(p), [p])}` — a HOOK INSIDE A CONDITIONAL BRANCH. Picking
+     the "One sprig" arrangement rendered one more hook than the render before it, which is the one
+     thing React will not forgive: "Rendered more hooks than during the previous render", and the
+     whole screen threw. Every other arrangement worked, so nothing caught it — the build is green
+     on this, and so is every gate we have.
+     Building it here costs one sprig (~1,000 triangles) on arrangements that do not show it, which
+     is nothing, and the count now comes off the geometry that is actually drawn rather than a
+     second copy of it that could drift. */
+  const soloGeo = useMemo(() => buildGypSprig(p), [p]);
+  const soloTris = (soloGeo.index?.count ?? 0) / 3;
   /* ⚠️ A FRESH OBJECT LITERAL IS A NEW DEPENDENCY EVERY RENDER. `hole` feeds the seat memo inside
      GypCloud, so writing it inline rebuilt every seat on every frame and the board ring shook. */
   const shape = SHAPES[shapeKey];
@@ -358,7 +369,7 @@ export default function GypsophilaStudio() {
           <SceneEnv />
 
           {L.solo ? (
-            <mesh geometry={useMemo(() => buildGypSprig(p), [p])} scale={3.2} castShadow receiveShadow>
+            <mesh geometry={soloGeo} scale={3.2} castShadow receiveShadow>
               <meshStandardMaterial vertexColors color="#ffffff" roughness={0.78} metalness={0} />
             </mesh>
           ) : (<>
