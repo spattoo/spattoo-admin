@@ -88,16 +88,26 @@ const LAYOUTS = {
   /* ⚠️ A COLLAR IS A PATCH WITH A BITE OUT OF IT. Every florist-style reference puts gypsophila
      AROUND the roses — hugging each and radiating outward, so the rose reads as placed rather than
      stuck on. A plain patch would grow flowers through it. */
-  /* ⚠️ THE FILLER STANDS UP IN A POSY, AND IT IS BURIED DEEP. Laid over is right for a band hugging
-     an edge, where the sprigs rest on something; in a bunch they are pushed in BETWEEN the roses
-     and hold each other up. Seated shallow they stood as a palisade of green sticks under the
-     bunch — the "tree plantation" read again — so they are cut long enough to reach the blooms they
-     sit among and buried far enough that no stem shows. */
-  'Rose posy':      { roses: POSY,
+  /* ⚠️ SURROUNDING AND MERGING ARE TWO DIFFERENT ARRANGEMENTS, and the references show both.
+     Surrounding rings each bloom and keeps off it; merging makes the filler part of the same mass,
+     with sprays lying ACROSS the roses and poking out between them.
+     ⚠️ BURIED DEEP AND CUT LONG either way. A posy's filler is pushed down between the roses, so
+     what shows is the bloom mass at their shoulder and none of the stem — seated shallow it stood
+     as a palisade of green sticks under the bunch, the "tree plantation" read all over again. */
+  'Posy, surrounded': { roses: POSY,
                       clouds: [{ spacing: 0.05, jitter: 0.9, lay: 14, layVary: 0.8,
                                  height: 0.46, droop: 0.4, bury: 0.20,
                                  collars: POSY.map(r => ({ ...r, r: r.size * 2.3,
                                                            inner: r.size * 0.82 })) }] },
+  'Posy, merged':   { roses: POSY,
+                      clouds: [{ spacing: 0.055, jitter: 0.9, lay: 22, layVary: 0.85,
+                                 height: 0.42, droop: 0.5, bury: 0.18,
+                                 /* The patch covers the whole bunch — nothing is cleared, so the
+                                    filler fills the gaps AND rides over the blooms. */
+                                 patches: POSY.map(r => ({ ...r, r: r.size * 2.3 })),
+                                 mergeOver: POSY.map(r => ({ ...r, r: r.size * 1.05,
+                                                             height: r.size * 0.85 })),
+                                 mergeKeep: 0.18 }] },
   'Around roses':   { roses: ROSES,
                       clouds: [{ spacing: 0.055, jitter: 0.85, lay: 55, height: 0.19, droop: 0.5,
                                  collars: ROSES.map(r => ({ ...r, r: r.halo, inner: r.size * 0.92 })) }] },
