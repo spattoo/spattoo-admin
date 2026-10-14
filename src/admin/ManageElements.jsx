@@ -496,7 +496,7 @@ export default function ManageElements() {
   // Filter: how recently an element was added. "The ones I added today" is how a promotion is
   // actually thought about, and ticking ten boxes from memory is how one gets missed — a missing
   // element does not error in prod, it is simply absent until somebody notices.
-  const [addedWithin, setAddedWithin] = useState(0);   // days; 0 = any time
+  const [touchedWithin, setTouchedWithin] = useState(0);   // days; 0 = any time
   const [selectedId,   setSelectedId]   = useState(null);
   const [cloneMode,    setCloneMode]    = useState(false);   // "create a NEW element from these settings"
   /* The preview is a POPUP, not a band in the flow. It used to sit inline under the placement
@@ -1400,7 +1400,7 @@ export default function ManageElements() {
   const overCapCount = elements.filter(el => el.over_cap).length;
   // Cut once per render, not per element: `new Date()` inside the filter would make every row's
   // comparison a slightly different "now".
-  const addedSince = addedWithin ? Date.now() - addedWithin * 864e5 : null;
+  const touchedSince = touchedWithin ? Date.now() - touchedWithin * 864e5 : null;
 
   const grouped = elementTypes
     .map(et => ({
@@ -1409,10 +1409,24 @@ export default function ManageElements() {
         el.element_type_id === et.id &&
         (lowerQuery === '' || (el.name ?? '').toLowerCase().includes(lowerQuery)) &&
         (!overCapOnly || el.over_cap) &&
-        // No created_at (older rows predate the column being populated) → treated as OLD rather
-        // than recent. A filter that quietly includes unknowns is worse than one that excludes
-        // them: you would promote something you did not mean to and never see it in the list.
-        (!addedSince || (el.created_at ? new Date(el.created_at).getTime() >= addedSince : false))
+        /* ⚠️ TOUCHED, NOT CREATED. This compared `created_at` alone, so an element authored in
+           March and edited this morning read as months old and never appeared under "Today" — and
+           the question the filter is actually asked is "what have I changed recently". Sandeep:
+           *"they are displaying only based on the created date i think, it should also show based
+           on modified date."*
+           `updated_at` is the right field and a trustworthy one: migration 082 added it with a
+           BEFORE UPDATE trigger, for the stated reason that cake_elements is written from the
+           studios, this screen, the optimizer, the promotion flow and bulk imports, so "every
+           writer remembers" was never going to hold. It backfilled to `created_at`, and new rows
+           default to now(), so it is never older than the row itself.
+           ⚠️ `created_at` STAYS AS THE FALLBACK — not because the column should ever be null, but
+           because this screen should not break if it is. And an unknown is still treated as OLD:
+           a filter that quietly includes unknowns is worse than one that excludes them, since you
+           would promote something you did not mean to and never see it in the list. */
+        (!touchedSince || (() => {
+          const t = el.updated_at ?? el.created_at;
+          return t ? new Date(t).getTime() >= touchedSince : false;
+        })())
       ),
     }))
     .filter(g => g.items.length > 0);
@@ -1676,8 +1690,8 @@ export default function ManageElements() {
 
               <div style={s.recencyRow}>
                 {[[0, 'Any time'], [1, 'Today'], [7, '7 days'], [30, '30 days']].map(([days, label]) => (
-                  <button key={days} onClick={() => setAddedWithin(days)}
-                          style={{ ...s.recencyChip, ...(addedWithin === days ? s.recencyChipOn : {}) }}>
+                  <button key={days} onClick={() => setTouchedWithin(days)}
+                          style={{ ...s.recencyChip, ...(touchedWithin === days ? s.recencyChipOn : {}) }}>
                     {label}
                   </button>
                 ))}
