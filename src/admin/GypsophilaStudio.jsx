@@ -198,10 +198,33 @@ export default function GypsophilaStudio() {
           floretVary: +p.floretVary.toFixed(3),
           ao: +p.ao.toFixed(2), aoFloor: +p.aoFloor.toFixed(2), shadeVary: +p.shadeVary.toFixed(2),
           bloom: p.bloom, stem: p.stem,
+          /* ── How it SITS on each surface, as opposed to what the sprig IS ────────────────────
+           * Core seeds all four sets in `GYP_PLACEMENTS` and lays whatever is here over the top
+           * (`gypPlacement`). Until this existed the tier card held those numbers itself, so an
+           * admin could not change how a filler arrives on a rim without a deploy — root CLAUDE.md
+           * rule 3 — and "White, fine" and "Dense pompom" could differ only in the sprig.
+           *
+           * ⚠️ ONLY WHAT THIS SCREEN ACTUALLY TUNES. The studio has dials for the rim's two reach
+           * values and the board ring's width, and those are per-zone by nature, so they belong
+           * here. Writing out spacing, lay and bury as well would be this screen CLAIMING to author
+           * numbers nobody can see or change on it — a row asserting a value it never offered is
+           * worse than a row that is quiet and lets core's seed stand. When the studio grows
+           * per-zone controls, they are added here and core's seed stops being reached. */
+          zones: {
+            rim:   { rimIn: +(p.rimIn ?? 0.14).toFixed(3), rimOut: +(p.rimOut ?? 0.10).toFixed(3) },
+            board: { ringWidth: +(p.ringWidth ?? 0.18).toFixed(3) },
+          },
         },
       },
     }),
-    onHydrate: (el) => setP(o => ({ ...o, ...(el.placement_config?.gyp ?? {}) })),
+    /* ⚠️ THE ZONES COME BACK OUT FLAT, because that is how this screen's sliders hold them — one
+       `rimIn`, one `ringWidth`. Spreading the nested block in raw would leave `zones` sitting in
+       the slider state and get written back as a `zones.zones` on the next save. */
+    onHydrate: (el) => setP((o) => {
+      const g = el.placement_config?.gyp ?? {};
+      const { zones, ...sprig } = g;
+      return { ...o, ...sprig, ...(zones?.rim ?? {}), ...(zones?.board ?? {}) };
+    }),
   });
 
   return (
