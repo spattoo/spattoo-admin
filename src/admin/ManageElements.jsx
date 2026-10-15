@@ -481,6 +481,12 @@ function Group({ title, sub, children }) {
   );
 }
 
+/* The verge anchors core understands (placement.js / CakeCanvas). ⚠️ READ BACK AGAINST THIS LIST,
+   never against one value: this was `seat === 'base' ? 'base' : 'center'`, which silently rewrote
+   any other anchor to `center` on open — so a row authored as `hang` would show as center and be
+   saved back as center by the next unrelated edit. */
+const VERGE_SEATS = ['center', 'base', 'hang'];
+
 export default function ManageElements() {
   const [elementTypes, setElementTypes] = useState([]);
   // Browsing category (migration 065). This screen is where the 86 backfilled elements get their
@@ -828,7 +834,7 @@ export default function ManageElements() {
     loadClusterFromPc(pc);
     loadPrintFinishFromPc(pc);
     loadReliefFromPc(pc);
-    setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
+    setVergeSeat(VERGE_SEATS.includes(pc.verge?.seat) ? pc.verge.seat : 'center');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
@@ -1083,7 +1089,7 @@ export default function ManageElements() {
     loadClusterFromPc(pc);
     loadPrintFinishFromPc(pc);
     loadReliefFromPc(pc);
-    setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
+    setVergeSeat(VERGE_SEATS.includes(pc.verge?.seat) ? pc.verge.seat : 'center');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
@@ -1133,7 +1139,7 @@ export default function ManageElements() {
   // → '' so patchPc drops the key and the designer uses its defaults (angle_deg 35 / 0 offsets).
   const vergeDesc = (seat = vergeSeat, a = vergeAngle, y = vergeYOffset, ei = vergeEdgeInset) => {
     const v = {};
-    if (seat === 'base') v.seat = 'base';   // default 'center' omitted (the renderer default)
+    if (seat !== 'center') v.seat = seat;   // default 'center' omitted (the renderer default)
     if (a  !== '') v.angle_deg  = parseFloat(a);
     if (y  !== '') v.y_offset   = parseFloat(y);
     if (ei !== '') v.edge_inset = parseFloat(ei);
@@ -2757,6 +2763,7 @@ export default function ManageElements() {
                               onChange={e => { setVergeSeat(e.target.value); patchPc({ verge: vergeDesc(e.target.value) }); }}>
                               <option value="center">center — mid-spine rests on the rim edge (drapes over the lip)</option>
                               <option value="base">base — body base sits on the top surface, leans from there</option>
+                              <option value="hang">hang — TOP meets the lip, body falls down the outside (a ribbon)</option>
                             </select>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -2772,7 +2779,7 @@ export default function ManageElements() {
                               onChange={e => { setVergeEdgeInset(e.target.value); patchPc({ verge: vergeDesc(vergeSeat, vergeAngle, vergeYOffset, e.target.value) }); }} />
                           </div>
                           <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                            Verge reclines radially outward over the rim (butterflies, flowers). Seat = center (mid-spine on the lip, body drapes over) or base (body base on the top). Lean angle° (blank = 35) is the default Tilt, plus an optional height nudge and edge inset (+ pulls in, − pushes out over the lip).
+                            Verge reclines radially outward over the rim (butterflies, flowers). Seat = center (mid-spine on the lip, body drapes over), base (body base on the top), or hang (the model's TOP meets the lip and the body falls down the OUTSIDE — a ribbon tied at the rim; the tilt pivots at that contact, so the tails swing through the air instead of into the wall). Lean angle° (blank = 35) is the default Tilt, plus a height nudge — on a hang seat that is how far the knot sits above the rim. ⚠️ Edge inset is a SEED only: a drag round the rim discards it, and a proud piece now stands off on its own measured depth, so leave it at 0.
                           </div>
                         </>
                       )}
