@@ -17,7 +17,7 @@ import DecorationGuidePanel from './DecorationGuidePanel.jsx';
 import Modal from './Modal.jsx';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
-import { statsFromElement } from '../lib/glb.js';
+import { statsFromElement, readGlbParts, modelFromParts } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
 import { serializeZone, zoneValueMode, zoneValueSeat, zoneValueAlt, zoneAltMode, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
@@ -697,6 +697,12 @@ export default function ManageElements() {
   const [frontConfirmed,     setFrontConfirmed]     = useState(false);
   const [rotationDirty,      setRotationDirty]      = useState(false);
   const [calibratorJson, setCalibratorJson] = useState('');
+  /* Part groups read back out of the element's own GLB — see lib/glb.js readGlbParts. `editable`
+     starts at whatever the Recompose Studio recorded in the file and is a tick here, because the
+     studio's answer was given before the element existed and may not be the one wanted now. */
+  const [glbParts,  setGlbParts]  = useState(null);   // null = not read yet
+  const [partsBusy, setPartsBusy] = useState(false);
+  const [partsMsg,  setPartsMsg]  = useState(null);
   const camRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState(null);
@@ -838,6 +844,7 @@ export default function ManageElements() {
     setGlbEnvPreset('none');
     setGlbRotation(rotationToDegrees(pc));   // degrees for the UI; converts legacy radians rows
     setCalibratorJson('');
+    setGlbParts(null); setPartsMsg(null);
     setFrontConfirmed(false);
     setRotationDirty(false);
     setDescription(el.description ?? '');
@@ -1386,6 +1393,36 @@ export default function ManageElements() {
     /\.(glb|gltf)(\?|$)/i.test(selectedEl.image_url ?? '') ||
     /\/3D\//i.test(selectedEl.image_url ?? '')
   );
+  /* Read the element's part groups back out of its own GLB.
+     ⚠️ Why this exists: RecomposeEditor writes `placement_config._model` ONLY when it creates a new
+     element. Recompose a model, download it and upload it onto a row that already exists and the
+     groups are lost — the customer then gets one flat colour over every part, with no way to author
+     the controls back short of hand-writing the JSON.
+     The GLB is the source of truth (lib/glb.js explains what it carries), and this screen NEVER
+     writes to the row: the reviewed `_model` lands in the merge box and MERGE stays a second press. */
+  async function readPartsFromGlb() {
+    if (!selectedEl?.image_url) return;
+    setPartsBusy(true); setPartsMsg(null); setGlbParts(null);
+    try {
+      const res = await fetch(selectedEl.image_url);
+      if (!res.ok) throw new Error(`Couldn't fetch the GLB (${res.status})`);
+      const { parts, source, meshCount } = readGlbParts(await res.arrayBuffer());
+      if (!parts.length) {
+        setPartsMsg({ ok: false, text: `No tagged parts in this GLB — ${meshCount} mesh${meshCount === 1 ? '' : 'es'}, none carrying a part group. Only a GLB exported from the Recompose Studio with NAMED groups carries them.` });
+        return;
+      }
+      setGlbParts(parts);
+      setPartsMsg({ ok: true, text: source === 'segments'
+        ? `${parts.length} parts, exactly as the Recompose Studio recorded them.`
+        : `${parts.length} parts, rebuilt from the per-mesh tags. This GLB carries no part list, so the labels are mesh names and each colour is read off the baked material.` });
+    } catch (e) {
+      setPartsMsg({ ok: false, text: e.message });
+    } finally { setPartsBusy(false); }
+  }
+
+  // What those ticks would author: one customer-facing colour control per named, ticked group.
+  const partModel = useMemo(() => (glbParts ? modelFromParts(glbParts) : null), [glbParts]);
+
   const selectedSlug = elementTypes.find(t => t.id === elementTypeId)?.slug;
   // cream_piping = a building-block GLB; piping_pattern = a fileless element referencing
   // blocks via placement_config.parts. Block-only tooling (GLB upload, orientation, alt
@@ -2932,6 +2969,74 @@ export default function ManageElements() {
                   </label>
 
                   <>
+                      {/* ── Part groups read out of the GLB ──────────────────────────────────────
+                          Sits directly above the merge box it fills (INVARIANTS #11): the ticks and
+                          the JSON they produce are on screen together. */}
+                      {isGlb && (
+                        <div style={{ marginBottom: 12, border: '1.5px solid #C5D4C8', borderRadius: 10, padding: 10, background: '#F6F9F6' }}>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); readPartsFromGlb(); }}
+                              disabled={partsBusy}
+                              style={{ ...s.smallBtn, marginBottom: 0, background: '#3D5A44', color: '#fff', cursor: partsBusy ? 'wait' : 'pointer' }}
+                            >
+                              {partsBusy ? 'Reading…' : 'Read parts from GLB'}
+                            </button>
+                            <span style={{ flex: '1 1 180px', minWidth: 0, fontSize: 11, fontWeight: 600, color: '#6B8C74' }}>
+                              Recovers the recolourable part groups the Recompose Studio wrote into the file.
+                            </span>
+                          </div>
+
+                          {partsMsg && (
+                            <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: partsMsg.ok ? '#3D5A44' : '#c00' }}>{partsMsg.text}</div>
+                          )}
+
+                          {glbParts && (
+                            <>
+                              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {glbParts.map((p, i) => (
+                                  <label
+                                    key={p.id || i}
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, background: '#fff', border: '1px solid #DCE6DE', fontSize: 12, fontWeight: 600, color: '#2C4433', cursor: p.textured ? 'not-allowed' : 'pointer', opacity: p.textured ? 0.55 : 1 }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={!!p.editable && !p.textured}
+                                      disabled={p.textured}
+                                      onChange={e => { const on = e.target.checked; setGlbParts(cur => cur.map((q, j) => (j === i ? { ...q, editable: on } : q))); }}
+                                    />
+                                    <span style={{ flex: '0 0 auto', width: 16, height: 16, borderRadius: 4, background: p.color, border: '1px solid rgba(0,0,0,0.15)' }} />
+                                    <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {p.label}{p.group && p.group !== p.label ? ` · ${p.group}` : ''}{!p.group ? ' · no group name' : ''}
+                                    </span>
+                                    <span style={{ flex: '0 0 auto', fontFamily: 'monospace', fontSize: 10, color: '#6B8C74' }}>{p.color}</span>
+                                  </label>
+                                ))}
+                              </div>
+
+                              <div style={{ marginTop: 8, fontSize: 11, lineHeight: 1.5, color: '#6B8C74', fontWeight: 600 }}>
+                                A tick is a colour the customer may change. Unticked parts keep the colour baked into the model.
+                                {glbParts.some(p => p.textured) && <> <br />Greyed parts carry a texture and cannot be recoloured whatever is authored — the designer leaves a textured material alone.</>}
+                                {glbParts.some(p => p.editable && !p.group) && <> <br />A part with no group name cannot become a control — give it a group in the Recompose Studio and export again.</>}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setCalibratorJson(JSON.stringify({ _model: partModel }, null, 2)); }}
+                                disabled={!partModel?.groups.length}
+                                style={{ ...s.smallBtn, marginTop: 10, marginBottom: 0, width: '100%', background: partModel?.groups.length ? '#E8EDE9' : '#F0F3F0', color: partModel?.groups.length ? '#3D5A44' : '#9BB5A2', cursor: partModel?.groups.length ? 'pointer' : 'not-allowed' }}
+                              >
+                                {partModel?.groups.length
+                                  ? `Put _model in the merge box — ${partModel.groups.length} colour control${partModel.groups.length === 1 ? '' : 's'}`
+                                  : 'Tick at least one named part'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+
                       <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', flexWrap: 'wrap' }}>
                         {/* Left — paste to merge */}
                         <div style={{ flex: '1 1 240px', minWidth: 0, display: 'flex', flexDirection: 'column' }}>

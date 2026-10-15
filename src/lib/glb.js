@@ -147,3 +147,125 @@ export function toStatColumns(stats) {
     over_cap:          stats.overCap,
   };
 }
+
+// ── Part groups the GLB already knows about ─────────────────────────────────────────────────────
+/* Recover `placement_config._model` from the FILE, for the recompose → download → attach-to-an-
+ * existing-element path. RecomposeEditor only writes `_model` when it CREATES an element
+ * (createGlobalElement), so a GLB recomposed and then uploaded onto a row that already exists loses
+ * its part groups and the customer gets one flat colour.
+ *
+ * Nothing is inferred. The Recompose Studio records the answer twice and both copies travel inside
+ * the file (GLTFExporter writes `mesh.userData` to a node's glTF `extras`):
+ *   • the ROOT node's `extras.segments` — the whole part list: id, label, default hex, finish,
+ *     group, and `editable`, which is the tick the admin set in the studio's editable-groups grid
+ *   • each MESH node's `extras` — { segment, group, editable }, the copy the renderer matches on
+ *     (CakeCanvas recolours a mesh by `userData.group`)
+ *
+ * Only the container's JSON chunk is read, so no geometry is decoded: a draco- or meshopt-compressed
+ * file costs nothing here and needs no decoder.
+ */
+
+// The JSON chunk of a .glb, or the whole document of a .gltf. Chunk lengths are 4-byte aligned by
+// spec (JSON padded with spaces), so walking by the declared length is enough.
+export function readGltfJson(buffer) {
+  const view = new DataView(buffer);
+  if (view.byteLength >= 4 && view.getUint32(0, true) === 0x46546C67) {     // 'glTF'
+    let off = 12;
+    while (off + 8 <= view.byteLength) {
+      const len = view.getUint32(off, true), type = view.getUint32(off + 4, true);
+      if (type === 0x4E4F534A) {                                            // 'JSON'
+        return JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, off + 8, len)));
+      }
+      off += 8 + len;
+    }
+    throw new Error('No JSON chunk in this GLB');
+  }
+  return JSON.parse(new TextDecoder().decode(buffer));                      // plain .gltf
+}
+
+// glTF stores baseColorFactor LINEAR; a hex an admin types (and `_model.groups[].default`) is sRGB.
+function lin2srgb(c) {
+  const v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  return Math.max(0, Math.min(255, Math.round(v * 255)));
+}
+function hexOfMaterial(mat) {
+  const f = mat?.pbrMetallicRoughness?.baseColorFactor;
+  if (!Array.isArray(f)) return '#ffffff';
+  return '#' + f.slice(0, 3).map(c => lin2srgb(c).toString(16).padStart(2, '0')).join('');
+}
+const FINISH_BY_ROUGH = [[0.85, 'matte'], [0.5, 'satin'], [0.25, 'glossy']];
+function finishOfMaterial(mat) {
+  const pbr = mat?.pbrMetallicRoughness ?? {};
+  if ((pbr.metallicFactor ?? 1) > 0.5) return 'metal';
+  const r = pbr.roughnessFactor ?? 1;
+  return FINISH_BY_ROUGH.reduce((best, [v, k]) => Math.abs(r - v) < Math.abs(r - best[0]) ? [v, k] : best,
+                                [Infinity, 'matte'])[1];
+}
+
+/* Every tagged part of a GLB, as the file records it.
+ * → { parts: [{ id, label, group, editable, color, finish, textured }], source, meshCount }
+ *   `source` is 'segments' when the studio's own part list was found, 'nodes' when it was rebuilt
+ *   from the per-mesh tags, and null when nothing in the file is tagged at all.
+ *   `textured` means that part's material carries a baseColorTexture — the renderer skips
+ *   `mat.color` whenever `mat.map` is set, so such a part cannot be recoloured whatever is authored.
+ */
+export function readGlbParts(buffer) {
+  const json = readGltfJson(buffer);
+  const nodes = json.nodes ?? [], meshes = json.meshes ?? [], materials = json.materials ?? [];
+  const meshCount = nodes.filter(n => n.mesh != null).length;
+
+  // What each tagged mesh node says about itself, keyed by segment id (falling back to its name).
+  const tagged = nodes
+    .filter(n => n.mesh != null && (n.extras?.group != null || n.extras?.segment != null))
+    .map(n => {
+      const mats = (meshes[n.mesh]?.primitives ?? []).map(p => materials[p.material]).filter(Boolean);
+      return {
+        id:       n.extras.segment ?? n.name ?? '',
+        label:    n.name || n.extras.segment || '(unnamed)',
+        group:    (n.extras.group ?? '').trim(),
+        editable: !!n.extras.editable,
+        color:    hexOfMaterial(mats[0]),
+        finish:   finishOfMaterial(mats[0]),
+        textured: mats.some(m => !!m.pbrMetallicRoughness?.baseColorTexture),
+      };
+    });
+
+  // The studio's own list wins where it exists — it carries the label and hex the admin chose, not
+  // whatever survived the exporter. Texture and material facts still come from the node it matches.
+  const recorded = nodes.find(n => Array.isArray(n.extras?.segments))?.extras.segments;
+  if (recorded?.length) {
+    const byId = new Map(tagged.map(t => [t.id, t]));
+    return {
+      source: 'segments',
+      meshCount,
+      parts: recorded.map(s => ({
+        id:       s.id,
+        label:    s.label || s.id,
+        group:    (s.group ?? '').trim(),
+        editable: !!s.editable,
+        color:    s.default || byId.get(s.id)?.color || '#ffffff',
+        finish:   s.finish || byId.get(s.id)?.finish || 'matte',
+        textured: !!byId.get(s.id)?.textured,
+      })),
+    };
+  }
+  return { source: tagged.length ? 'nodes' : null, meshCount, parts: tagged };
+}
+
+/* The `_model` block to merge into placement_config. `editable` is taken from the parts passed in —
+ * so an admin re-ticking a part in Manage Elements overrides what the studio recorded — and the
+ * groups are collapsed by key exactly as RecomposeEditor.buildPartsBuffer does: one customer-facing
+ * control per distinct NAMED editable group, its default being the first member's colour. */
+export function modelFromParts(parts) {
+  const groups = [], seen = new Set();
+  parts.forEach(p => {
+    if (!p.group || !p.editable || seen.has(p.group)) return;
+    seen.add(p.group);
+    groups.push({ key: p.group, label: p.group, editable: true, default: p.color });
+  });
+  return {
+    groups,
+    segments: parts.map(p => ({ id: p.id, label: p.label, default: p.color, finish: p.finish, group: p.group, editable: !!p.editable })),
+    source: 'glb-read',
+  };
+}
