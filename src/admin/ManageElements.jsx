@@ -17,7 +17,7 @@ import DecorationGuidePanel from './DecorationGuidePanel.jsx';
 import Modal from './Modal.jsx';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
-import { statsFromElement } from '../lib/glb.js';
+import { statsFromElement, readGlbParts, modelFromParts } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
 import { serializeZone, zoneValueMode, zoneValueSeat, zoneValueAlt, zoneAltMode, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
@@ -481,6 +481,12 @@ function Group({ title, sub, children }) {
   );
 }
 
+/* The verge anchors core understands (placement.js / CakeCanvas). ⚠️ READ BACK AGAINST THIS LIST,
+   never against one value: this was `seat === 'base' ? 'base' : 'center'`, which silently rewrote
+   any other anchor to `center` on open — so a row authored as `hang` would show as center and be
+   saved back as center by the next unrelated edit. */
+const VERGE_SEATS = ['center', 'base', 'hang'];
+
 export default function ManageElements() {
   const [elementTypes, setElementTypes] = useState([]);
   // Browsing category (migration 065). This screen is where the 86 backfilled elements get their
@@ -496,7 +502,7 @@ export default function ManageElements() {
   // Filter: how recently an element was added. "The ones I added today" is how a promotion is
   // actually thought about, and ticking ten boxes from memory is how one gets missed — a missing
   // element does not error in prod, it is simply absent until somebody notices.
-  const [addedWithin, setAddedWithin] = useState(0);   // days; 0 = any time
+  const [touchedWithin, setTouchedWithin] = useState(0);   // days; 0 = any time
   const [selectedId,   setSelectedId]   = useState(null);
   const [cloneMode,    setCloneMode]    = useState(false);   // "create a NEW element from these settings"
   /* The preview is a POPUP, not a band in the flow. It used to sit inline under the placement
@@ -653,6 +659,15 @@ export default function ManageElements() {
   const [vergeAngle,     setVergeAngle]     = useState('');   // verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]   = useState('');   // verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset] = useState('');   // verge.edge_inset (blank = 0)
+  /* Where a MESSAGE may be written ON this element (placement_config.text_path). Off = absent, and
+     absent is what every element has: the baker is then offered nothing, rather than a control that
+     does nothing. The shape values are all RELATIVE (a fraction of a band, never a position) —
+     see spattoo-core src/designer/geometry/textPath.js for why the path itself is derived. */
+  const [textPathKind,  setTextPathKind]  = useState('');     // '' = no text on this element
+  const [textPathBand,  setTextPathBand]  = useState('mid');  // inner | mid | outer | an index
+  const [textPathInset, setTextPathInset] = useState('');     // off the rope's centreline (0 = on it)
+  const [textPathSpan,  setTextPathSpan]  = useState('');     // share of the arch a line may use
+  const [textPathSize,  setTextPathSize]  = useState('');     // cap height, fraction of the stack
   // Insert (base sunk into the surface at an angle — chocolate bars, sparklers) is a per-zone
   // MODIFIER now (rides `placement_config[zone].insert`, like `seat`), NOT a global position. One
   // entry per zone that has it on: { [zone]: { depth?, lean_deg?, jitter_deg? } } ({} = on, defaults).
@@ -697,6 +712,12 @@ export default function ManageElements() {
   const [frontConfirmed,     setFrontConfirmed]     = useState(false);
   const [rotationDirty,      setRotationDirty]      = useState(false);
   const [calibratorJson, setCalibratorJson] = useState('');
+  /* Part groups read back out of the element's own GLB — see lib/glb.js readGlbParts. `editable`
+     starts at whatever the Recompose Studio recorded in the file and is a tick here, because the
+     studio's answer was given before the element existed and may not be the one wanted now. */
+  const [glbParts,  setGlbParts]  = useState(null);   // null = not read yet
+  const [partsBusy, setPartsBusy] = useState(false);
+  const [partsMsg,  setPartsMsg]  = useState(null);
   const camRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState(null);
@@ -822,7 +843,12 @@ export default function ManageElements() {
     loadClusterFromPc(pc);
     loadPrintFinishFromPc(pc);
     loadReliefFromPc(pc);
-    setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
+    setVergeSeat(VERGE_SEATS.includes(pc.verge?.seat) ? pc.verge.seat : 'center');
+    setTextPathKind(pc.text_path?.kind ?? '');
+    setTextPathBand(pc.text_path?.band != null ? String(pc.text_path.band) : 'mid');
+    setTextPathInset(pc.text_path?.inset != null ? String(pc.text_path.inset) : '');
+    setTextPathSpan(pc.text_path?.span != null ? String(pc.text_path.span) : '');
+    setTextPathSize(pc.text_path?.size != null ? String(pc.text_path.size) : '');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
@@ -838,6 +864,7 @@ export default function ManageElements() {
     setGlbEnvPreset('none');
     setGlbRotation(rotationToDegrees(pc));   // degrees for the UI; converts legacy radians rows
     setCalibratorJson('');
+    setGlbParts(null); setPartsMsg(null);
     setFrontConfirmed(false);
     setRotationDirty(false);
     setDescription(el.description ?? '');
@@ -1076,7 +1103,12 @@ export default function ManageElements() {
     loadClusterFromPc(pc);
     loadPrintFinishFromPc(pc);
     loadReliefFromPc(pc);
-    setVergeSeat(pc.verge?.seat === 'base' ? 'base' : 'center');
+    setVergeSeat(VERGE_SEATS.includes(pc.verge?.seat) ? pc.verge.seat : 'center');
+    setTextPathKind(pc.text_path?.kind ?? '');
+    setTextPathBand(pc.text_path?.band != null ? String(pc.text_path.band) : 'mid');
+    setTextPathInset(pc.text_path?.inset != null ? String(pc.text_path.inset) : '');
+    setTextPathSpan(pc.text_path?.span != null ? String(pc.text_path.span) : '');
+    setTextPathSize(pc.text_path?.size != null ? String(pc.text_path.size) : '');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
@@ -1126,11 +1158,24 @@ export default function ManageElements() {
   // → '' so patchPc drops the key and the designer uses its defaults (angle_deg 35 / 0 offsets).
   const vergeDesc = (seat = vergeSeat, a = vergeAngle, y = vergeYOffset, ei = vergeEdgeInset) => {
     const v = {};
-    if (seat === 'base') v.seat = 'base';   // default 'center' omitted (the renderer default)
+    if (seat !== 'center') v.seat = seat;   // default 'center' omitted (the renderer default)
     if (a  !== '') v.angle_deg  = parseFloat(a);
     if (y  !== '') v.y_offset   = parseFloat(y);
     if (ei !== '') v.edge_inset = parseFloat(ei);
     return Object.keys(v).length ? v : '';
+  };
+  /* ⚠️ ONLY WHAT THE ADMIN ACTUALLY SET. Every key here has a seed in core, and writing a value that
+     merely matches the seed freezes it — a later tuning of the default would not reach this row.
+     Same rule the verge builder above follows. */
+  const textPathDesc = (kind = textPathKind, band = textPathBand,
+                        inset = textPathInset, span = textPathSpan, size = textPathSize) => {
+    if (!kind) return '';                       // '' → patchPc removes text_path entirely
+    const v = { kind };
+    if (band && band !== 'mid') v.band = /^\d+$/.test(band) ? parseInt(band, 10) : band;
+    if (inset !== '') v.inset = parseFloat(inset);
+    if (span  !== '') v.span  = parseFloat(span);
+    if (size  !== '') v.size  = parseFloat(size);
+    return v;
   };
   // Build the placement_config.scale patch from the min/max inputs: an object with only the set
   // keys, or '' so patchPc removes `scale` entirely when all are blank. The sibling fields' current
@@ -1386,6 +1431,36 @@ export default function ManageElements() {
     /\.(glb|gltf)(\?|$)/i.test(selectedEl.image_url ?? '') ||
     /\/3D\//i.test(selectedEl.image_url ?? '')
   );
+  /* Read the element's part groups back out of its own GLB.
+     ⚠️ Why this exists: RecomposeEditor writes `placement_config._model` ONLY when it creates a new
+     element. Recompose a model, download it and upload it onto a row that already exists and the
+     groups are lost — the customer then gets one flat colour over every part, with no way to author
+     the controls back short of hand-writing the JSON.
+     The GLB is the source of truth (lib/glb.js explains what it carries), and this screen NEVER
+     writes to the row: the reviewed `_model` lands in the merge box and MERGE stays a second press. */
+  async function readPartsFromGlb() {
+    if (!selectedEl?.image_url) return;
+    setPartsBusy(true); setPartsMsg(null); setGlbParts(null);
+    try {
+      const res = await fetch(selectedEl.image_url);
+      if (!res.ok) throw new Error(`Couldn't fetch the GLB (${res.status})`);
+      const { parts, source, meshCount } = readGlbParts(await res.arrayBuffer());
+      if (!parts.length) {
+        setPartsMsg({ ok: false, text: `No tagged parts in this GLB — ${meshCount} mesh${meshCount === 1 ? '' : 'es'}, none carrying a part group. Only a GLB exported from the Recompose Studio with NAMED groups carries them.` });
+        return;
+      }
+      setGlbParts(parts);
+      setPartsMsg({ ok: true, text: source === 'segments'
+        ? `${parts.length} parts, exactly as the Recompose Studio recorded them.`
+        : `${parts.length} parts, rebuilt from the per-mesh tags. This GLB carries no part list, so the labels are mesh names and each colour is read off the baked material.` });
+    } catch (e) {
+      setPartsMsg({ ok: false, text: e.message });
+    } finally { setPartsBusy(false); }
+  }
+
+  // What those ticks would author: one customer-facing colour control per named, ticked group.
+  const partModel = useMemo(() => (glbParts ? modelFromParts(glbParts) : null), [glbParts]);
+
   const selectedSlug = elementTypes.find(t => t.id === elementTypeId)?.slug;
   // cream_piping = a building-block GLB; piping_pattern = a fileless element referencing
   // blocks via placement_config.parts. Block-only tooling (GLB upload, orientation, alt
@@ -1400,7 +1475,7 @@ export default function ManageElements() {
   const overCapCount = elements.filter(el => el.over_cap).length;
   // Cut once per render, not per element: `new Date()` inside the filter would make every row's
   // comparison a slightly different "now".
-  const addedSince = addedWithin ? Date.now() - addedWithin * 864e5 : null;
+  const touchedSince = touchedWithin ? Date.now() - touchedWithin * 864e5 : null;
 
   const grouped = elementTypes
     .map(et => ({
@@ -1409,10 +1484,24 @@ export default function ManageElements() {
         el.element_type_id === et.id &&
         (lowerQuery === '' || (el.name ?? '').toLowerCase().includes(lowerQuery)) &&
         (!overCapOnly || el.over_cap) &&
-        // No created_at (older rows predate the column being populated) → treated as OLD rather
-        // than recent. A filter that quietly includes unknowns is worse than one that excludes
-        // them: you would promote something you did not mean to and never see it in the list.
-        (!addedSince || (el.created_at ? new Date(el.created_at).getTime() >= addedSince : false))
+        /* ⚠️ TOUCHED, NOT CREATED. This compared `created_at` alone, so an element authored in
+           March and edited this morning read as months old and never appeared under "Today" — and
+           the question the filter is actually asked is "what have I changed recently". Sandeep:
+           *"they are displaying only based on the created date i think, it should also show based
+           on modified date."*
+           `updated_at` is the right field and a trustworthy one: migration 082 added it with a
+           BEFORE UPDATE trigger, for the stated reason that cake_elements is written from the
+           studios, this screen, the optimizer, the promotion flow and bulk imports, so "every
+           writer remembers" was never going to hold. It backfilled to `created_at`, and new rows
+           default to now(), so it is never older than the row itself.
+           ⚠️ `created_at` STAYS AS THE FALLBACK — not because the column should ever be null, but
+           because this screen should not break if it is. And an unknown is still treated as OLD:
+           a filter that quietly includes unknowns is worse than one that excludes them, since you
+           would promote something you did not mean to and never see it in the list. */
+        (!touchedSince || (() => {
+          const t = el.updated_at ?? el.created_at;
+          return t ? new Date(t).getTime() >= touchedSince : false;
+        })())
       ),
     }))
     .filter(g => g.items.length > 0);
@@ -1676,8 +1765,8 @@ export default function ManageElements() {
 
               <div style={s.recencyRow}>
                 {[[0, 'Any time'], [1, 'Today'], [7, '7 days'], [30, '30 days']].map(([days, label]) => (
-                  <button key={days} onClick={() => setAddedWithin(days)}
-                          style={{ ...s.recencyChip, ...(addedWithin === days ? s.recencyChipOn : {}) }}>
+                  <button key={days} onClick={() => setTouchedWithin(days)}
+                          style={{ ...s.recencyChip, ...(touchedWithin === days ? s.recencyChipOn : {}) }}>
                     {label}
                   </button>
                 ))}
@@ -2698,6 +2787,47 @@ export default function ManageElements() {
                             onChange={e => { setHugFill(e.target.value); patchPc({ hug_fill: numPatch(e.target.value) }); }} />
                         </div>
                       )}
+                      {/* ── Text written ON this element ───────────────────────────────────────
+                          ⚠️ THE PATH IS NOT AUTHORED HERE, AND THAT IS THE POINT. A rainbow's arch
+                          is already a function of its own numbers, and it SHRINKS to fit a small
+                          cake — a slot placed by hand would be left behind by a band count, an
+                          inner radius, a size, and silently by the shrink. What this authors is
+                          which rope the line rides and how big it is, all as fractions. */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Text on it</span>
+                        <select style={{ ...s.select, flex: 1 }} value={textPathKind}
+                          onChange={e => { setTextPathKind(e.target.value); patchPc({ text_path: textPathDesc(e.target.value) }); }}>
+                          <option value="">no — a message cannot be written on this element</option>
+                          <option value="arch">arch — along the curve of the bands (fondant rainbow)</option>
+                        </select>
+                      </div>
+                      {textPathKind === 'arch' && (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Rides</span>
+                            <select style={{ ...s.select, flex: 1 }} value={textPathBand}
+                              onChange={e => { setTextPathBand(e.target.value); patchPc({ text_path: textPathDesc(textPathKind, e.target.value) }); }}>
+                              <option value="mid">middle of the stack — centred on the arch's face</option>
+                              <option value="inner">innermost rope — inside the hole</option>
+                              <option value="outer">outermost rope — over the top</option>
+                            </select>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <input type="number" step="0.05" style={{ ...s.input, flex: 1 }} value={textPathInset}
+                              placeholder="off the rope — 0 = on it, + outward"
+                              onChange={e => { setTextPathInset(e.target.value); patchPc({ text_path: textPathDesc(textPathKind, textPathBand, e.target.value) }); }} />
+                            <input type="number" min="0.1" max="1" step="0.05" style={{ ...s.input, flex: 1 }} value={textPathSpan}
+                              placeholder="span — e.g. 0.55 (blank = default)"
+                              onChange={e => { setTextPathSpan(e.target.value); patchPc({ text_path: textPathDesc(textPathKind, textPathBand, textPathInset, e.target.value) }); }} />
+                            <input type="number" min="0.05" max="2" step="0.05" style={{ ...s.input, flex: 1 }} value={textPathSize}
+                              placeholder="size — e.g. 0.45 (blank = default)"
+                              onChange={e => { setTextPathSize(e.target.value); patchPc({ text_path: textPathDesc(textPathKind, textPathBand, textPathInset, textPathSpan, e.target.value) }); }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            A baker may write a message ON this element; it follows the arch's curve by itself. <b>Rides</b> picks the rope, <b>off the rope</b> nudges away from its centreline in band thicknesses (0 = stuck on the fondant, which is what a baker does), <b>span</b> is how much of the arch one line may use before it shrinks to fit, <b>size</b> is cap height as a fraction of the whole band stack. ⚠️ All blank is the right answer unless a render says otherwise — the defaults are tuned in core and a value typed here freezes this row against a later tuning. ⚠️ The <b>curve</b> is the arch's, not the customer's: the Curve dial is hidden on a message written here.
+                          </div>
+                        </>
+                      )}
                       {applicableZones.some(z => (placementZoneConfig[z] ?? 'hug') === 'verge') && (
                         <>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -2706,6 +2836,7 @@ export default function ManageElements() {
                               onChange={e => { setVergeSeat(e.target.value); patchPc({ verge: vergeDesc(e.target.value) }); }}>
                               <option value="center">center — mid-spine rests on the rim edge (drapes over the lip)</option>
                               <option value="base">base — body base sits on the top surface, leans from there</option>
+                              <option value="hang">hang — TOP meets the lip, body falls down the outside (a ribbon)</option>
                             </select>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -2721,7 +2852,7 @@ export default function ManageElements() {
                               onChange={e => { setVergeEdgeInset(e.target.value); patchPc({ verge: vergeDesc(vergeSeat, vergeAngle, vergeYOffset, e.target.value) }); }} />
                           </div>
                           <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                            Verge reclines radially outward over the rim (butterflies, flowers). Seat = center (mid-spine on the lip, body drapes over) or base (body base on the top). Lean angle° (blank = 35) is the default Tilt, plus an optional height nudge and edge inset (+ pulls in, − pushes out over the lip).
+                            Verge reclines radially outward over the rim (butterflies, flowers). Seat = center (mid-spine on the lip, body drapes over), base (body base on the top), or hang (the model's TOP meets the lip and the body falls down the OUTSIDE — a ribbon tied at the rim; the tilt pivots at that contact, so the tails swing through the air instead of into the wall). Lean angle° (blank = 35) is the default Tilt, plus a height nudge — on a hang seat that is how far the knot sits above the rim. ⚠️ Edge inset is a SEED only: a drag round the rim discards it, and a proud piece now stands off on its own measured depth, so leave it at 0.
                           </div>
                         </>
                       )}
@@ -2918,6 +3049,74 @@ export default function ManageElements() {
                   </label>
 
                   <>
+                      {/* ── Part groups read out of the GLB ──────────────────────────────────────
+                          Sits directly above the merge box it fills (INVARIANTS #11): the ticks and
+                          the JSON they produce are on screen together. */}
+                      {isGlb && (
+                        <div style={{ marginBottom: 12, border: '1.5px solid #C5D4C8', borderRadius: 10, padding: 10, background: '#F6F9F6' }}>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); readPartsFromGlb(); }}
+                              disabled={partsBusy}
+                              style={{ ...s.smallBtn, marginBottom: 0, background: '#3D5A44', color: '#fff', cursor: partsBusy ? 'wait' : 'pointer' }}
+                            >
+                              {partsBusy ? 'Reading…' : 'Read parts from GLB'}
+                            </button>
+                            <span style={{ flex: '1 1 180px', minWidth: 0, fontSize: 11, fontWeight: 600, color: '#6B8C74' }}>
+                              Recovers the recolourable part groups the Recompose Studio wrote into the file.
+                            </span>
+                          </div>
+
+                          {partsMsg && (
+                            <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: partsMsg.ok ? '#3D5A44' : '#c00' }}>{partsMsg.text}</div>
+                          )}
+
+                          {glbParts && (
+                            <>
+                              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {glbParts.map((p, i) => (
+                                  <label
+                                    key={p.id || i}
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, background: '#fff', border: '1px solid #DCE6DE', fontSize: 12, fontWeight: 600, color: '#2C4433', cursor: p.textured ? 'not-allowed' : 'pointer', opacity: p.textured ? 0.55 : 1 }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={!!p.editable && !p.textured}
+                                      disabled={p.textured}
+                                      onChange={e => { const on = e.target.checked; setGlbParts(cur => cur.map((q, j) => (j === i ? { ...q, editable: on } : q))); }}
+                                    />
+                                    <span style={{ flex: '0 0 auto', width: 16, height: 16, borderRadius: 4, background: p.color, border: '1px solid rgba(0,0,0,0.15)' }} />
+                                    <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {p.label}{p.group && p.group !== p.label ? ` · ${p.group}` : ''}{!p.group ? ' · no group name' : ''}
+                                    </span>
+                                    <span style={{ flex: '0 0 auto', fontFamily: 'monospace', fontSize: 10, color: '#6B8C74' }}>{p.color}</span>
+                                  </label>
+                                ))}
+                              </div>
+
+                              <div style={{ marginTop: 8, fontSize: 11, lineHeight: 1.5, color: '#6B8C74', fontWeight: 600 }}>
+                                A tick is a colour the customer may change. Unticked parts keep the colour baked into the model.
+                                {glbParts.some(p => p.textured) && <> <br />Greyed parts carry a texture and cannot be recoloured whatever is authored — the designer leaves a textured material alone.</>}
+                                {glbParts.some(p => p.editable && !p.group) && <> <br />A part with no group name cannot become a control — give it a group in the Recompose Studio and export again.</>}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setCalibratorJson(JSON.stringify({ _model: partModel }, null, 2)); }}
+                                disabled={!partModel?.groups.length}
+                                style={{ ...s.smallBtn, marginTop: 10, marginBottom: 0, width: '100%', background: partModel?.groups.length ? '#E8EDE9' : '#F0F3F0', color: partModel?.groups.length ? '#3D5A44' : '#9BB5A2', cursor: partModel?.groups.length ? 'pointer' : 'not-allowed' }}
+                              >
+                                {partModel?.groups.length
+                                  ? `Put _model in the merge box — ${partModel.groups.length} colour control${partModel.groups.length === 1 ? '' : 's'}`
+                                  : 'Tick at least one named part'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+
                       <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', flexWrap: 'wrap' }}>
                         {/* Left — paste to merge */}
                         <div style={{ flex: '1 1 240px', minWidth: 0, display: 'flex', flexDirection: 'column' }}>

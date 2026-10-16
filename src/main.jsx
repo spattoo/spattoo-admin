@@ -62,6 +62,7 @@ const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx')
 const FlowerNailStudio      = lazy(() => import('./admin/FlowerNailStudio.jsx'));
 const CardCutoutStudio      = lazy(() => import('./admin/CardCutoutStudio.jsx'));
 const WaferPaperStudio      = lazy(() => import('./admin/WaferPaperStudio.jsx'));
+const GypsophilaStudio      = lazy(() => import('./admin/GypsophilaStudio.jsx'));
 const BalloonStudio         = lazy(() => import('./admin/BalloonStudio.jsx'));
 const TopperComposer        = lazy(() => import('./admin/TopperComposer.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
@@ -142,6 +143,7 @@ const ROUTES = {
   '/elements/flower-nail':       FlowerNailStudio,
   '/elements/card-cutout':       CardCutoutStudio,
   '/elements/wafer-paper':       WaferPaperStudio,
+  '/elements/gypsophila':        GypsophilaStudio,
   '/elements/balloon':           BalloonStudio,
   '/elements/topper-composer':   TopperComposer,
   '/elements/chocolate-drip':    ChocolateDripStudio,
@@ -179,6 +181,13 @@ const NAV_GROUPS = [
     { href: '/elements/import', label: 'Import Bundle' },
     { href: '/elements/types',  label: 'Element Types' },
     { href: '/elements/categories', label: 'Element Categories' },
+    /* ⚠️ THE SCREEN EXISTED AND HAD NO DOOR. `/elements/tags` has been in the route map with no
+       NAV_GROUPS entry, no link and no button anywhere in src — reachable only by typing the URL,
+       which is the failure this menu exists to prevent: *"if tomorrow i want to visit it, i wont
+       have this url."* It belongs beside Element Types and Element Categories because it is master
+       data of the same kind — and it is the vocabulary a baker FILES a template under, so it
+       decides what can be found (templateFilter searches tag slugs and display names). */
+    { href: '/elements/tags',   label: 'Manage Tags' },
     { href: '/elements/material-styles', label: 'Material → Styles' },
   ] },
   { title: 'Editors', index: '/editors', items: [
@@ -202,6 +211,7 @@ const NAV_GROUPS = [
     { href: '/elements/flower-nail',    label: 'Flower Nail' },
     { href: '/elements/card-cutout',    label: 'Card Cutout' },
     { href: '/elements/wafer-paper',    label: 'Wafer Paper' },
+    { href: '/elements/gypsophila',     label: 'Gypsophila' },
     { href: '/elements/balloon',        label: 'Balloons' },
     { href: '/elements/topper-composer', label: 'Topper Composer' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },

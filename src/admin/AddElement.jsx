@@ -271,7 +271,10 @@ export default function AddElement() {
   const [newCategory, setNewCategory]     = useState('');
   const [addingCategory, setAddingCategory] = useState(false);
   const [applicableZones, setApplicableZones] = useState([]);
-  const [isParent, setIsParent]           = useState(false);
+  /* Checked by default: nearly every element authored here is a top-level one, and a CHILD is the
+     exception (a unicorn eye, one block of a pattern). Starting unticked meant the common case
+     needed a click and the form refused to save without a parent until you found it. */
+  const [isParent, setIsParent]           = useState(true);
   const [parentId, setParentId]           = useState('');
   const [assetType, setAssetType]         = useState('2D');
   // Which generator draws a PROCEDURAL element. It becomes `placement_config.procedural`, the key
@@ -319,7 +322,7 @@ export default function AddElement() {
   const [clusterPalette, setClusterPalette]   = useState('');   // comma hex; blank = element colour / gold
   // Verge (rests on the rim lip, reclines radially outward over the edge). Calibration mirrors
   // perch's placement_config.perch object — written when any zone uses the `verge` mode.
-  const [vergeSeat,      setVergeSeat]        = useState('center'); // placement_config.verge.seat: center | base
+  const [vergeSeat,      setVergeSeat]        = useState('center'); // placement_config.verge.seat: center | base | hang
   const [vergeAngle,     setVergeAngle]       = useState('');   // placement_config.verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]     = useState('');   // placement_config.verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset]   = useState('');   // placement_config.verge.edge_inset (blank = 0)
@@ -670,7 +673,7 @@ export default function AddElement() {
         // falls back to angle_deg 35 / 0 offsets. See spattoo-core PLACEMENT_CONFIG.md.
         if (applicableZones.some(zone => builtPlacementConfig[zone] === 'verge')) {
           const verge = {};
-          if (vergeSeat === 'base') verge.seat = 'base';   // default 'center' omitted (the renderer default)
+          if (vergeSeat !== 'center') verge.seat = vergeSeat;   // default 'center' omitted (the renderer default)
           if (vergeAngle     !== '') verge.angle_deg  = parseFloat(vergeAngle);
           if (vergeYOffset   !== '') verge.y_offset   = parseFloat(vergeYOffset);
           if (vergeEdgeInset !== '') verge.edge_inset = parseFloat(vergeEdgeInset);
@@ -765,7 +768,9 @@ export default function AddElement() {
       setName('');
       setElementTypeId('');
       setApplicableZones([]);
-      setIsParent(false);
+      // Back to the DEFAULT, not to false — otherwise saving one element quietly unticks it for the
+      // next, which is the same surprise the default above exists to remove.
+      setIsParent(true);
       setParentId('');
       setAssetFile(null);
       setElementColor('#F0DEB8');
@@ -1250,6 +1255,7 @@ export default function AddElement() {
                       <select style={{ ...s.select, flex: 1 }} value={vergeSeat} onChange={e => setVergeSeat(e.target.value)}>
                         <option value="center">center — mid-spine rests on the rim edge (drapes over the lip)</option>
                         <option value="base">base — body base sits on the top surface, leans from there</option>
+                        <option value="hang">hang — TOP meets the lip, body falls down the outside (a ribbon)</option>
                       </select>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
@@ -1259,7 +1265,7 @@ export default function AddElement() {
                       <input type="number" step="0.01" style={{ ...s.input, flex: 1 }} value={vergeEdgeInset} placeholder="edge inset — e.g. 0" onChange={e => setVergeEdgeInset(e.target.value)} />
                     </div>
                     <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
-                      Verge reclines the element radially outward over the rim edge (butterflies, flowers). Seat = center (mid-spine rests on the lip, body drapes over) or base (body base on the top surface). Lean angle in degrees (blank = 35) is the default Tilt, plus an optional height nudge and edge inset (+ pulls in from the rim, − pushes out over it). All optional.
+                      Verge reclines the element radially outward over the rim edge (butterflies, flowers). Seat = center (mid-spine rests on the lip, body drapes over), base (body base on the top surface), or hang (the model's TOP meets the lip and the body falls down the outside — a ribbon tied at the rim; the tilt pivots at that contact, so the tails swing through the air instead of into the wall). Lean angle in degrees (blank = 35) is the default Tilt, plus an optional height nudge and edge inset (+ pulls in from the rim, − pushes out over it). All optional.
                     </div>
                   </>
                 )}

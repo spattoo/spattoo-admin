@@ -32,27 +32,46 @@ const fromSource = () =>
  * spattoo-docs/plans/renderer-version-floor.md
  */
 
-/** True only when this admin runs a real vendored release that can name itself. */
-export const canStampRendererFloor = () => !fromSource() && !!BUILD?.version;
+/* ── The floor is the DESIGNER's version, not a judgement about this admin ───────────────────────
+ *
+ * ⚠️ THIS NEVER BLOCKS, AND IT USED TO. The first cut refused to stamp whenever admin aliased the
+ * designer to core's working tree, on the reasoning that `BUILD.version` then names the last
+ * release rather than the code on screen. The reasoning is sound and the rule was still wrong:
+ * admin is internal and runs on localhost nearly all the time, so the "unsafe" branch was the
+ * ordinary one and cataloguing was blocked outright. Sandeep: *"admin mostly runs on localhost
+ * since i am the only developer. this should only be a warning. cannot block me to do the action.
+ * it should not be based on what admin is running — it should be on what designer vendored
+ * version."*
+ *
+ * So the number stamped is simply what the designer reports. That IS the vendored release, and it
+ * is the right floor: a template composed against working-tree code still cannot need a renderer
+ * OLDER than the last release, so the stamp is a true lower bound either way. What running from
+ * source costs is the ceiling — the template may need the NEXT release — and that is a caveat to
+ * show, not a door to lock. The admin can always raise the number by hand.
+ */
 
-/** The renderer version to stamp, or null when this build has no business stamping one. */
-export const rendererFloor = () => (canStampRendererFloor() ? BUILD.version : null);
+/** True when the designer can name its own version at all (core 0.1.675+). */
+export const canStampRendererFloor = () => !!BUILD?.version;
 
-/* ⚠️ TWO WAYS TO BE UNABLE TO STAMP, AND THE SECOND WAS A HOLE UNTIL IT WAS MEASURED. Running from
-   source is the obvious one. The other is a vendored core OLDER than 0.1.675, which exports no
-   `BUILD` at all — the first cut returned `canStamp: true` with a null floor, so a dialog would
-   have believed it could stamp and then written nothing. Both are "no", for different reasons, and
-   the dialog shows which. */
-export const stampBlockedReason = () => {
+/** True when admin is aliased to core's working tree rather than a vendored tarball. */
+export const runningFromSource = () => fromSource();
+
+/** The renderer version to stamp — whatever the designer reports, or null if it cannot say. */
+export const rendererFloor = () => BUILD?.version ?? null;
+
+/* ⚠️ A WARNING, NOT A BLOCK — the name changed with the behaviour so a caller cannot keep the old
+   meaning by keeping the old word. Both branches are things worth reading before cataloguing and
+   neither is a reason to refuse. */
+export const stampWarning = () => {
   if (fromSource()) {
-    return `This admin is running spattoo-core from SOURCE (../spattoo-core/src), not the vendored `
-      + `release. The designer reports ${BUILD?.version ?? 'an unknown version'}, which is the last `
-      + `release rather than the code on screen — stamping it would record a version that never `
-      + `rendered this template. Catalogue from deployed admin instead.`;
+    return `This admin runs spattoo-core from SOURCE (../spattoo-core/src). ${BUILD?.version ?? 'The version shown'} `
+      + `is the last RELEASE, so it is a true floor but possibly a low one: if this design uses `
+      + `anything added since, raise it by hand or re-stamp after the next release.`;
   }
   if (!BUILD?.version) {
     return `The vendored spattoo-core is older than 0.1.675 and cannot name its own version, so `
-      + `there is nothing truthful to stamp. Release core and re-vendor, then catalogue.`;
+      + `nothing is stamped automatically. Leave this empty for "renders anywhere", or type the `
+      + `version you know it needs.`;
   }
   return null;
 };

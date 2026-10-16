@@ -33,7 +33,14 @@ import { normalizeArtwork, buildShellGeo, buildSwagRing, buildFestoons,
          silhouette, maxTileStep,
          /* The heart's footprint comes from core's own curve, not a copy of one here — the same
             generator the designer extrudes a heart tier from. */
-         scaledOutline, coatShade } from '@spattoo/designer';
+         scaledOutline, coatShade,
+         /* ⚠️ THE LID IS NOT A RING, so it is not drawn by anything in this file. `ElementPreview`
+            places a single element with the designer's OWN `addSticker` and draws it in the
+            designer's own scene — so the Top tab cannot drift from the cake a baker sees, which is
+            the whole reason it was asked for: *"if these are not in sync we cant rely on
+            calibrating it in admin calibrator"*. Every other tab here reproduces ring geometry and
+            has to be kept in step by hand; this one has nothing to keep in step. */
+         ElementPreview } from '@spattoo/designer';
 import { PATTERN_THUMB_DIM } from '../lib/elementImage.js';
 
 const DEG = Math.PI / 180;
@@ -1017,6 +1024,15 @@ export default function PipingCalibrator() {
      Off by default — an element that authors nothing falls back to `bottom_rotation`, which is the
      behaviour every element shipped before this had. */
   const [sideRot,     setSideRot]     = useState({ rx: 0, ry: 0, rz: 0 });
+  /* The LID's own values. Deliberately NOT a `DEFAULT_TARGET_CFG`: a ring's vocabulary is radial
+     offset, spacing, flip and y-offset, and on the top surface three of those four mean nothing.
+     ⚠️ AND THERE IS NO Y OFFSET HERE ON PURPOSE. A top-surface instance takes `yOffset` from
+     `extra.yOffset ?? seatYOffset`, and `seatYOffset` is only ever set by `edgeSeatSeed` — i.e. for
+     perch and verge. No placement_config key reaches a stand/hug piece on the lid, so a slider here
+     would author a number core silently drops, which is the exact fault the `side_rotation` tick
+     above exists to prevent. What DOES reach it: the pose, the row's facing rotation, and `r`. */
+  const [topCfg, setTopCfg] = useState({ pose: 'stand', rx: 0, ry: 0, rz: 0, r: 2 });
+  const [includeTop, setIncludeTop] = useState(false);
   /* ── Cover the cake ───────────────────────────────────────────────────────────────────────────
    * Sandeep: *"similarly we need to have a flag to cover the cake. once side and top calibration
    * is done, we can do it."* It belongs here rather than in its own studio precisely because it
@@ -1078,6 +1094,9 @@ export default function PipingCalibrator() {
      slider on a hidden panel write to a ring nobody is looking at. */
   const cfg    = target === 'rim' ? rimCfg    : boardCfg;
   const setCfg = target === 'rim' ? setRimCfg : setBoardCfg;
+  // Board and rim are the only tabs the ring controls belong to. Side authors one key; Top is not a
+  // ring at all. Named once so a fourth tab cannot be added without deciding which it is.
+  const isRingTarget = target === 'board' || target === 'rim';
 
   // Download the cake on its own — the full cake, board, and placed element with NO canvas
   // background or floor. Rendered on a dedicated offscreen canvas (transparent, no floor, framed
@@ -1096,6 +1115,41 @@ export default function PipingCalibrator() {
 
   // GLB the preview/capture renders: the loaded block in pattern mode, else the upload.
   const activeGlbUrl = mode === 'pattern' ? (block?.image_url ?? null) : blobUrl;
+
+  /* The uploaded GLB as a catalogue ROW, so core's own preview can place it. Nothing here decides
+     how it is seated — that is `addSticker`'s job, through ElementPreview.
+     ⚠️ THE CONFIG IS IN THE `id`, AND IT HAS TO BE. ElementPreview re-seats on
+     `[element.id, element.image_url, zone, tierCount, tierIndex, mode, extra]` — a changed
+     `placement_config` is not in that list, so turning a knob would move the slider and leave the
+     cake alone. Folding the values into the identity makes "a different configuration" a different
+     element, which for a preview is exactly what it is. */
+  /* ⚠️ AN UPLOADED FILE HAS NO EXTENSION, AND CORE READS ONE. A blob URL is
+     `blob:http://host/<uuid>` — no `.glb` — and the designer decides a sticker is a MODEL by
+     sniffing the url (`/\.(glb|gltf)(\?|$)/`). So the brush loaded, was treated as 2D artwork, and
+     was handed to the texture path, which cannot decode a GLB: a cake with nothing on it and no
+     error anywhere. Measured in the page: the bare blob url fails that test, `blob:…#x.glb` passes
+     it AND still fetches (the fragment is not part of the blob lookup).
+     Only added when the url does not already read as a model — a pattern block's is a real
+     `…/3D/<uuid>.glb` and needs nothing. */
+  const previewGlbUrl = activeGlbUrl && !/\.(glb|gltf)(\?|$)/i.test(activeGlbUrl)
+    ? `${activeGlbUrl}#calibrator.glb`
+    : activeGlbUrl;
+  const topSig = `${topCfg.pose}:${topCfg.r}:${topCfg.rx},${topCfg.ry},${topCfg.rz}:${elementColor}`;
+  const topPreviewEl = useMemo(() => (previewGlbUrl ? {
+    id: `calibrator-top:${topSig}`,
+    name: 'Calibrator',
+    image_url: previewGlbUrl,
+    thumbnail_url: null,
+    allowed_zones: ['top_surface'],
+    allowed_actions: { move: true, resize: true, color: true, delete: true },
+    placement_config: {
+      r: topCfg.r,
+      top_surface: topCfg.pose,
+      rotation: [topCfg.rx, topCfg.ry, topCfg.rz],
+      rotation_unit: 'deg',
+    },
+    default_color: elementColor,
+  } : null), [previewGlbUrl, topSig]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lazy-load the element library + types the first time we enter pattern mode.
   useEffect(() => {
@@ -1216,9 +1270,19 @@ export default function PipingCalibrator() {
     // Not a `sectionFor` prefix: `side_rotation` has no top_/bottom_ twin, because there is no wall
     // above the rim. Emitted only when ticked, so a paste never silently overrides the fallback.
     side:  includeSide  ? { side_rotation: [Math.round(sideRot.rx), Math.round(sideRot.ry), Math.round(sideRot.rz)] } : {},
+    /* The lid's keys are the element's own, not a ring's: the POSE (`top_surface`), the row's
+       facing rotation in degrees, and the default size. ⚠️ `top_surface` carries the pose as a bare
+       string, which is the form `zoneSeatFields` reads — an object form here would need a `mode`
+       inside it, and both are valid, so the simpler one wins. */
+    top:   includeTop   ? {
+      top_surface: topCfg.pose,
+      r: topCfg.r,
+      rotation: [Math.round(topCfg.rx), Math.round(topCfg.ry), Math.round(topCfg.rz)],
+      rotation_unit: 'deg',
+    } : {},
   };
   const valuesJson = JSON.stringify(
-    Object.assign({}, ...[target, 'board', 'rim', 'side'].filter((k, i, a) => a.indexOf(k) === i).map(k => sections[k] ?? {})),
+    Object.assign({}, ...[target, 'board', 'rim', 'side', 'top'].filter((k, i, a) => a.indexOf(k) === i).map(k => sections[k] ?? {})),
     null, 2);
 
   return (
@@ -1316,7 +1380,14 @@ export default function PipingCalibrator() {
                     burying one of the three answers somewhere else means nobody finds it. Sandeep:
                     *"board and ring, we should add side option. how would i calibrate otherwise"*. */}
                 {[{ v: 'board', label: 'Board (base)' }, { v: 'rim', label: 'Rim (top edge)' },
-                  { v: 'side', label: 'Side (wall)' }].map(({ v, label }) => (
+                  { v: 'side', label: 'Side (wall)' },
+                  /* ⚠️ THE LID WAS THE ONE SURFACE THIS TOOL COULD NOT ANSWER FOR, and a decoration
+                     is placed there more often than on any other. Reported on a makeup brush sunk
+                     halfway into the icing: *"my other major concern is glb calibrator in admin and
+                     core designer rendering are not in sync... pls add top_surface to the
+                     calibrator"*. It renders through core, not through this file — see the
+                     ElementPreview import. */
+                  { v: 'top', label: 'Top (lid)' }].map(({ v, label }) => (
                   /* ⚠️ OPENING THE WALL TAB TICKS IT FOR OUTPUT. Without this you can select Side,
                      move all three sliders, watch the cake change — and copy a JSON with no
                      `side_rotation` in it, because the tick lives further down the panel. A control
@@ -1324,7 +1395,7 @@ export default function PipingCalibrator() {
                      whole key exists to fix; reproducing it in the tool that authors it would be
                      absurd. It is a tick, not a lock: untick it and the element goes back to
                      following the board. */
-                  <button key={v} onClick={() => { setTarget(v); if (v === 'side') setIncludeSide(true); }}
+                  <button key={v} onClick={() => { setTarget(v); if (v === 'side') setIncludeSide(true); if (v === 'top') setIncludeTop(true); }}
                     style={{ flex: 1, fontSize: 11, padding: '6px 0', borderRadius: 6, border: `2px solid ${target === v ? '#3D5A44' : '#C5D4C8'}`, background: target === v ? '#3D5A44' : '#fff', color: target === v ? '#fff' : '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
                     {label}
                   </button>
@@ -1504,8 +1575,52 @@ export default function PipingCalibrator() {
               )}
             </div>
 
+            {/* ── Lid controls — the pose, the facing, the size. Nothing a ring would ask. ──── */}
+            {target === 'top' && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', marginBottom: 4 }}>How it sits on the lid</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[{ v: 'stand', label: 'Stand — base on the icing' },
+                    { v: 'hug',   label: 'Hug — centre on the icing' }].map(({ v, label }) => (
+                    <button key={v} onClick={() => setTopCfg(c => ({ ...c, pose: v }))}
+                      style={{ flex: 1, fontSize: 11, padding: '6px 4px', borderRadius: 6, border: `2px solid ${topCfg.pose === v ? '#3D5A44' : '#C5D4C8'}`, background: topCfg.pose === v ? '#3D5A44' : '#fff', color: topCfg.pose === v ? '#fff' : '#6B8C74', cursor: 'pointer', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {/* ⚠️ THE SENTENCE THAT WOULD HAVE SAVED A ROUND TRIP. `hug` seats a model's ORIGIN
+                    at the surface, so a centred model loses half of itself into the cake — which is
+                    what a brush authored as `top_surface: "hug"` does, with no y_offset to blame.
+                    Said here because this is where the choice is made. */}
+                <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 6, lineHeight: 1.5 }}>
+                  <b>Stand</b> rests the model's lowest point on the icing — right for nearly everything
+                  laid on a lid. <b>Hug</b> puts its middle at the surface, so a centred model sinks in
+                  by half its height; it is for a piece modelled to be partly buried.
+                </div>
+
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#6B8C74', margin: '12px 0 4px' }}>Default size (r)</div>
+                <input type="number" min="0.2" max="12" step="0.1" value={topCfg.r}
+                  onChange={e => setTopCfg(c => ({ ...c, r: Number(e.target.value) || 0 }))}
+                  style={{ width: '100%', fontSize: 12, padding: '6px 8px', borderRadius: 6, border: '1.5px solid #C5D4C8', boxSizing: 'border-box', fontFamily: "'Quicksand',sans-serif" }} />
+
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#9B5F72', margin: '12px 0 4px' }}>ROTATION (DEGREES)</div>
+                {[['rx', 'X rotation', '#c0392b'], ['ry', 'Y rotation', '#27ae60'], ['rz', 'Z rotation', '#2d6cdf']].map(([k, label, col]) => (
+                  <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: col, width: 78 }}>{label}</span>
+                    <input type="range" min="-180" max="180" step="1" value={topCfg[k]}
+                      onChange={e => setTopCfg(c => ({ ...c, [k]: Number(e.target.value) }))} style={{ flex: 1 }} />
+                    <input type="number" min="-180" max="180" step="1" value={topCfg[k]}
+                      onChange={e => setTopCfg(c => ({ ...c, [k]: Number(e.target.value) || 0 }))}
+                      style={{ width: 56, fontSize: 11, padding: '4px 6px', borderRadius: 6, border: '1.5px solid #C5D4C8', fontFamily: "'Quicksand',sans-serif" }} />
+                  </div>
+                ))}
+                {/* No radial offset and no Y offset: see the note on `topCfg`. Neither reaches a
+                    stand/hug piece on the lid, so neither is offered. */}
+              </div>
+            )}
+
             {/* ── Ring controls — board and rim only ─────────────────────────────────────────── */}
-            {target !== 'side' && (<>
+            {isRingTarget && (<>
             {/* Flip */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44' }}>Flip (180° X on geometry)</span>
@@ -1680,8 +1795,8 @@ export default function PipingCalibrator() {
 
             </>)}
 
-            {/* Ring toggle — a RING preview switch, so it has no meaning on the wall tab. */}
-            {target !== 'side' && (
+            {/* Ring toggle — a RING preview switch, so it has no meaning on the wall or lid tabs. */}
+            {isRingTarget && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#3D5A44' }}>Show full ring</span>
               <button onClick={() => setShowRing(r => !r)}
@@ -1756,6 +1871,17 @@ export default function PipingCalibrator() {
 
       {/* ── Right: 3D canvas ────────────────────────────────────────────── */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {/* ⚠️ THE LID TAB DRAWS NOTHING OF ITS OWN. Every other tab builds ring geometry here and
+            carries a comment saying it MUST stay identical to CakeTier — four such copies, kept in
+            step by hand. The lid asks core to draw it instead, so there is no copy to keep. */}
+        {target === 'top' ? (
+          topPreviewEl
+            ? <ElementPreview element={topPreviewEl} zone="top_surface" mode={topCfg.pose}
+                              autoRotate={false} style={{ width: '100%', height: '100%' }} />
+            : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9BB5A2', fontSize: 13, fontWeight: 700 }}>
+                Upload a GLB to see it on the lid
+              </div>
+        ) : (
         <Canvas shadows camera={{ position: [0, 5.5, 7.9], fov: 42 }}>
           <ambientLight intensity={0.7} />
           <directionalLight position={[5, 10, 5]} intensity={1.4} castShadow />
@@ -1800,8 +1926,9 @@ export default function PipingCalibrator() {
               a floor stops a scroll flick from flying through the cake and losing the piece. */}
           <OrbitControls ref={orbitRef} makeDefault target={[0, focusY, focusZ]} minDistance={0.55} maxDistance={16} />
         </Canvas>
+        )}
 
-        {!activeGlbUrl && (
+        {target !== 'top' && !activeGlbUrl && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
             <div style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 12, padding: '16px 24px', fontSize: 13, color: '#9BB5A2', fontWeight: 700, fontFamily: "'Quicksand',sans-serif" }}>
               {mode === 'tune' ? 'Upload a GLB to see the piece on the cake' : 'Load a building-block element to start'}

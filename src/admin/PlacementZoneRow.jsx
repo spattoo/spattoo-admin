@@ -42,9 +42,9 @@ export default function PlacementZoneRow({ zone, zoneLabel, mode, seat, insert, 
       )}
       {zoneShowsFullRing(zone) && onFullRingToggle && (
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 110, fontSize: 12, fontWeight: 600, color: '#2C4433', cursor: 'pointer' }}
-          title="Repeat this decoration all the way around the perimeter, keeping its real materials">
+          title="Offers a full ring as well as ordinary placement — the baker chooses on the cake">
           <input type="checkbox" checked={!!fullRing} onChange={e => onFullRingToggle(e.target.checked)} />
-          Show full ring (repeat around the {zoneLabel.toLowerCase()})
+          Also offer a full ring (repeat around the {zoneLabel.toLowerCase()})
         </label>
       )}
       {showInsert && (
