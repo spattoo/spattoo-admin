@@ -486,6 +486,10 @@ function Group({ title, sub, children }) {
    any other anchor to `center` on open — so a row authored as `hang` would show as center and be
    saved back as center by the next unrelated edit. */
 const VERGE_SEATS = ['center', 'base', 'hang'];
+/* ⚠️ READ BACK AGAINST THIS LIST, NOT STORED BLIND — the same trap VERGE_SEATS exists for. A value
+   the list does not know is silently rewritten to 'center' on open and saved that way, so an
+   authored seat would be lost by merely LOOKING at the row. */
+const PERCH_SEATS = ['center', 'base'];
 
 export default function ManageElements() {
   const [elementTypes, setElementTypes] = useState([]);
@@ -659,6 +663,14 @@ export default function ManageElements() {
   const [vergeAngle,     setVergeAngle]     = useState('');   // verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]   = useState('');   // verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset] = useState('');   // verge.edge_inset (blank = 0)
+  /* Perch (straddles the rim edge) — placement_config.perch. ⚠️ THESE HAD NO CONTROLS AT ALL until
+     a fondant doll was reported hanging in the air: the mode could be chosen in the zone row, but
+     tilt_deg / y_offset / edge_inset — and the seat below — could only be reached by hand-editing
+     the JSON. A value only an engineer can set is not authorable (root CLAUDE.md rule 3). */
+  const [perchSeat,      setPerchSeat]      = useState('center'); // perch.seat: center | base
+  const [perchTilt,      setPerchTilt]      = useState('');   // perch.tilt_deg (blank = 0)
+  const [perchYOffset,   setPerchYOffset]   = useState('');   // perch.y_offset (blank = 0)
+  const [perchEdgeInset, setPerchEdgeInset] = useState('');   // perch.edge_inset (blank = 0)
   /* Where a MESSAGE may be written ON this element (placement_config.text_path). Off = absent, and
      absent is what every element has: the baker is then offered nothing, rather than a control that
      does nothing. The shape values are all RELATIVE (a fraction of a band, never a position) —
@@ -852,6 +864,10 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    setPerchSeat(PERCH_SEATS.includes(pc.perch?.seat) ? pc.perch.seat : 'center');
+    setPerchTilt(pc.perch?.tilt_deg != null ? String(pc.perch.tilt_deg) : '');
+    setPerchYOffset(pc.perch?.y_offset != null ? String(pc.perch.y_offset) : '');
+    setPerchEdgeInset(pc.perch?.edge_inset != null ? String(pc.perch.edge_inset) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
@@ -1112,6 +1128,10 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    setPerchSeat(PERCH_SEATS.includes(pc.perch?.seat) ? pc.perch.seat : 'center');
+    setPerchTilt(pc.perch?.tilt_deg != null ? String(pc.perch.tilt_deg) : '');
+    setPerchYOffset(pc.perch?.y_offset != null ? String(pc.perch.y_offset) : '');
+    setPerchEdgeInset(pc.perch?.edge_inset != null ? String(pc.perch.edge_inset) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
@@ -1160,6 +1180,16 @@ export default function ManageElements() {
     const v = {};
     if (seat !== 'center') v.seat = seat;   // default 'center' omitted (the renderer default)
     if (a  !== '') v.angle_deg  = parseFloat(a);
+    if (y  !== '') v.y_offset   = parseFloat(y);
+    if (ei !== '') v.edge_inset = parseFloat(ei);
+    return Object.keys(v).length ? v : '';
+  };
+  // The perch descriptor (straddles the rim edge) — same rule as vergeDesc: only non-blank fields,
+  // all blank → '' so patchPc drops the key and core's own defaults apply.
+  const perchDesc = (seat = perchSeat, t = perchTilt, y = perchYOffset, ei = perchEdgeInset) => {
+    const v = {};
+    if (seat !== 'center') v.seat = seat;   // default 'center' omitted (the renderer default)
+    if (t  !== '') v.tilt_deg   = parseFloat(t);
     if (y  !== '') v.y_offset   = parseFloat(y);
     if (ei !== '') v.edge_inset = parseFloat(ei);
     return Object.keys(v).length ? v : '';
@@ -2853,6 +2883,33 @@ export default function ManageElements() {
                           </div>
                           <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
                             Verge reclines radially outward over the rim (butterflies, flowers). Seat = center (mid-spine on the lip, body drapes over), base (body base on the top), or hang (the model's TOP meets the lip and the body falls down the OUTSIDE — a ribbon tied at the rim; the tilt pivots at that contact, so the tails swing through the air instead of into the wall). Lean angle° (blank = 35) is the default Tilt, plus a height nudge — on a hang seat that is how far the knot sits above the rim. ⚠️ Edge inset is a SEED only: a drag round the rim discards it, and a proud piece now stands off on its own measured depth, so leave it at 0.
+                          </div>
+                        </>
+                      )}
+                      {applicableZones.some(z => (placementZoneConfig[z] ?? 'hug') === 'perch') && (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Perch seat</span>
+                            <select style={{ ...s.select, flex: 1 }} value={perchSeat}
+                              onChange={e => { setPerchSeat(e.target.value); patchPc({ perch: perchDesc(e.target.value) }); }}>
+                              <option value="center">center — the body's MIDDLE on the rim line (straddles the edge)</option>
+                              <option value="base">base — the body's BASE on the rim, so it stands on the edge</option>
+                            </select>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Perch lean</span>
+                            <input type="number" step="1" style={{ ...s.input, flex: 1 }} value={perchTilt}
+                              placeholder="tilt° — e.g. 0 (blank = 0)"
+                              onChange={e => { setPerchTilt(e.target.value); patchPc({ perch: perchDesc(perchSeat, e.target.value) }); }} />
+                            <input type="number" step="0.01" style={{ ...s.input, flex: 1 }} value={perchYOffset}
+                              placeholder="height — e.g. 0"
+                              onChange={e => { setPerchYOffset(e.target.value); patchPc({ perch: perchDesc(perchSeat, perchTilt, e.target.value) }); }} />
+                            <input type="number" step="0.01" style={{ ...s.input, flex: 1 }} value={perchEdgeInset}
+                              placeholder="edge inset — e.g. 0"
+                              onChange={e => { setPerchEdgeInset(e.target.value); patchPc({ perch: perchDesc(perchSeat, perchTilt, perchYOffset, e.target.value) }); }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            Perch straddles the rim edge. Seat = center (the body's middle on the rim line — right for a ribbon or a folded card, which have half to hang either side) or base (the body's base on the rim, so it STANDS on the edge — right for a figure). ⚠️ Pick base for anything with legs: a centre seat drops the lower half below the rim, and at the edge that half is past the wall, so the piece hangs in the air. ⚠️ Height is a raw nudge and does NOT scale with the customer's Size dial, so it cannot stand in for the seat — a figure tuned to look right at one size floats at every other. Leave it at 0 once the seat is right.
                           </div>
                         </>
                       )}
