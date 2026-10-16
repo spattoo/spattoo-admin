@@ -271,7 +271,10 @@ export default function AddElement() {
   const [newCategory, setNewCategory]     = useState('');
   const [addingCategory, setAddingCategory] = useState(false);
   const [applicableZones, setApplicableZones] = useState([]);
-  const [isParent, setIsParent]           = useState(false);
+  /* Checked by default: nearly every element authored here is a top-level one, and a CHILD is the
+     exception (a unicorn eye, one block of a pattern). Starting unticked meant the common case
+     needed a click and the form refused to save without a parent until you found it. */
+  const [isParent, setIsParent]           = useState(true);
   const [parentId, setParentId]           = useState('');
   const [assetType, setAssetType]         = useState('2D');
   // Which generator draws a PROCEDURAL element. It becomes `placement_config.procedural`, the key
@@ -765,7 +768,9 @@ export default function AddElement() {
       setName('');
       setElementTypeId('');
       setApplicableZones([]);
-      setIsParent(false);
+      // Back to the DEFAULT, not to false — otherwise saving one element quietly unticks it for the
+      // next, which is the same surprise the default above exists to remove.
+      setIsParent(true);
       setParentId('');
       setAssetFile(null);
       setElementColor('#F0DEB8');
