@@ -181,6 +181,13 @@ const NAV_GROUPS = [
     { href: '/elements/import', label: 'Import Bundle' },
     { href: '/elements/types',  label: 'Element Types' },
     { href: '/elements/categories', label: 'Element Categories' },
+    /* ⚠️ THE SCREEN EXISTED AND HAD NO DOOR. `/elements/tags` has been in the route map with no
+       NAV_GROUPS entry, no link and no button anywhere in src — reachable only by typing the URL,
+       which is the failure this menu exists to prevent: *"if tomorrow i want to visit it, i wont
+       have this url."* It belongs beside Element Types and Element Categories because it is master
+       data of the same kind — and it is the vocabulary a baker FILES a template under, so it
+       decides what can be found (templateFilter searches tag slugs and display names). */
+    { href: '/elements/tags',   label: 'Manage Tags' },
     { href: '/elements/material-styles', label: 'Material → Styles' },
   ] },
   { title: 'Editors', index: '/editors', items: [
