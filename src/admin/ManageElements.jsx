@@ -659,6 +659,15 @@ export default function ManageElements() {
   const [vergeAngle,     setVergeAngle]     = useState('');   // verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]   = useState('');   // verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset] = useState('');   // verge.edge_inset (blank = 0)
+  /* Where a MESSAGE may be written ON this element (placement_config.text_path). Off = absent, and
+     absent is what every element has: the baker is then offered nothing, rather than a control that
+     does nothing. The shape values are all RELATIVE (a fraction of a band, never a position) —
+     see spattoo-core src/designer/geometry/textPath.js for why the path itself is derived. */
+  const [textPathKind,  setTextPathKind]  = useState('');     // '' = no text on this element
+  const [textPathBand,  setTextPathBand]  = useState('mid');  // inner | mid | outer | an index
+  const [textPathInset, setTextPathInset] = useState('');     // off the rope's centreline (0 = on it)
+  const [textPathSpan,  setTextPathSpan]  = useState('');     // share of the arch a line may use
+  const [textPathSize,  setTextPathSize]  = useState('');     // cap height, fraction of the stack
   // Insert (base sunk into the surface at an angle — chocolate bars, sparklers) is a per-zone
   // MODIFIER now (rides `placement_config[zone].insert`, like `seat`), NOT a global position. One
   // entry per zone that has it on: { [zone]: { depth?, lean_deg?, jitter_deg? } } ({} = on, defaults).
@@ -835,6 +844,11 @@ export default function ManageElements() {
     loadPrintFinishFromPc(pc);
     loadReliefFromPc(pc);
     setVergeSeat(VERGE_SEATS.includes(pc.verge?.seat) ? pc.verge.seat : 'center');
+    setTextPathKind(pc.text_path?.kind ?? '');
+    setTextPathBand(pc.text_path?.band != null ? String(pc.text_path.band) : 'mid');
+    setTextPathInset(pc.text_path?.inset != null ? String(pc.text_path.inset) : '');
+    setTextPathSpan(pc.text_path?.span != null ? String(pc.text_path.span) : '');
+    setTextPathSize(pc.text_path?.size != null ? String(pc.text_path.size) : '');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
@@ -1090,6 +1104,11 @@ export default function ManageElements() {
     loadPrintFinishFromPc(pc);
     loadReliefFromPc(pc);
     setVergeSeat(VERGE_SEATS.includes(pc.verge?.seat) ? pc.verge.seat : 'center');
+    setTextPathKind(pc.text_path?.kind ?? '');
+    setTextPathBand(pc.text_path?.band != null ? String(pc.text_path.band) : 'mid');
+    setTextPathInset(pc.text_path?.inset != null ? String(pc.text_path.inset) : '');
+    setTextPathSpan(pc.text_path?.span != null ? String(pc.text_path.span) : '');
+    setTextPathSize(pc.text_path?.size != null ? String(pc.text_path.size) : '');
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
@@ -1144,6 +1163,19 @@ export default function ManageElements() {
     if (y  !== '') v.y_offset   = parseFloat(y);
     if (ei !== '') v.edge_inset = parseFloat(ei);
     return Object.keys(v).length ? v : '';
+  };
+  /* ⚠️ ONLY WHAT THE ADMIN ACTUALLY SET. Every key here has a seed in core, and writing a value that
+     merely matches the seed freezes it — a later tuning of the default would not reach this row.
+     Same rule the verge builder above follows. */
+  const textPathDesc = (kind = textPathKind, band = textPathBand,
+                        inset = textPathInset, span = textPathSpan, size = textPathSize) => {
+    if (!kind) return '';                       // '' → patchPc removes text_path entirely
+    const v = { kind };
+    if (band && band !== 'mid') v.band = /^\d+$/.test(band) ? parseInt(band, 10) : band;
+    if (inset !== '') v.inset = parseFloat(inset);
+    if (span  !== '') v.span  = parseFloat(span);
+    if (size  !== '') v.size  = parseFloat(size);
+    return v;
   };
   // Build the placement_config.scale patch from the min/max inputs: an object with only the set
   // keys, or '' so patchPc removes `scale` entirely when all are blank. The sibling fields' current
@@ -2754,6 +2786,47 @@ export default function ManageElements() {
                             placeholder="0.7 — fraction of wall height (blank = default)"
                             onChange={e => { setHugFill(e.target.value); patchPc({ hug_fill: numPatch(e.target.value) }); }} />
                         </div>
+                      )}
+                      {/* ── Text written ON this element ───────────────────────────────────────
+                          ⚠️ THE PATH IS NOT AUTHORED HERE, AND THAT IS THE POINT. A rainbow's arch
+                          is already a function of its own numbers, and it SHRINKS to fit a small
+                          cake — a slot placed by hand would be left behind by a band count, an
+                          inner radius, a size, and silently by the shrink. What this authors is
+                          which rope the line rides and how big it is, all as fractions. */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Text on it</span>
+                        <select style={{ ...s.select, flex: 1 }} value={textPathKind}
+                          onChange={e => { setTextPathKind(e.target.value); patchPc({ text_path: textPathDesc(e.target.value) }); }}>
+                          <option value="">no — a message cannot be written on this element</option>
+                          <option value="arch">arch — along the curve of the bands (fondant rainbow)</option>
+                        </select>
+                      </div>
+                      {textPathKind === 'arch' && (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Rides</span>
+                            <select style={{ ...s.select, flex: 1 }} value={textPathBand}
+                              onChange={e => { setTextPathBand(e.target.value); patchPc({ text_path: textPathDesc(textPathKind, e.target.value) }); }}>
+                              <option value="mid">middle of the stack — centred on the arch's face</option>
+                              <option value="inner">innermost rope — inside the hole</option>
+                              <option value="outer">outermost rope — over the top</option>
+                            </select>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <input type="number" step="0.05" style={{ ...s.input, flex: 1 }} value={textPathInset}
+                              placeholder="off the rope — 0 = on it, + outward"
+                              onChange={e => { setTextPathInset(e.target.value); patchPc({ text_path: textPathDesc(textPathKind, textPathBand, e.target.value) }); }} />
+                            <input type="number" min="0.1" max="1" step="0.05" style={{ ...s.input, flex: 1 }} value={textPathSpan}
+                              placeholder="span — e.g. 0.55 (blank = default)"
+                              onChange={e => { setTextPathSpan(e.target.value); patchPc({ text_path: textPathDesc(textPathKind, textPathBand, textPathInset, e.target.value) }); }} />
+                            <input type="number" min="0.05" max="2" step="0.05" style={{ ...s.input, flex: 1 }} value={textPathSize}
+                              placeholder="size — e.g. 0.45 (blank = default)"
+                              onChange={e => { setTextPathSize(e.target.value); patchPc({ text_path: textPathDesc(textPathKind, textPathBand, textPathInset, textPathSpan, e.target.value) }); }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            A baker may write a message ON this element; it follows the arch's curve by itself. <b>Rides</b> picks the rope, <b>off the rope</b> nudges away from its centreline in band thicknesses (0 = stuck on the fondant, which is what a baker does), <b>span</b> is how much of the arch one line may use before it shrinks to fit, <b>size</b> is cap height as a fraction of the whole band stack. ⚠️ All blank is the right answer unless a render says otherwise — the defaults are tuned in core and a value typed here freezes this row against a later tuning. ⚠️ The <b>curve</b> is the arch's, not the customer's: the Curve dial is hidden on a message written here.
+                          </div>
+                        </>
                       )}
                       {applicableZones.some(z => (placementZoneConfig[z] ?? 'hug') === 'verge') && (
                         <>
