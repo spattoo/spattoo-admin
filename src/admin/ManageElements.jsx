@@ -672,6 +672,7 @@ export default function ManageElements() {
   const [perchTilt,      setPerchTilt]      = useState('');   // perch.tilt_deg (blank = 0)
   const [perchYOffset,   setPerchYOffset]   = useState('');   // perch.y_offset (blank = 0)
   const [perchEdgeInset, setPerchEdgeInset] = useState('');   // perch.edge_inset (blank = 0)
+  const [perchAnchor,    setPerchAnchor]    = useState('');   // perch.anchor: 0..1 from the TOP
   /* Where a MESSAGE may be written ON this element (placement_config.text_path). Off = absent, and
      absent is what every element has: the baker is then offered nothing, rather than a control that
      does nothing. The shape values are all RELATIVE (a fraction of a band, never a position) —
@@ -870,6 +871,7 @@ export default function ManageElements() {
     setPerchTilt(pc.perch?.tilt_deg != null ? String(pc.perch.tilt_deg) : '');
     setPerchYOffset(pc.perch?.y_offset != null ? String(pc.perch.y_offset) : '');
     setPerchEdgeInset(pc.perch?.edge_inset != null ? String(pc.perch.edge_inset) : '');
+    setPerchAnchor(pc.perch?.anchor != null ? String(pc.perch.anchor) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
@@ -1135,6 +1137,7 @@ export default function ManageElements() {
     setPerchTilt(pc.perch?.tilt_deg != null ? String(pc.perch.tilt_deg) : '');
     setPerchYOffset(pc.perch?.y_offset != null ? String(pc.perch.y_offset) : '');
     setPerchEdgeInset(pc.perch?.edge_inset != null ? String(pc.perch.edge_inset) : '');
+    setPerchAnchor(pc.perch?.anchor != null ? String(pc.perch.anchor) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
@@ -1191,12 +1194,20 @@ export default function ManageElements() {
   };
   // The perch descriptor (straddles the rim edge) — same rule as vergeDesc: only non-blank fields,
   // all blank → '' so patchPc drops the key and core's own defaults apply.
-  const perchDesc = (seat = perchSeat, t = perchTilt, y = perchYOffset, ei = perchEdgeInset) => {
+  /* ⚠️ EVERY KEY THIS OBJECT CAN HOLD MUST BE LISTED, because `patchPc` REPLACES `perch` rather
+     than merging into it — so a field missing from here is silently destroyed the moment anyone
+     edits any other field on this screen. `anchor` was missing, which would have wiped a pose
+     calibrated in the Perch Calibrator on the next unrelated edit. The same failure the calibrator
+     had from the other direction, and it is why `anchor` is in the signature rather than spread
+     from the current config: a builder that forgets a key cannot be noticed by reading it. */
+  const perchDesc = (seat = perchSeat, t = perchTilt, y = perchYOffset, ei = perchEdgeInset,
+                     an = perchAnchor) => {
     const v = {};
     if (seat !== 'center') v.seat = seat;   // default 'center' omitted (the renderer default)
     if (t  !== '') v.tilt_deg   = parseFloat(t);
     if (y  !== '') v.y_offset   = parseFloat(y);
     if (ei !== '') v.edge_inset = parseFloat(ei);
+    if (an !== '') v.anchor     = parseFloat(an);
     return Object.keys(v).length ? v : '';
   };
   /* ⚠️ ONLY WHAT THE ADMIN ACTUALLY SET. Every key here has a seed in core, and writing a value that
@@ -2921,6 +2932,15 @@ export default function ManageElements() {
                             <input type="number" step="0.01" style={{ ...s.input, flex: 1 }} value={perchEdgeInset}
                               placeholder="edge inset — e.g. 0"
                               onChange={e => { setPerchEdgeInset(e.target.value); patchPc({ perch: perchDesc(perchSeat, perchTilt, perchYOffset, e.target.value) }); }} />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Rim touches at</span>
+                            <input type="number" min="0" max="1" step="0.01" style={{ ...s.input, flex: 1 }} value={perchAnchor}
+                              placeholder="0 = top · 0.5 = middle · 1 = base (blank = use the seat)"
+                              onChange={e => { setPerchAnchor(e.target.value); patchPc({ perch: perchDesc(perchSeat, perchTilt, perchYOffset, perchEdgeInset, e.target.value) }); }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            Where ALONG this model the rim line touches it, as a fraction of its height from the TOP — the same number the Perch Calibrator's “Sits at” slider writes, and the easier place to set it is there, with the figure on screen. A model drawn SITTING rests on its seat with its legs below the lip, which is neither its base nor its middle. ⚠️ It OVERRIDES the seat above and switches off the automatic rim stand-off, because a calibrated pose should not then be pushed outward by something the calibrator never showed. ⚠️ Prefer it over the height nudge: a fraction is a statement about the MODEL and holds at every size, while a nudge is a world distance that is right at one size and wrong at the rest.
                           </div>
                           <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
                             Perch straddles the rim edge. Seat = center (the body's middle on the rim line — right for a ribbon or a folded card, which have half to hang either side) or base (the body's base on the rim, so it STANDS on the edge — right for a figure). ⚠️ Pick base for anything with legs: a centre seat drops the lower half below the rim, and at the edge that half is past the wall, so the piece hangs in the air. ⚠️ Height is a raw nudge and does NOT scale with the customer's Size dial, so it cannot stand in for the seat — a figure tuned to look right at one size floats at every other. Leave it at 0 once the seat is right.
