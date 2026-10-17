@@ -168,7 +168,14 @@ export default function PerchCalibrator() {
          time anyone touched a slider here. The failure is silent and the screen looks right: the
          figure only moves later, on a cake. Same family as the verge read-back that rewrote an
          unknown seat to 'center' merely by opening the row. */
-      perch: { ...(existing.perch ?? {}), anchor: +anchor.toFixed(2),
+      /* ⚠️ `seat` IS DROPPED WHEN AN ANCHOR IS WRITTEN, because they say the same thing and a row
+         holding both is a contradiction nobody can see on this screen. A named seat IS a fraction
+         — base = 1, center = 0.5, hang = 0 — so saving `anchor: 0.5` beside a leftover
+         `seat: "base"` states two different poses at once. Core resolves it in the anchor's favour
+         (the explicit number beats the shorthand), but leaving the dead key on the row invites the
+         next reader to believe the seat still means something. */
+      perch: { ...(() => { const { seat, ...rest } = existing.perch ?? {}; return rest; })(),
+               anchor: +anchor.toFixed(2),
                tilt_deg: +tiltDeg.toFixed(1), y_offset: +yOffset.toFixed(2), edge_inset: +edgeInset.toFixed(2) },
     };
   }
