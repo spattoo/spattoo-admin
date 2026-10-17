@@ -663,6 +663,7 @@ export default function ManageElements() {
   const [vergeAngle,     setVergeAngle]     = useState('');   // verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]   = useState('');   // verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset] = useState('');   // verge.edge_inset (blank = 0)
+  const [vergeAnchor,    setVergeAnchor]    = useState('');   // verge.anchor: 0..1 from the TOP
   /* Perch (straddles the rim edge) — placement_config.perch. ⚠️ THESE HAD NO CONTROLS AT ALL until
      a fondant doll was reported hanging in the air: the mode could be chosen in the zone row, but
      tilt_deg / y_offset / edge_inset — and the seat below — could only be reached by hand-editing
@@ -864,6 +865,7 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    setVergeAnchor(pc.verge?.anchor != null ? String(pc.verge.anchor) : '');
     setPerchSeat(PERCH_SEATS.includes(pc.perch?.seat) ? pc.perch.seat : 'center');
     setPerchTilt(pc.perch?.tilt_deg != null ? String(pc.perch.tilt_deg) : '');
     setPerchYOffset(pc.perch?.y_offset != null ? String(pc.perch.y_offset) : '');
@@ -1128,6 +1130,7 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    setVergeAnchor(pc.verge?.anchor != null ? String(pc.verge.anchor) : '');
     setPerchSeat(PERCH_SEATS.includes(pc.perch?.seat) ? pc.perch.seat : 'center');
     setPerchTilt(pc.perch?.tilt_deg != null ? String(pc.perch.tilt_deg) : '');
     setPerchYOffset(pc.perch?.y_offset != null ? String(pc.perch.y_offset) : '');
@@ -1176,12 +1179,14 @@ export default function ManageElements() {
   };
   // The verge descriptor (rests on the rim lip, reclines outward) — only non-blank fields; all blank
   // → '' so patchPc drops the key and the designer uses its defaults (angle_deg 35 / 0 offsets).
-  const vergeDesc = (seat = vergeSeat, a = vergeAngle, y = vergeYOffset, ei = vergeEdgeInset) => {
+  const vergeDesc = (seat = vergeSeat, a = vergeAngle, y = vergeYOffset, ei = vergeEdgeInset,
+                     an = vergeAnchor) => {
     const v = {};
     if (seat !== 'center') v.seat = seat;   // default 'center' omitted (the renderer default)
     if (a  !== '') v.angle_deg  = parseFloat(a);
     if (y  !== '') v.y_offset   = parseFloat(y);
     if (ei !== '') v.edge_inset = parseFloat(ei);
+    if (an !== '') v.anchor     = parseFloat(an);
     return Object.keys(v).length ? v : '';
   };
   // The perch descriptor (straddles the rim edge) — same rule as vergeDesc: only non-blank fields,
@@ -2880,6 +2885,15 @@ export default function ManageElements() {
                             <input type="number" step="0.01" style={{ ...s.input, flex: 1 }} value={vergeEdgeInset}
                               placeholder="edge inset — e.g. 0"
                               onChange={e => { setVergeEdgeInset(e.target.value); patchPc({ verge: vergeDesc(vergeSeat, vergeAngle, vergeYOffset, e.target.value) }); }} />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Rim touches at</span>
+                            <input type="number" min="0" max="1" step="0.01" style={{ ...s.input, flex: 1 }} value={vergeAnchor}
+                              placeholder="0 = top · 0.5 = middle · 1 = base (blank = use the seat)"
+                              onChange={e => { setVergeAnchor(e.target.value); patchPc({ verge: vergeDesc(vergeSeat, vergeAngle, vergeYOffset, vergeEdgeInset, e.target.value) }); }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            Where ALONG this model the rim line touches it, as a fraction of its height measured from the TOP. The three seats above are three points on that line — 0 is “hang”, 0.5 is “center”, 1 is “base” — and this sets anything between, for a model whose contact point is neither. A satin bow is tied at the centre of its KNOT, which sits about 0.1 down from the top, so “hang” alone drops the whole bow below the lip. ⚠️ Use this rather than the height nudge: a fraction is a statement about the MODEL and holds at every size, while a nudge is a world distance that is right at one size and wrong at the rest. Blank = follow the seat.
                           </div>
                           <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
                             Verge reclines radially outward over the rim (butterflies, flowers). Seat = center (mid-spine on the lip, body drapes over), base (body base on the top), or hang (the model's TOP meets the lip and the body falls down the OUTSIDE — a ribbon tied at the rim; the tilt pivots at that contact, so the tails swing through the air instead of into the wall). Lean angle° (blank = 35) is the default Tilt, plus a height nudge — on a hang seat that is how far the knot sits above the rim. ⚠️ Edge inset is a SEED only: a drag round the rim discards it, and a proud piece now stands off on its own measured depth, so leave it at 0.
