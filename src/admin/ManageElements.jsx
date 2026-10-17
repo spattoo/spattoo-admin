@@ -697,6 +697,7 @@ export default function ManageElements() {
      ABSENCE meant "does not" would silently re-pose the whole catalogue on the next save. The
      checkbox therefore reads as "always faces the viewer" and un-ticking is what gets recorded. */
   const [faceCamera,    setFaceCamera]    = useState(true);
+  const [freeHand,      setFreeHand]      = useState(false);   // placement_config.free_hand
   const [foldAngle,     setFoldAngle]     = useState('');
   const [spineSplit,    setSpineSplit]    = useState('');
   const [recolorMethod, setRecolorMethod] = useState('opaque');
@@ -875,6 +876,7 @@ export default function ManageElements() {
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
+    setFreeHand(pc.free_hand === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -1141,6 +1143,7 @@ export default function ManageElements() {
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
+    setFreeHand(pc.free_hand === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -2911,6 +2914,24 @@ export default function ManageElements() {
                           </div>
                         </>
                       )}
+                      {/* ⚠️ THE ESCAPE HATCH, AND IT IS DELIBERATELY NOT THE DEFAULT. Everything else on
+                          this screen describes a pose the app can then seat for every baker on every
+                          cake size. Some pieces defeat that: a bow is tied at its knot, a doll sits on
+                          her seat with her legs hanging, and a flat ribbon on a round wall lifts at its
+                          edges wherever its anchor is. For those, the honest answer is to hand the
+                          placing to the person looking at the cake. Sandeep: *"lets give a free hand
+                          moment to the user for this now."* */}
+                      <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}>
+                        <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={freeHand}
+                          onChange={e => { const on = e.target.checked; setFreeHand(on);
+                            patchPc({ free_hand: on ? true : '' }); }} />
+                        <div>
+                          <div style={s.checkLabel}>Free hand placement</div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            The customer gets a 3D move gizmo on this decoration — three coloured axis arrows, dragged in the scene — and can put it anywhere. Turning this on RELEASES the rules that would otherwise seat it: the rim lock on a drag, and the automatic stand-off that holds an edge piece clear of the icing. ⚠️ Use it for a piece whose resting place cannot be stated as a rule — a ribbon that must drape over whatever cream happens to be on the rim, say. Everything else is better seated automatically, because a seat holds at every cake size and on every tier, and a hand-placed position only holds where it was placed.
+                          </div>
+                        </div>
+                      </label>
                       {applicableZones.some(z => (placementZoneConfig[z] ?? 'hug') === 'perch') && (
                         <>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
