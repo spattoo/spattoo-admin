@@ -44,8 +44,8 @@ function CakeMesh() {
 // Perched figure — mirrors spattoo-core DraggableTopSticker(perch) + StickerModel:
 // facing is baked as a Y-rotation; the model is normalised to STICKER_SIZE and centred; the group is
 // placed at the front edge, centre AT the tier top (+ seat y_offset), tilted about X, scaled by r.
-function PerchedFigure({ scene, facingDeg, tiltDeg, yOffset, edgeInset, size }) {
-  const { faced, sc, center } = useMemo(() => {
+function PerchedFigure({ scene, facingDeg, tiltDeg, yOffset, edgeInset, size, anchor = 0.5 }) {
+  const { faced, sc, center, halfH } = useMemo(() => {
     if (!scene) return { faced: null };
     const f = scene.clone(true);
     f.updateMatrixWorld(true);
@@ -56,12 +56,18 @@ function PerchedFigure({ scene, facingDeg, tiltDeg, yOffset, edgeInset, size }) 
     const size3 = new THREE.Vector3(); box.getSize(size3);
     const ctr = new THREE.Vector3(); box.getCenter(ctr);
     const s = STICKER_SIZE / Math.max(size3.x, size3.y, size3.z, 0.01);
-    return { faced: f, sc: s, center: ctr };
+    // `halfH` is the model's own half-HEIGHT once normalised — core's `seatHalf`, same formula.
+    // Half of STICKER_SIZE would only be right for a model whose height is its longest axis.
+    return { faced: f, sc: s, center: ctr, halfH: (size3.y * s) / 2 };
   }, [scene, facingDeg]);
 
   if (!faced) return null;
   const topY = BOARD_H + BOTTOM_H;            // bottom tier top
-  const py = topY + yOffset;                  // perch: centre straddles the edge (no auto-lift)
+  /* ⚠️ THE SAME LINE CORE USES, or this screen calibrates a pose nobody will see. A model of
+     height 2·halfH touching the rim at fraction f of that height measured from the TOP sits with
+     its centre at halfH·(2f − 1): −halfH at f=0 (top on the lip), 0 at f=0.5 (the middle — what
+     this preview used to hardcode), +halfH at f=1 (standing on its base). */
+  const py = topY + yOffset + halfH * (2 * anchor - 1) * size;
   const pz = TIER_RADII[0] - edgeInset;       // inset from the front rim
   return (
     <group position={[0, py, pz]} scale={size}>
@@ -111,6 +117,12 @@ export default function PerchCalibrator() {
   const [tiltDeg, setTiltDeg] = useState(0);
   const [yOffset, setYOffset] = useState(0);
   const [edgeInset, setEdgeInset] = useState(0);
+  /* Where ALONG the model the rim line touches it, as a fraction of its height from the TOP.
+     0.5 (the middle) is what a perch has always done. ⚠️ A FIGURE'S CONTACT POINT IS NOT
+     ALWAYS ITS FEET: the catalogue doll is modelled SITTING, so she belongs on the rim by her
+     SEAT with her legs hanging down the outside, and her lowest geometry rests on nothing.
+     A fraction says that and holds at every size, where a height nudge is right at one. */
+  const [anchor, setAnchor] = useState(0.5);
   const [size, setSize] = useState(2.5);
 
   const selected = elements.find(e => e.id === elementId) ?? null;
@@ -131,6 +143,7 @@ export default function PerchCalibrator() {
     setTiltDeg(perch.tilt_deg ?? 0);
     setYOffset(perch.y_offset ?? 0);
     setEdgeInset(perch.edge_inset ?? 0);
+    setAnchor(perch.anchor ?? 0.5);
     setSize(pc.r ?? 2.5);
     setBusy(true); setMsg(null);
     loader().loadAsync(selected.image_url)
@@ -147,7 +160,23 @@ export default function PerchCalibrator() {
       r: +size.toFixed(2),
       rotation: [0, Math.round(facingDeg), 0],
       rotation_unit: 'deg',
-      perch: { tilt_deg: +tiltDeg.toFixed(1), y_offset: +yOffset.toFixed(2), edge_inset: +edgeInset.toFixed(2) },
+      /* ⚠️ SPREAD THE EXISTING PERCH, DO NOT REPLACE IT. This object used to be written from the
+         three fields below and nothing else, so every other key on `perch` was destroyed by a save
+         from this screen — `seat` (which decides whether a figure stands on the rim or straddles
+         it) and `foot` (which decides whether it stands on its measured feet or on the centre of
+         its bounding box) are both authored in Manage Elements, and both would vanish the next
+         time anyone touched a slider here. The failure is silent and the screen looks right: the
+         figure only moves later, on a cake. Same family as the verge read-back that rewrote an
+         unknown seat to 'center' merely by opening the row. */
+      /* ⚠️ `seat` IS DROPPED WHEN AN ANCHOR IS WRITTEN, because they say the same thing and a row
+         holding both is a contradiction nobody can see on this screen. A named seat IS a fraction
+         — base = 1, center = 0.5, hang = 0 — so saving `anchor: 0.5` beside a leftover
+         `seat: "base"` states two different poses at once. Core resolves it in the anchor's favour
+         (the explicit number beats the shorthand), but leaving the dead key on the row invites the
+         next reader to believe the seat still means something. */
+      perch: { ...(() => { const { seat, ...rest } = existing.perch ?? {}; return rest; })(),
+               anchor: +anchor.toFixed(2),
+               tilt_deg: +tiltDeg.toFixed(1), y_offset: +yOffset.toFixed(2), edge_inset: +edgeInset.toFixed(2) },
     };
   }
 
@@ -179,9 +208,10 @@ export default function PerchCalibrator() {
               <Slider label="Facing"   value={facingDeg} min={-180} max={180} step={1}    onChange={setFacingDeg} fmt={v => `${v}°`} />
               <Slider label="Tilt"     value={tiltDeg}   min={-45}  max={45}  step={1}    onChange={setTiltDeg}   fmt={v => `${v}°`} />
               <Slider label="Height"   value={yOffset}   min={-1}   max={1}   step={0.01} onChange={setYOffset}   fmt={v => v.toFixed(2)} />
+              <Slider label="Sits at"  value={anchor}    min={0}    max={1}   step={0.01} onChange={setAnchor}    fmt={v => v.toFixed(2)} />
               <Slider label="Edge in"  value={edgeInset} min={-0.3} max={0.8} step={0.01} onChange={setEdgeInset} fmt={v => v.toFixed(2)} />
               <Slider label="Size"     value={size}      min={0.5}  max={10}  step={0.1}  onChange={setSize}      fmt={v => v.toFixed(1)} />
-              <div style={S.hint}>Facing turns it to look outward; Height seats it on the edge; Edge in tucks it back from the rim; Tilt leans it.</div>
+              <div style={S.hint}>Facing turns it to look outward; <b>Sits at</b> is WHERE on the model the rim touches it — 0 is its top, 0.5 its middle, 1 its base — so a figure modelled sitting rests on its seat with its legs hanging below the lip; Height nudges it after that; Edge in tucks it back from the rim; Tilt leans it. ⚠️ Prefer “Sits at” over “Height”: a fraction is a statement about the model and holds at every size, while a nudge is a world distance that is right at one size and wrong at the rest.</div>
               <button style={S.btn} onClick={handleSave} disabled={busy}>{busy ? 'Working…' : 'Save to element'}</button>
               <button style={S.ghost} onClick={() => { navigator.clipboard?.writeText(JSON.stringify(buildPlacementConfig(), null, 2)); setMsg({ ok: true, text: 'placement_config copied.' }); }}>Copy JSON</button>
               {msg && <div style={{ ...S.hint, color: msg.ok ? '#2C7A3F' : '#C0392B', fontWeight: 700 }}>{msg.text}</div>}
@@ -198,7 +228,7 @@ export default function PerchCalibrator() {
               <directionalLight position={[-4, 2, -3]} intensity={0.5} />
               <Environment preset="studio" />
               <CakeMesh />
-              {scene && <PerchedFigure scene={scene} facingDeg={facingDeg} tiltDeg={tiltDeg} yOffset={yOffset} edgeInset={edgeInset} size={size} />}
+              {scene && <PerchedFigure scene={scene} facingDeg={facingDeg} tiltDeg={tiltDeg} yOffset={yOffset} edgeInset={edgeInset} size={size} anchor={anchor} />}
               <OrbitControls target={[0, 1.4, 0]} makeDefault enablePan />
             </Canvas>
           </div>

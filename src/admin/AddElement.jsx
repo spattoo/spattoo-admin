@@ -281,7 +281,7 @@ export default function AddElement() {
   // the designer's registry looks up to place one — so without it the row is inert: it appears in
   // the picker, and tapping it does nothing at all.
   const [generator, setGenerator]         = useState('');
-  // 2D only: run remove.bg on the uploaded image. ON by default (most decals are photographed/solid
+  // 2D only: cut the background out of the uploaded image. ON by default (most decals are photographed/solid
   // and need their background stripped). Turn OFF for assets whose alpha is already authored — e.g. a
   // photo-frame overlay (border + transparent window) — so the asset is uploaded untouched + un-cropped.
   const [removeBgEnabled, setRemoveBgEnabled] = useState(true);
@@ -869,7 +869,7 @@ export default function AddElement() {
 
           {assetType === '2D' && (
             <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 8 }}
-              title="Run remove.bg on the uploaded image. Turn off for images whose transparency is already correct (e.g. a photo-frame overlay).">
+              title="Cut the background out of the uploaded image. Turn off for images whose transparency is already correct (e.g. a photo-frame overlay).">
               <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={removeBgEnabled} onChange={e => setRemoveBgEnabled(e.target.checked)} />
               <div>
                 <div style={s.checkLabel}>Remove background</div>

@@ -486,6 +486,10 @@ function Group({ title, sub, children }) {
    any other anchor to `center` on open — so a row authored as `hang` would show as center and be
    saved back as center by the next unrelated edit. */
 const VERGE_SEATS = ['center', 'base', 'hang'];
+/* ⚠️ READ BACK AGAINST THIS LIST, NOT STORED BLIND — the same trap VERGE_SEATS exists for. A value
+   the list does not know is silently rewritten to 'center' on open and saved that way, so an
+   authored seat would be lost by merely LOOKING at the row. */
+const PERCH_SEATS = ['center', 'base'];
 
 export default function ManageElements() {
   const [elementTypes, setElementTypes] = useState([]);
@@ -606,7 +610,7 @@ export default function ManageElements() {
   // NOT deliberate, so plain "Save" must ignore it (only "Save + Thumbnail" persists it).
   const [thumbManual,      setThumbManual]      = useState(false);
   const [removingBg,       setRemovingBg]       = useState(false);
-  // 2D only: run remove.bg when generating the thumbnail from a replaced image. ON by default; turn
+  // 2D only: cut the background out when generating the thumbnail from a replaced image. ON by default; turn
   // OFF for images whose alpha is already authored (e.g. a photo-frame overlay). NOTE: the asset
   // (image_url) is always uploaded untouched here regardless — this only governs the auto-thumbnail.
   const [removeBgEnabled,  setRemoveBgEnabled]  = useState(true);
@@ -659,6 +663,16 @@ export default function ManageElements() {
   const [vergeAngle,     setVergeAngle]     = useState('');   // verge.angle_deg (blank = default 35)
   const [vergeYOffset,   setVergeYOffset]   = useState('');   // verge.y_offset (blank = 0)
   const [vergeEdgeInset, setVergeEdgeInset] = useState('');   // verge.edge_inset (blank = 0)
+  const [vergeAnchor,    setVergeAnchor]    = useState('');   // verge.anchor: 0..1 from the TOP
+  /* Perch (straddles the rim edge) — placement_config.perch. ⚠️ THESE HAD NO CONTROLS AT ALL until
+     a fondant doll was reported hanging in the air: the mode could be chosen in the zone row, but
+     tilt_deg / y_offset / edge_inset — and the seat below — could only be reached by hand-editing
+     the JSON. A value only an engineer can set is not authorable (root CLAUDE.md rule 3). */
+  const [perchSeat,      setPerchSeat]      = useState('center'); // perch.seat: center | base
+  const [perchTilt,      setPerchTilt]      = useState('');   // perch.tilt_deg (blank = 0)
+  const [perchYOffset,   setPerchYOffset]   = useState('');   // perch.y_offset (blank = 0)
+  const [perchEdgeInset, setPerchEdgeInset] = useState('');   // perch.edge_inset (blank = 0)
+  const [perchAnchor,    setPerchAnchor]    = useState('');   // perch.anchor: 0..1 from the TOP
   /* Where a MESSAGE may be written ON this element (placement_config.text_path). Off = absent, and
      absent is what every element has: the baker is then offered nothing, rather than a control that
      does nothing. The shape values are all RELATIVE (a fraction of a band, never a position) —
@@ -683,6 +697,7 @@ export default function ManageElements() {
      ABSENCE meant "does not" would silently re-pose the whole catalogue on the next save. The
      checkbox therefore reads as "always faces the viewer" and un-ticking is what gets recorded. */
   const [faceCamera,    setFaceCamera]    = useState(true);
+  const [freeHand,      setFreeHand]      = useState(false);   // placement_config.free_hand
   const [foldAngle,     setFoldAngle]     = useState('');
   const [spineSplit,    setSpineSplit]    = useState('');
   const [recolorMethod, setRecolorMethod] = useState('opaque');
@@ -852,9 +867,16 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    setVergeAnchor(pc.verge?.anchor != null ? String(pc.verge.anchor) : '');
+    setPerchSeat(PERCH_SEATS.includes(pc.perch?.seat) ? pc.perch.seat : 'center');
+    setPerchTilt(pc.perch?.tilt_deg != null ? String(pc.perch.tilt_deg) : '');
+    setPerchYOffset(pc.perch?.y_offset != null ? String(pc.perch.y_offset) : '');
+    setPerchEdgeInset(pc.perch?.edge_inset != null ? String(pc.perch.edge_inset) : '');
+    setPerchAnchor(pc.perch?.anchor != null ? String(pc.perch.anchor) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
+    setFreeHand(pc.free_hand === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -1112,9 +1134,16 @@ export default function ManageElements() {
     setVergeAngle(pc.verge?.angle_deg != null ? String(pc.verge.angle_deg) : '');
     setVergeYOffset(pc.verge?.y_offset != null ? String(pc.verge.y_offset) : '');
     setVergeEdgeInset(pc.verge?.edge_inset != null ? String(pc.verge.edge_inset) : '');
+    setVergeAnchor(pc.verge?.anchor != null ? String(pc.verge.anchor) : '');
+    setPerchSeat(PERCH_SEATS.includes(pc.perch?.seat) ? pc.perch.seat : 'center');
+    setPerchTilt(pc.perch?.tilt_deg != null ? String(pc.perch.tilt_deg) : '');
+    setPerchYOffset(pc.perch?.y_offset != null ? String(pc.perch.y_offset) : '');
+    setPerchEdgeInset(pc.perch?.edge_inset != null ? String(pc.perch.edge_inset) : '');
+    setPerchAnchor(pc.perch?.anchor != null ? String(pc.perch.anchor) : '');
     // insert is loaded per-zone inside loadZonesFromPc (splitZoneValue promotes the legacy global).
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
+    setFreeHand(pc.free_hand === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -1156,12 +1185,32 @@ export default function ManageElements() {
   };
   // The verge descriptor (rests on the rim lip, reclines outward) — only non-blank fields; all blank
   // → '' so patchPc drops the key and the designer uses its defaults (angle_deg 35 / 0 offsets).
-  const vergeDesc = (seat = vergeSeat, a = vergeAngle, y = vergeYOffset, ei = vergeEdgeInset) => {
+  const vergeDesc = (seat = vergeSeat, a = vergeAngle, y = vergeYOffset, ei = vergeEdgeInset,
+                     an = vergeAnchor) => {
     const v = {};
     if (seat !== 'center') v.seat = seat;   // default 'center' omitted (the renderer default)
     if (a  !== '') v.angle_deg  = parseFloat(a);
     if (y  !== '') v.y_offset   = parseFloat(y);
     if (ei !== '') v.edge_inset = parseFloat(ei);
+    if (an !== '') v.anchor     = parseFloat(an);
+    return Object.keys(v).length ? v : '';
+  };
+  // The perch descriptor (straddles the rim edge) — same rule as vergeDesc: only non-blank fields,
+  // all blank → '' so patchPc drops the key and core's own defaults apply.
+  /* ⚠️ EVERY KEY THIS OBJECT CAN HOLD MUST BE LISTED, because `patchPc` REPLACES `perch` rather
+     than merging into it — so a field missing from here is silently destroyed the moment anyone
+     edits any other field on this screen. `anchor` was missing, which would have wiped a pose
+     calibrated in the Perch Calibrator on the next unrelated edit. The same failure the calibrator
+     had from the other direction, and it is why `anchor` is in the signature rather than spread
+     from the current config: a builder that forgets a key cannot be noticed by reading it. */
+  const perchDesc = (seat = perchSeat, t = perchTilt, y = perchYOffset, ei = perchEdgeInset,
+                     an = perchAnchor) => {
+    const v = {};
+    if (seat !== 'center') v.seat = seat;   // default 'center' omitted (the renderer default)
+    if (t  !== '') v.tilt_deg   = parseFloat(t);
+    if (y  !== '') v.y_offset   = parseFloat(y);
+    if (ei !== '') v.edge_inset = parseFloat(ei);
+    if (an !== '') v.anchor     = parseFloat(an);
     return Object.keys(v).length ? v : '';
   };
   /* ⚠️ ONLY WHAT THE ADMIN ACTUALLY SET. Every key here has a seed in core, and writing a value that
@@ -2311,7 +2360,7 @@ export default function ManageElements() {
                       in the other one. */}
                   {!isPipingPattern && !isGlb && (
                     <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 8 }}
-                      title="Run remove.bg when generating the thumbnail from a replaced image. The asset itself is always uploaded untouched.">
+                      title="Cut the background out when generating the thumbnail from a replaced image. The asset itself is always uploaded untouched.">
                       <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={removeBgEnabled}
                         onChange={e => { const v = e.target.checked; setRemoveBgEnabled(v); if (newAssetFile) processRemoveBg(newAssetFile, v); }} />
                       <div>
@@ -2851,8 +2900,71 @@ export default function ManageElements() {
                               placeholder="edge inset — e.g. 0"
                               onChange={e => { setVergeEdgeInset(e.target.value); patchPc({ verge: vergeDesc(vergeSeat, vergeAngle, vergeYOffset, e.target.value) }); }} />
                           </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Rim touches at</span>
+                            <input type="number" min="0" max="1" step="0.01" style={{ ...s.input, flex: 1 }} value={vergeAnchor}
+                              placeholder="0 = top · 0.5 = middle · 1 = base (blank = use the seat)"
+                              onChange={e => { setVergeAnchor(e.target.value); patchPc({ verge: vergeDesc(vergeSeat, vergeAngle, vergeYOffset, vergeEdgeInset, e.target.value) }); }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            Where ALONG this model the rim line touches it, as a fraction of its height measured from the TOP. The three seats above are three points on that line — 0 is “hang”, 0.5 is “center”, 1 is “base” — and this sets anything between, for a model whose contact point is neither. A satin bow is tied at the centre of its KNOT, which sits about 0.1 down from the top, so “hang” alone drops the whole bow below the lip. ⚠️ Use this rather than the height nudge: a fraction is a statement about the MODEL and holds at every size, while a nudge is a world distance that is right at one size and wrong at the rest. Blank = follow the seat.
+                          </div>
                           <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
                             Verge reclines radially outward over the rim (butterflies, flowers). Seat = center (mid-spine on the lip, body drapes over), base (body base on the top), or hang (the model's TOP meets the lip and the body falls down the OUTSIDE — a ribbon tied at the rim; the tilt pivots at that contact, so the tails swing through the air instead of into the wall). Lean angle° (blank = 35) is the default Tilt, plus a height nudge — on a hang seat that is how far the knot sits above the rim. ⚠️ Edge inset is a SEED only: a drag round the rim discards it, and a proud piece now stands off on its own measured depth, so leave it at 0.
+                          </div>
+                        </>
+                      )}
+                      {/* ⚠️ THE ESCAPE HATCH, AND IT IS DELIBERATELY NOT THE DEFAULT. Everything else on
+                          this screen describes a pose the app can then seat for every baker on every
+                          cake size. Some pieces defeat that: a bow is tied at its knot, a doll sits on
+                          her seat with her legs hanging, and a flat ribbon on a round wall lifts at its
+                          edges wherever its anchor is. For those, the honest answer is to hand the
+                          placing to the person looking at the cake. Sandeep: *"lets give a free hand
+                          moment to the user for this now."* */}
+                      <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4 }}>
+                        <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={freeHand}
+                          onChange={e => { const on = e.target.checked; setFreeHand(on);
+                            patchPc({ free_hand: on ? true : '' }); }} />
+                        <div>
+                          <div style={s.checkLabel}>Free hand placement</div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            The customer gets a 3D move gizmo on this decoration — three coloured axis arrows, dragged in the scene — and can put it anywhere. Turning this on RELEASES the rules that would otherwise seat it: the rim lock on a drag, and the automatic stand-off that holds an edge piece clear of the icing. ⚠️ Use it for a piece whose resting place cannot be stated as a rule — a ribbon that must drape over whatever cream happens to be on the rim, say. Everything else is better seated automatically, because a seat holds at every cake size and on every tier, and a hand-placed position only holds where it was placed.
+                          </div>
+                        </div>
+                      </label>
+                      {applicableZones.some(z => (placementZoneConfig[z] ?? 'hug') === 'perch') && (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Perch seat</span>
+                            <select style={{ ...s.select, flex: 1 }} value={perchSeat}
+                              onChange={e => { setPerchSeat(e.target.value); patchPc({ perch: perchDesc(e.target.value) }); }}>
+                              <option value="center">center — the body's MIDDLE on the rim line (straddles the edge)</option>
+                              <option value="base">base — the body's BASE on the rim, so it stands on the edge</option>
+                            </select>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Perch lean</span>
+                            <input type="number" step="1" style={{ ...s.input, flex: 1 }} value={perchTilt}
+                              placeholder="tilt° — e.g. 0 (blank = 0)"
+                              onChange={e => { setPerchTilt(e.target.value); patchPc({ perch: perchDesc(perchSeat, e.target.value) }); }} />
+                            <input type="number" step="0.01" style={{ ...s.input, flex: 1 }} value={perchYOffset}
+                              placeholder="height — e.g. 0"
+                              onChange={e => { setPerchYOffset(e.target.value); patchPc({ perch: perchDesc(perchSeat, perchTilt, e.target.value) }); }} />
+                            <input type="number" step="0.01" style={{ ...s.input, flex: 1 }} value={perchEdgeInset}
+                              placeholder="edge inset — e.g. 0"
+                              onChange={e => { setPerchEdgeInset(e.target.value); patchPc({ perch: perchDesc(perchSeat, perchTilt, perchYOffset, e.target.value) }); }} />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Rim touches at</span>
+                            <input type="number" min="0" max="1" step="0.01" style={{ ...s.input, flex: 1 }} value={perchAnchor}
+                              placeholder="0 = top · 0.5 = middle · 1 = base (blank = use the seat)"
+                              onChange={e => { setPerchAnchor(e.target.value); patchPc({ perch: perchDesc(perchSeat, perchTilt, perchYOffset, perchEdgeInset, e.target.value) }); }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            Where ALONG this model the rim line touches it, as a fraction of its height from the TOP — the same number the Perch Calibrator's “Sits at” slider writes, and the easier place to set it is there, with the figure on screen. A model drawn SITTING rests on its seat with its legs below the lip, which is neither its base nor its middle. ⚠️ It OVERRIDES the seat above and switches off the automatic rim stand-off, because a calibrated pose should not then be pushed outward by something the calibrator never showed. ⚠️ Prefer it over the height nudge: a fraction is a statement about the MODEL and holds at every size, while a nudge is a world distance that is right at one size and wrong at the rest.
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                            Perch straddles the rim edge. Seat = center (the body's middle on the rim line — right for a ribbon or a folded card, which have half to hang either side) or base (the body's base on the rim, so it STANDS on the edge — right for a figure). ⚠️ Pick base for anything with legs: a centre seat drops the lower half below the rim, and at the edge that half is past the wall, so the piece hangs in the air. ⚠️ Height is a raw nudge and does NOT scale with the customer's Size dial, so it cannot stand in for the seat — a figure tuned to look right at one size floats at every other. Leave it at 0 once the seat is right.
                           </div>
                         </>
                       )}
@@ -3271,7 +3383,7 @@ export default function ManageElements() {
                         style={{ ...s.btn('secondary'), flex: 1, opacity: (saving || removingBg) ? 0.6 : 1 }}
                         onClick={() => handleSave(true)}
                         disabled={saving || removingBg}
-                        title="Save and upload the captured thumbnail (uses a remove.bg credit)"
+                        title="Save and upload the captured thumbnail (cutting the background out costs a fraction of a rupee)"
                       >
                         {removingBg ? 'Processing thumbnail…' : 'Save + Thumbnail'}
                       </button>

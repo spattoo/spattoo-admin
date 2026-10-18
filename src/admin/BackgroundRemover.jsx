@@ -62,7 +62,7 @@ export default function BackgroundRemover() {
     <div style={s.wrap}>
       <div style={s.panel}>
         <div style={s.title}>Background Remover</div>
-        <div style={s.hint}>In-browser cutouts (isnet model) — no remove.bg cost.</div>
+        <div style={s.hint}>In-browser cutouts (isnet model) — nothing is sent to a paid vendor.</div>
 
         <button style={s.fileBtn} onClick={() => fileRef.current?.click()}>Choose image…</button>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}

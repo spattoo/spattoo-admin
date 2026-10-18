@@ -1004,7 +1004,7 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
       if (!glCanvas) throw new Error('Preview not ready — try again');
       const rawThumb = await new Promise(r => glCanvas.toBlob(r, 'image/png'));
       let thumbBlob = rawThumb;
-      try { thumbBlob = await removeBg(rawThumb); } catch (e) { console.warn('remove.bg failed:', e.message); }
+      try { thumbBlob = await removeBg(rawThumb); } catch (e) { console.warn('background removal failed:', e.message); }
 
       const buffer = await buildGLBBuffer();
       const glbBlob = new Blob([buffer], { type: 'model/gltf-binary' });
