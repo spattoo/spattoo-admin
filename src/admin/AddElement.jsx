@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { fetchElementTypes, fetchAdminElementCategories, createElementCategory, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide } from '../lib/api.js';
+import { fetchElementTypes, fetchAdminElementCategories, createElementCategory, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide, fetchDecorationMediums } from '../lib/api.js';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM } from '../lib/elementImage.js';
 import { toStatColumns, measureGlbBuffer, deriveAssetClass } from '../lib/glb.js';
@@ -285,6 +285,22 @@ export default function AddElement() {
   // and need their background stripped). Turn OFF for assets whose alpha is already authored — e.g. a
   // photo-frame overlay (border + transparent window) — so the asset is uploaded untouched + un-cropped.
   const [removeBgEnabled, setRemoveBgEnabled] = useState(true);
+  /* ⚠️ THE GUIDE IS BUILT AT CREATION, AND THERE WAS NO WAY TO SAY "DO NOT". `POST /admin/elements`
+     fires `ensureDecorationGuide` after it answers, which asks `decorationPolicy` — and that reads
+     `placement_config.ready_made` FIRST, with its own note saying why: "without that an admin could
+     tick the box, generate a guide anyway, SPEND THE CREDITS, and have the result hidden by the
+     fetch filter". That is exactly what happened here, because the tick only existed in Manage
+     Elements: every element created on this screen paid for a how-to, and ticking it afterwards
+     only hid the one we had already bought. Sandeep: "it is trying to generate for every element
+     now which is created from create element and thats costing money". */
+  const [readyMade, setReadyMade] = useState(false);
+  /* ⚠️ "MADE WITH" WAS MISSING HERE TOO, and it is the other half of the same bill. The create
+     payload never sent `medium`, so every new element arrived with none — and with nothing stated,
+     decorationPolicy falls back to inferring from the type and offers a modelling guide. An
+     acrylic topper or a printed sheet has no hand-made version at all; the guide it paid for
+     describes a process that does not exist. */
+  const [medium, setMedium] = useState('');
+  const [mediums, setMediums] = useState([]);
   const [elementColor, setElementColor]   = useState('#F0DEB8');
   const [userPickedColor, setUserPickedColor] = useState(false);
   const [glbRoughness, setGlbRoughness]   = useState(0.6);
@@ -365,6 +381,12 @@ export default function AddElement() {
     fetchElementTypes()
       .then(setElementTypes)
       .catch(err => setMsg({ ok: false, text: err.message }));
+    /* Like categories below: not required to save, so a failure must not block the form. The
+       select simply offers "not stated", which is what every element created here has had until
+       now anyway. */
+    fetchDecorationMediums()
+      .then(setMediums)
+      .catch(() => {});
     // Categories are not required to save, so a failure here must not block the form — the element
     // is still perfectly placeable without one, it just has no home in the browsing menu yet.
     fetchAdminElementCategories()
@@ -623,6 +645,9 @@ export default function AddElement() {
         // A procedural element IS its generator. `placement_config.procedural` is what
         // PROCEDURAL_TOOLS in the designer looks up, and the row does nothing without it.
         if (isProcedural) builtPlacementConfig.procedural = generator.trim();
+        /* Only when true — the key is absent otherwise, matching how Manage Elements clears it
+           ('' removes the key) so a config never carries `ready_made: false` forever. */
+        if (readyMade) builtPlacementConfig.ready_made = true;
         // GLB material finish (placement_config.roughness/metalness): persist so the designer can read
         // it as matte (high roughness / 0 metalness) or metallic (low roughness / high metalness) —
         // config-driven, applied on the one art render path. GLB only.
@@ -735,6 +760,9 @@ export default function AddElement() {
         name:             name.trim(),
         description:      description.trim() || null,
         element_type_id:  elementTypeId,
+        // Blank means "not stated", which is what the policy treats as unknown — the same meaning
+        // Manage Elements gives it. Never sent as '' or the column's check would refuse the row.
+        medium:           medium || null,
         // null, not '' — the column is a uuid FK, and an empty string is not a valid uuid.
         category_id:      categoryId || null,
         parent_id:        isParent ? null : parentId,
@@ -866,6 +894,47 @@ export default function AddElement() {
             file={assetFile}
             onChange={f => { setAssetFile(f); setOptimizedStats(null); setGlbHasTexture(null); setUserPickedColor(false); setGlbRoughness(0.6); setGlbMetalness(0); setGlbEnvPreset('none'); setGlbRotation([0,0,0]); setFrontConfirmed(false); }}
           />
+
+          {/* ⚠️ THE TWO CONTROLS THAT DECIDE WHETHER WE PAY FOR A GUIDE SIT TOGETHER, because they
+              answer one question between them — is this thing made, and out of what. Split across
+              two screens, an admin sets neither until after the money is spent.
+              The option labels say what X-Ray will DO with the choice rather than naming the
+              material alone, derived from the same two booleans the policy reads — copied from
+              Manage Elements so the two screens cannot describe one field differently. */}
+          <div style={{ marginTop: 8 }}>
+            <label style={s.label}>Made with</label>
+            <select value={medium} onChange={e => setMedium(e.target.value)}
+              style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #C5D4C8', background: '#fff', fontSize: 13, fontFamily: "'Quicksand', sans-serif", color: '#2F4A38' }}>
+              <option value="">Not stated — X-Ray offers both</option>
+              {mediums.map(m => (
+                <option key={m.key} value={m.key}>
+                  {m.label}{' — '}
+                  {m.can_model && m.can_print ? 'guide + print'
+                    : m.can_model ? 'guide only'
+                    : m.can_print ? 'print only'
+                    : 'no guide, no print'}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* ⚠️ SAME WORDS AS MANAGE ELEMENTS, deliberately — it writes the same key and means the
+              same thing, and two screens describing one flag differently is how an admin learns to
+              distrust both. The difference is only in WHEN: here it stops a guide being built;
+              there it hides one that already exists. */}
+          <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 8 }}
+            title="Bought rather than made — skips building a how-to guide for it.">
+            <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }}
+              checked={readyMade} onChange={e => setReadyMade(e.target.checked)} />
+            <div>
+              <div style={s.checkLabel}>Ready-made — no how-to guide</div>
+              <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                Bought from a supply shop rather than made: faux balls, ready toppers, candles.
+                Tick it <b>before creating</b> — the guide is built the moment the element is saved,
+                so ticking it later hides a guide we have already paid for.
+              </div>
+            </div>
+          </label>
 
           {assetType === '2D' && (
             <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 8 }}
