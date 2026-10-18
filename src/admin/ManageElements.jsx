@@ -610,7 +610,7 @@ export default function ManageElements() {
   // NOT deliberate, so plain "Save" must ignore it (only "Save + Thumbnail" persists it).
   const [thumbManual,      setThumbManual]      = useState(false);
   const [removingBg,       setRemovingBg]       = useState(false);
-  // 2D only: run remove.bg when generating the thumbnail from a replaced image. ON by default; turn
+  // 2D only: cut the background out when generating the thumbnail from a replaced image. ON by default; turn
   // OFF for images whose alpha is already authored (e.g. a photo-frame overlay). NOTE: the asset
   // (image_url) is always uploaded untouched here regardless — this only governs the auto-thumbnail.
   const [removeBgEnabled,  setRemoveBgEnabled]  = useState(true);
@@ -2360,7 +2360,7 @@ export default function ManageElements() {
                       in the other one. */}
                   {!isPipingPattern && !isGlb && (
                     <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 8 }}
-                      title="Run remove.bg when generating the thumbnail from a replaced image. The asset itself is always uploaded untouched.">
+                      title="Cut the background out when generating the thumbnail from a replaced image. The asset itself is always uploaded untouched.">
                       <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={removeBgEnabled}
                         onChange={e => { const v = e.target.checked; setRemoveBgEnabled(v); if (newAssetFile) processRemoveBg(newAssetFile, v); }} />
                       <div>
@@ -3383,7 +3383,7 @@ export default function ManageElements() {
                         style={{ ...s.btn('secondary'), flex: 1, opacity: (saving || removingBg) ? 0.6 : 1 }}
                         onClick={() => handleSave(true)}
                         disabled={saving || removingBg}
-                        title="Save and upload the captured thumbnail (uses a remove.bg credit)"
+                        title="Save and upload the captured thumbnail (cutting the background out costs a fraction of a rupee)"
                       >
                         {removingBg ? 'Processing thumbnail…' : 'Save + Thumbnail'}
                       </button>

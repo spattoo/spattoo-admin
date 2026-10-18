@@ -591,7 +591,7 @@ const RecomposeEditor = forwardRef(function RecomposeEditor({
       if (!glCanvas) throw new Error('Preview not ready — try again');
       const rawThumb = await new Promise(r => glCanvas.toBlob(r, 'image/png'));
       let thumbBlob = rawThumb;
-      try { thumbBlob = await removeBg(rawThumb); } catch (e) { console.warn('remove.bg failed:', e.message); }
+      try { thumbBlob = await removeBg(rawThumb); } catch (e) { console.warn('background removal failed:', e.message); }
 
       const { blob, stats, metaSegments, groups } = reviewed;
       const { key: fk } = await uploadBlob('elements/files/3D', `${crypto.randomUUID()}.glb`, blob, 'model/gltf-binary');

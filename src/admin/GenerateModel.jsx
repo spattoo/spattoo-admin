@@ -390,7 +390,7 @@ export default function GenerateModel() {
       if (!glCanvas) throw new Error('3D preview not ready — try again');
       const rawThumb = await new Promise(resolve => glCanvas.toBlob(resolve, 'image/png'));
       let thumbBlob = rawThumb;
-      try { thumbBlob = await removeBg(rawThumb); } catch (e) { console.warn('remove.bg failed:', e.message); }
+      try { thumbBlob = await removeBg(rawThumb); } catch (e) { console.warn('background removal failed:', e.message); }
 
       // export GLB (re-run the script so we don't detach the live preview's root)
       const { root: exportRoot, manifest } = runScript(script);

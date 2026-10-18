@@ -551,7 +551,7 @@ export default function GenerateShape() {
         const fn = `${crypto.randomUUID()}.png`;
         const { key: fk } = await uploadBlob('elements/files/2D', fn, rawBlob, 'image/png');
         let thumbBlob = rawBlob;
-        try { thumbBlob = await removeBg(rawBlob); } catch (e) { console.warn('remove.bg failed:', e.message); }
+        try { thumbBlob = await removeBg(rawBlob); } catch (e) { console.warn('background removal failed:', e.message); }
         const tk = await uploadThumbnail('elements/thumbnails', thumbBlob);
         await createGlobalElement({ name: name.trim(), element_type_id: elementTypeId, parent_id: null, image_url: fk, thumbnail_url: tk, allowed_zones: zones, placement_config: finalPlacementConfig, allowed_actions: capabilities, default_color: null, sort_order: 0 });
 
@@ -561,7 +561,7 @@ export default function GenerateShape() {
         if (!glCanvas) throw new Error('3D preview not ready — try again');
         const rawThumbBlob = await new Promise(resolve => glCanvas.toBlob(resolve, 'image/png'));
         let thumbBlob = rawThumbBlob;
-        try { thumbBlob = await removeBg(rawThumbBlob); } catch (e) { console.warn('remove.bg failed:', e.message); }
+        try { thumbBlob = await removeBg(rawThumbBlob); } catch (e) { console.warn('background removal failed:', e.message); }
 
         // Export GLB
         const glbBuffer = await buildAndExportGLB(shape3d, color3d, roughness, metalness);

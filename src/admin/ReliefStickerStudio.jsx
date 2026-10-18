@@ -374,7 +374,7 @@ export default function ReliefStickerStudio() {
   // `domeBlur`, `edgeRound`, and the normal map's per-texel slope — was measured in a frame the renderer
   // never sees. Same function here, so what you tune is what ships.
   //
-  // removeBgEnabled:false — the studio takes an already-transparent PNG, and remove.bg costs credits. The
+  // removeBgEnabled:false — the studio takes an already-transparent PNG, and a paid cut-out costs money. The
   // upload path runs bg-removal FIRST and then this same normalize, so the framing is identical either way.
   //
   // (Lesson: the raw Dinosaur PNG has its subject at 41% of the frame — 429px tall at bake resolution. The
