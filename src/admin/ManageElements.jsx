@@ -721,6 +721,11 @@ export default function ManageElements() {
      means every time bar one. Pinning a hex is a deliberate override and stays in the studio. */
   const [reliefOn,    setReliefOn]    = useState(false);   // relief present at all
   const [reliefSolid, setReliefSolid] = useState(false);   // relief.solid — extruded cut-out vs displaced shell
+  /* relief.lift — HOW THICK. Blank = the renderer's 0.07. On this screen because an admin adjusting a
+     slab's thickness is routine and the studio is not where they are: Sandeep, *"since admin employees
+     need to adjust it, i dont want them to update the json directly"*. The studio keeps the live
+     preview and every other relief knob; this is the one number that gets nudged after the fact. */
+  const [reliefLift,  setReliefLift]  = useState('');
   const [patternOnly,        setPatternOnly]        = useState(false);
   const [description,      setDescription]      = useState('');
   const [glbRotation,        setGlbRotation]        = useState([0, 0, 0]);
@@ -1063,6 +1068,9 @@ export default function ManageElements() {
   function loadReliefFromPc(pc) {
     setReliefOn(!!pc.relief);
     setReliefSolid(pc.relief?.solid === true);
+    // '' rather than 0.07 when absent: the field must show EMPTY for "the default", or every element
+    // ever opened would be saved carrying an explicit lift it never asked for.
+    setReliefLift(pc.relief?.lift ?? '');
   }
   /* Merge into the relief object rather than replacing it. A studio-authored `bake` block, a painted
      `flatMask`, a tuned `lift` — none of those are on this screen, and rebuilding the object from the two
@@ -2426,6 +2434,27 @@ export default function ManageElements() {
                             </div>
                           </div>
                         </label>
+                      )}
+                      {/* ⚠️ A FRACTION OF THE CAKE'S RADIUS, NOT A MILLIMETRE FIGURE, and the placeholder
+                          says so because it is the thing an admin will get wrong. The renderer computes
+                          `lift × tier radius`, so 0.07 is the same proportion on a 6-inch cake and a
+                          10-inch one; a world dimension typed here would be right on exactly one size
+                          (INVARIANTS #8, and the same reason the stick multipliers below are not lengths).
+                          ⚠️ SHOWN ONLY WITH RELIEF ON, because a thickness for a flat decal is a number
+                          that does nothing — "a form full of those is how an admin stops believing the
+                          form", as the stick depth beside it puts it.
+                          ⚠️ IT FEEDS BOTH SHAPES. The same value is the slab's extrude depth and the
+                          domed shell's displacement scale ("ONE lift→world formula, shared"), so the
+                          label says height rather than naming the cut-out. */}
+                      {reliefOn && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Height</span>
+                          <input type="number" min="0.01" max="0.4" step="0.01"
+                            style={{ ...s.input, flex: 1 }}
+                            value={reliefLift}
+                            placeholder="fraction of the cake's radius — blank = 0.07"
+                            onChange={e => { setReliefLift(e.target.value); patchRelief({ lift: numPatch(e.target.value) }); }} />
+                        </div>
                       )}
                     </div>
                     {reliefOn && (
