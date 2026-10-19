@@ -8,6 +8,7 @@ import {
   fetchDecorationMediums,
   fetchAllElements, fetchParentElements,
   uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
+  makeElementRenderVariant,
 } from '../lib/api.js';
 /* The wire's bounds, from the one place that defines them — see the note on the Wire angle field. */
 import { WIRE_ANGLE, ELEMENT_WIRE_DEFAULTS } from '@spattoo/designer';
@@ -557,6 +558,38 @@ export default function ManageElements() {
 
   // Derive selected element from list (auto-updates after reload)
   const selectedEl = elements.find(e => e.id === selectedId) ?? null;
+
+  /* ── The ≤512 copy the CAKE is textured from (render_key, migration 132) ───────────────────────
+   * A 1024² sticker decodes to ~5.3 MB of RGBA on a GPU; at 512² it is ~1.3 MB, because the cost
+   * follows the AREA. The designer draws the small copy when there is one and the master when there
+   * is not, and an edible print is ALWAYS made from the master — so this is a pure saving with
+   * nothing to weigh up.
+   *
+   * The API makes one at ingest for anything created or re-uploaded since 132. Everything older has
+   * none, which is most of the library, and `scripts/backfillRenderVariants.mjs` needs R2
+   * credentials and a terminal. So the row says whether it has one, and this is the button. */
+  const [renderBusy, setRenderBusy] = useState(false);
+  const [renderNote, setRenderNote] = useState('');
+  useEffect(() => { setRenderNote(''); }, [selectedId]);
+
+  async function makeRenderVariant() {
+    if (!selectedEl || renderBusy) return;
+    setRenderBusy(true);
+    setRenderNote('');
+    try {
+      const r = await makeElementRenderVariant(selectedEl.id);
+      // A null key is a correct answer for a row with no raster master — say the reason rather than
+      // leaving a button that looks like it did nothing.
+      if (!r?.render_key) setRenderNote(r?.reason || 'Nothing to resize here');
+      // Re-read rather than patching the row locally: the key is the API's to derive, and reading it
+      // back is what proves it landed.
+      await loadAll();
+    } catch (err) {
+      setRenderNote(err?.message || 'Could not make it');
+    } finally {
+      setRenderBusy(false);
+    }
+  }
 
   // Form state
   const [name,             setName]             = useState('');
@@ -1919,6 +1952,16 @@ export default function ManageElements() {
                             {isOversized(selectedEl.file_size, isGlb) && ' · optimize'}
                           </span>
                         )}
+                        {/* 2D only — a GLB carries its own textures and its own budget (GlbStatChips). */}
+                        {!isGlb && (selectedEl.render_key
+                          ? <span title="This decoration has a 512px copy, and the 3D cake is drawn from it — a quarter of the GPU memory the master costs. Prints still use the master."
+                                  style={{ fontWeight: 700, color: '#6B8C74' }}>· 512 ready</span>
+                          : <button type="button" onClick={makeRenderVariant} disabled={renderBusy}
+                              title="Make the 512px copy the 3D cake is drawn from. A quarter of the GPU memory on a phone, and nobody can see the difference. Prints always use the master."
+                              style={{ ...s.smallBtn, marginBottom: 0, padding: '2px 9px', fontSize: 11, cursor: renderBusy ? 'wait' : 'pointer' }}>
+                              {renderBusy ? 'Making 512…' : 'Make 512 copy'}
+                            </button>)}
+                        {renderNote && <span style={{ color: '#9BB5A2' }}>· {renderNote}</span>}
                       </div>
                     )}
                     {/* Relief authoring is a 2D-image capability (the studio bakes displacement from the
