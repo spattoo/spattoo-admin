@@ -572,6 +572,62 @@ export default function ManageElements() {
   const [renderNote, setRenderNote] = useState('');
   useEffect(() => { setRenderNote(''); }, [selectedId]);
 
+  /* ── The same job for the whole back catalogue ─────────────────────────────────────────────────
+   * Every element created or re-uploaded since migration 132 gets its 512 copy at ingest. Everything
+   * older has none, and that is most of the library — `scripts/backfillRenderVariants.mjs` does it
+   * but wants R2 credentials and a terminal, which is not a tool this screen's user has.
+   *
+   * ⚠️ NO NEW ENDPOINT, AND NO NEW LIST. The rows are already here: `fetchAllElements` returns
+   * `render_key` on every one, so "which of these is missing a copy" is a filter, not a request. And
+   * the work is the per-element route the button above already calls. This is a loop over the two
+   * things that exist.
+   *
+   * ⚠️ ACTIVE ONLY. A retired element is not drawn on anybody's cake, so converting it spends a
+   * download, a resize and an upload to make a picture nothing will ask for. Re-activating one is
+   * an edit, and an edit regenerates the copy — so this is not a hole, it is the right moment.
+   * (`fetchAllElements` is already catalogue-only, so a baker's own decoration is never touched
+   * from here; those get theirs at ingest, and the sweep script covers the rest.)
+   *
+   * Three at a time: the server downloads, resizes and re-uploads each one, and a hundred at once
+   * would be a denial of service we wrote ourselves. Sequential would take minutes.
+   */
+  const [bulk, setBulk] = useState(null);        // { done, total, failed } while running, else null
+  const [bulkNote, setBulkNote] = useState('');
+  const bulkStop = useRef(false);
+
+  async function makeAllRenderVariants() {
+    // A second press stops it. A job over a hundred rows that cannot be called off is a trap.
+    if (bulk) { bulkStop.current = true; return; }
+    const queue = needsRenderCopy.slice();
+    const total = queue.length;
+    if (!total) return;
+    bulkStop.current = false;
+    setBulkNote('');
+    setBulk({ done: 0, total, failed: 0 });
+    let done = 0, failed = 0;
+    const worker = async () => {
+      while (queue.length && !bulkStop.current) {
+        const el = queue.shift();
+        try { await makeElementRenderVariant(el.id); } catch { failed++; }
+        done++;
+        setBulk({ done, total, failed });
+      }
+    };
+    await Promise.all(Array.from({ length: 3 }, worker));
+    const stopped = bulkStop.current;
+    // Re-read rather than patching rows locally: the list is what proves the copies landed, and
+    // anything that failed is still counted as missing, which is the honest state.
+    //
+    // ⚠️ BEFORE `setBulk(null)`, NOT AFTER. Clearing the progress first re-renders the button from
+    // a list that has not been re-read yet — so for one beat it says "Make 512 copies (91)" about
+    // 91 copies it has just finished making, and only then does it disappear. Seen in the dev run
+    // that converted the catalogue. Holding the progress state until the fresh rows arrive means
+    // the label only ever goes from counting to gone.
+    await loadAll();
+    setBulk(null);
+    setBulkNote(`${done} of ${total} done${failed ? `, ${failed} failed` : ''}${stopped ? ' (stopped)' : ''}`);
+  }
+
   async function makeRenderVariant() {
     if (!selectedEl || renderBusy) return;
     setRenderBusy(true);
@@ -1563,6 +1619,11 @@ export default function ManageElements() {
   // Filter + group elements
   const lowerQuery = query.toLowerCase();
   const overCapCount = elements.filter(el => el.over_cap).length;
+  /* Which decorations the 3D cake is still drawing at full size. A `.glb` is 3D and an `.svg` has no
+     resolution to reduce, so neither is missing anything — only a raster master with no copy is. */
+  const needsRenderCopy = elements.filter(
+    el => el.is_active && /\.(webp|png|jpe?g)$/i.test(el.image_url ?? '') && !el.render_key,
+  );
   // Cut once per render, not per element: `new Date()` inside the filter would make every row's
   // comparison a slightly different "now".
   const touchedSince = touchedWithin ? Date.now() - touchedWithin * 864e5 : null;
@@ -1852,6 +1913,28 @@ export default function ManageElements() {
                   color: overCapOnly ? '#8a6d1a' : '#6B8C74', fontFamily: "'Quicksand',sans-serif", fontSize: 12, fontWeight: 700 }}>
                 {overCapOnly ? '⚠ Showing over-budget only' : `⚠ Over budget (${overCapCount})`}
               </button>
+
+              {/* Only when there is something to do, or something being done — a button that always
+                  reads "0 left" is clutter on a screen that already has plenty. The note after a run
+                  says what happened, since by then the button itself has gone. */}
+              {(needsRenderCopy.length > 0 || bulk) && (
+                <button
+                  onClick={makeAllRenderVariants}
+                  title="Make the 512px copy the 3D cake is drawn from, for every active decoration that has none. A quarter of the GPU memory on a phone; prints always use the master."
+                  style={{ marginTop: 8, width: '100%', padding: '7px 0', borderRadius: 8, cursor: 'pointer',
+                    border: `1.5px solid ${bulk ? '#3D5A44' : '#C5D4C8'}`,
+                    background: bulk ? '#E8EDE9' : '#fff',
+                    color: '#3D5A44', fontFamily: "'Quicksand',sans-serif", fontSize: 12, fontWeight: 700 }}>
+                  {bulk
+                    ? `Making 512 copies — ${bulk.done} of ${bulk.total}… tap to stop`
+                    : `Make 512 copies (${needsRenderCopy.length})`}
+                </button>
+              )}
+              {bulkNote && !bulk && (
+                <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: '#6B8C74', fontFamily: "'Quicksand',sans-serif", textAlign: 'center' }}>
+                  {bulkNote}
+                </div>
+              )}
 
               <div style={s.recencyRow}>
                 {[[0, 'Any time'], [1, 'Today'], [7, '7 days'], [30, '30 days']].map(([days, label]) => (
