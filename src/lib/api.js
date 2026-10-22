@@ -381,6 +381,17 @@ export async function createGlobalElement(payload) {
   return post('/api/admin/elements', payload);
 }
 
+// Make (or remake) the ≤512 WebP copy the 3D cake is textured from — `cake_elements.render_key`,
+// migration 132. The API makes one at ingest for anything created or re-uploaded since; this is for
+// the back catalogue, which is most of the library and gets no render copy until somebody asks.
+//
+// Returns `{ render_key, url }`, or `{ render_key: null, reason }` for a row that has no smaller
+// copy to make — a 3D model, an SVG, an element with no artwork. That is a correct answer, not an
+// error: the renderer falls back to the master.
+export async function makeElementRenderVariant(id) {
+  return post(`/api/admin/elements/${id}/render-variant`, {});
+}
+
 // ── Image → 3D wizard (Meshy.ai) ──────────────────────────────────────────────
 // Run the validation gate + kick off a Meshy image-to-3D task for an already-uploaded
 // source image (R2 key under meshy/source/). A gate rejection comes back as { ok:false,

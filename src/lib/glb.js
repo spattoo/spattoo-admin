@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
@@ -64,6 +65,65 @@ export function measureGlbRoot(root) {
   tris = Math.round(tris);
   const textureMaxDim = textures.reduce((mx, t) => Math.max(mx, t.width, t.height), 0);
   return { tris, textureCount: textures.length, textureMaxDim, decodedMemKB: decodedMemKB(tris, textures) };
+}
+
+/* ── What colour is this model, before anyone recolours it ───────────────────────────────────────
+ *
+ * ⚠️ AN OPTIMISED MODEL ARRIVES WITH NO COLOUR TO SHOW. `bake` mode — the default, and the whole
+ * reason a Meshy download fits on a phone — folds the base-colour TEXTURE into per-vertex colours
+ * and drops the map. Core then has to take the HUE back out for any element marked
+ * colour-changeable, because three.js MULTIPLIES material colour by vertex colour and a baked red
+ * eats every colour a customer picks (designer/canvas/bakedColour.js: ask for cream, get red; ask
+ * for blue, get nearly black). What survives is the shading, which is correct — but with
+ * `default_color` null the piece lands on the cake grey.
+ *
+ * Reported while building one: *"i am loosing the original color of the glb element. is there a way
+ * to retain the original color, but still be able to change it?"* There is, and it is this: record
+ * what the model actually looked like, and put it in `default_color`. The tint then lands over the
+ * preserved shading, so the piece arrives looking like itself AND stays changeable.
+ *
+ * ⚠️ MEASURED FROM THE VERTICES FIRST, because after a bake that is where the colour went. A
+ * material's own `color` is usually white once a map has been folded in, so reading it would report
+ * white for exactly the models this exists for. Material colour is the fallback for a model that
+ * was never baked.
+ *
+ * Weighted by vertex count so a large part decides, not a small one: a unicorn that is mostly white
+ * with a pink horn is white. The mean is taken in LINEAR space (what three stores) and handed back
+ * as an sRGB hex, which is what a colour input and the `default_color` column both speak.
+ */
+export function dominantColour(root) {
+  if (!root?.traverse) return null;
+  let r = 0, g = 0, b = 0, n = 0;
+  let mr = 0, mg = 0, mb = 0, mn = 0;
+  root.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
+    const col = o.geometry.attributes?.color;
+    if (col?.count) {
+      for (let i = 0; i < col.count; i++) { r += col.getX(i); g += col.getY(i); b += col.getZ(i); }
+      n += col.count;
+    }
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      if (!m?.color) continue;
+      const w = o.geometry.attributes?.position?.count ?? 1;
+      mr += m.color.r * w; mg += m.color.g * w; mb += m.color.b * w; mn += w;
+    }
+  });
+  const [lr, lg, lb] = n ? [r / n, g / n, b / n] : mn ? [mr / mn, mg / mn, mb / mn] : [null, null, null];
+  if (lr == null) return null;
+  /* ⚠️ A NEARLY-BLACK OR NEARLY-WHITE MEAN IS NOT A COLOUR, it is an unlit or untextured model, and
+     writing it into `default_color` would paint every piece that colour on arrival. Say nothing
+     instead: null leaves the element exactly as it behaves today. */
+  const lum = 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+  if (lum < 0.004 || lum > 0.985) return null;
+  return '#' + new THREE.Color().setRGB(lr, lg, lb, THREE.LinearSRGBColorSpace).getHexString(THREE.SRGBColorSpace);
+}
+
+/* From a raw buffer, the way `measureGlbBuffer` is — same loader, so a meshopt or Draco file is
+   read identically. This is also how the measurement is testable without a scene in hand. */
+export async function dominantColourFromBuffer(buffer) {
+  const gltf = await bufLoader().parseAsync(buffer, '');
+  return dominantColour(gltf.scene);
 }
 
 // Compare measured stats against a class's caps. Returns one row per metric with over/under flags so

@@ -8,6 +8,7 @@ import {
   fetchDecorationMediums,
   fetchAllElements, fetchParentElements,
   uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
+  makeElementRenderVariant,
 } from '../lib/api.js';
 /* The wire's bounds, from the one place that defines them — see the note on the Wire angle field. */
 import { WIRE_ANGLE, ELEMENT_WIRE_DEFAULTS } from '@spattoo/designer';
@@ -17,7 +18,7 @@ import DecorationGuidePanel from './DecorationGuidePanel.jsx';
 import Modal from './Modal.jsx';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
-import { statsFromElement, readGlbParts, modelFromParts } from '../lib/glb.js';
+import { statsFromElement, readGlbParts, modelFromParts, measureGlbBuffer, toStatColumns, deriveAssetClass } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
 import { serializeZone, zoneValueMode, zoneValueSeat, zoneValueAlt, zoneAltMode, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
@@ -558,6 +559,94 @@ export default function ManageElements() {
   // Derive selected element from list (auto-updates after reload)
   const selectedEl = elements.find(e => e.id === selectedId) ?? null;
 
+  /* ── The ≤512 copy the CAKE is textured from (render_key, migration 132) ───────────────────────
+   * A 1024² sticker decodes to ~5.3 MB of RGBA on a GPU; at 512² it is ~1.3 MB, because the cost
+   * follows the AREA. The designer draws the small copy when there is one and the master when there
+   * is not, and an edible print is ALWAYS made from the master — so this is a pure saving with
+   * nothing to weigh up.
+   *
+   * The API makes one at ingest for anything created or re-uploaded since 132. Everything older has
+   * none, which is most of the library, and `scripts/backfillRenderVariants.mjs` needs R2
+   * credentials and a terminal. So the row says whether it has one, and this is the button. */
+  const [renderBusy, setRenderBusy] = useState(false);
+  const [renderNote, setRenderNote] = useState('');
+  useEffect(() => { setRenderNote(''); }, [selectedId]);
+
+  /* ── The same job for the whole back catalogue ─────────────────────────────────────────────────
+   * Every element created or re-uploaded since migration 132 gets its 512 copy at ingest. Everything
+   * older has none, and that is most of the library — `scripts/backfillRenderVariants.mjs` does it
+   * but wants R2 credentials and a terminal, which is not a tool this screen's user has.
+   *
+   * ⚠️ NO NEW ENDPOINT, AND NO NEW LIST. The rows are already here: `fetchAllElements` returns
+   * `render_key` on every one, so "which of these is missing a copy" is a filter, not a request. And
+   * the work is the per-element route the button above already calls. This is a loop over the two
+   * things that exist.
+   *
+   * ⚠️ ACTIVE ONLY. A retired element is not drawn on anybody's cake, so converting it spends a
+   * download, a resize and an upload to make a picture nothing will ask for. Re-activating one is
+   * an edit, and an edit regenerates the copy — so this is not a hole, it is the right moment.
+   * (`fetchAllElements` is already catalogue-only, so a baker's own decoration is never touched
+   * from here; those get theirs at ingest, and the sweep script covers the rest.)
+   *
+   * Three at a time: the server downloads, resizes and re-uploads each one, and a hundred at once
+   * would be a denial of service we wrote ourselves. Sequential would take minutes.
+   */
+  const [bulk, setBulk] = useState(null);        // { done, total, failed } while running, else null
+  const [bulkNote, setBulkNote] = useState('');
+  const bulkStop = useRef(false);
+
+  async function makeAllRenderVariants() {
+    // A second press stops it. A job over a hundred rows that cannot be called off is a trap.
+    if (bulk) { bulkStop.current = true; return; }
+    const queue = needsRenderCopy.slice();
+    const total = queue.length;
+    if (!total) return;
+    bulkStop.current = false;
+    setBulkNote('');
+    setBulk({ done: 0, total, failed: 0 });
+    let done = 0, failed = 0;
+    const worker = async () => {
+      while (queue.length && !bulkStop.current) {
+        const el = queue.shift();
+        try { await makeElementRenderVariant(el.id); } catch { failed++; }
+        done++;
+        setBulk({ done, total, failed });
+      }
+    };
+    await Promise.all(Array.from({ length: 3 }, worker));
+    const stopped = bulkStop.current;
+    // Re-read rather than patching rows locally: the list is what proves the copies landed, and
+    // anything that failed is still counted as missing, which is the honest state.
+    //
+    // ⚠️ BEFORE `setBulk(null)`, NOT AFTER. Clearing the progress first re-renders the button from
+    // a list that has not been re-read yet — so for one beat it says "Make 512 copies (91)" about
+    // 91 copies it has just finished making, and only then does it disappear. Seen in the dev run
+    // that converted the catalogue. Holding the progress state until the fresh rows arrive means
+    // the label only ever goes from counting to gone.
+    await loadAll();
+    setBulk(null);
+    setBulkNote(`${done} of ${total} done${failed ? `, ${failed} failed` : ''}${stopped ? ' (stopped)' : ''}`);
+  }
+
+  async function makeRenderVariant() {
+    if (!selectedEl || renderBusy) return;
+    setRenderBusy(true);
+    setRenderNote('');
+    try {
+      const r = await makeElementRenderVariant(selectedEl.id);
+      // A null key is a correct answer for a row with no raster master — say the reason rather than
+      // leaving a button that looks like it did nothing.
+      if (!r?.render_key) setRenderNote(r?.reason || 'Nothing to resize here');
+      // Re-read rather than patching the row locally: the key is the API's to derive, and reading it
+      // back is what proves it landed.
+      await loadAll();
+    } catch (err) {
+      setRenderNote(err?.message || 'Could not make it');
+    } finally {
+      setRenderBusy(false);
+    }
+  }
+
   // Form state
   const [name,             setName]             = useState('');
   const [elementTypeId,    setElementTypeId]    = useState('');
@@ -721,6 +810,11 @@ export default function ManageElements() {
      means every time bar one. Pinning a hex is a deliberate override and stays in the studio. */
   const [reliefOn,    setReliefOn]    = useState(false);   // relief present at all
   const [reliefSolid, setReliefSolid] = useState(false);   // relief.solid — extruded cut-out vs displaced shell
+  /* relief.lift — HOW THICK. Blank = the renderer's 0.07. On this screen because an admin adjusting a
+     slab's thickness is routine and the studio is not where they are: Sandeep, *"since admin employees
+     need to adjust it, i dont want them to update the json directly"*. The studio keeps the live
+     preview and every other relief knob; this is the one number that gets nudged after the fact. */
+  const [reliefLift,  setReliefLift]  = useState('');
   const [patternOnly,        setPatternOnly]        = useState(false);
   const [description,      setDescription]      = useState('');
   const [glbRotation,        setGlbRotation]        = useState([0, 0, 0]);
@@ -1063,6 +1157,9 @@ export default function ManageElements() {
   function loadReliefFromPc(pc) {
     setReliefOn(!!pc.relief);
     setReliefSolid(pc.relief?.solid === true);
+    // '' rather than 0.07 when absent: the field must show EMPTY for "the default", or every element
+    // ever opened would be saved carrying an explicit lift it never asked for.
+    setReliefLift(pc.relief?.lift ?? '');
   }
   /* Merge into the relief object rather than replacing it. A studio-authored `bake` block, a painted
      `flatMask`, a tuned `lift` — none of those are on this screen, and rebuilding the object from the two
@@ -1337,6 +1434,31 @@ export default function ManageElements() {
       const assetSrc = (!isGlb && removeBgEnabled && newThumbBlob) ? newThumbBlob : newAssetFile;
       fields.image_url = await uploadAsset(folder, assetSrc);
       fields.file_size = assetSrc.size ?? null;
+      /* ⚠️ RE-MEASURE A REPLACED GLB, or the row keeps the OLD model's cost for ever. This path set
+         `file_size` and nothing else, so every other stat — triangles, texture size, decoded GPU
+         memory, and the `over_cap` flag read from them — stayed describing the file that was just
+         thrown away. Reported on Twisted seaweed: a 579 KB replacement still listed 3.6 MB, 91,728
+         tris and 66.6 MB GPU, and still wore the over-budget tag. The row said so itself —
+         `optimized_at` three minutes EARLIER than `updated_at`.
+
+         ⚠️ AND IT READS WORSE THAN A MISSING NUMBER. A stale stat is a confident wrong one: the
+         budget filter counts the element, the list warns about it, and the person who just fixed it
+         is told their fix did nothing. Nothing here was measuring; AddElement, the GLB Studio and
+         Generate Shape all measure on create — only REPLACE did not, which is why it survived.
+
+         The same three calls those three use, so there is one definition of what a GLB costs. A
+         measurement failure must not block the save: the asset is already uploaded and the row has
+         to point at it, so the stats are left alone and the save proceeds. */
+      if (isGlb) {
+        try {
+          const assetClass = deriveAssetClass({ placementConfig: parsedConfig, zones: applicableZones });
+          // sizeKB is an INTEGER column — a float makes the write fail, as AddElement records.
+          const stats = await measureGlbBuffer(await assetSrc.arrayBuffer(), Math.round(assetSrc.size / 1024), assetClass);
+          Object.assign(fields, toStatColumns(stats));
+        } catch (err) {
+          console.warn('could not measure the replaced GLB — cost stats left as they were:', err?.message);
+        }
+      }
     }
     if (altAssetFile) {
       const key = await uploadAsset('elements/files/3D', altAssetFile);
@@ -1522,6 +1644,11 @@ export default function ManageElements() {
   // Filter + group elements
   const lowerQuery = query.toLowerCase();
   const overCapCount = elements.filter(el => el.over_cap).length;
+  /* Which decorations the 3D cake is still drawing at full size. A `.glb` is 3D and an `.svg` has no
+     resolution to reduce, so neither is missing anything — only a raster master with no copy is. */
+  const needsRenderCopy = elements.filter(
+    el => el.is_active && /\.(webp|png|jpe?g)$/i.test(el.image_url ?? '') && !el.render_key,
+  );
   // Cut once per render, not per element: `new Date()` inside the filter would make every row's
   // comparison a slightly different "now".
   const touchedSince = touchedWithin ? Date.now() - touchedWithin * 864e5 : null;
@@ -1812,6 +1939,28 @@ export default function ManageElements() {
                 {overCapOnly ? '⚠ Showing over-budget only' : `⚠ Over budget (${overCapCount})`}
               </button>
 
+              {/* Only when there is something to do, or something being done — a button that always
+                  reads "0 left" is clutter on a screen that already has plenty. The note after a run
+                  says what happened, since by then the button itself has gone. */}
+              {(needsRenderCopy.length > 0 || bulk) && (
+                <button
+                  onClick={makeAllRenderVariants}
+                  title="Make the 512px copy the 3D cake is drawn from, for every active decoration that has none. A quarter of the GPU memory on a phone; prints always use the master."
+                  style={{ marginTop: 8, width: '100%', padding: '7px 0', borderRadius: 8, cursor: 'pointer',
+                    border: `1.5px solid ${bulk ? '#3D5A44' : '#C5D4C8'}`,
+                    background: bulk ? '#E8EDE9' : '#fff',
+                    color: '#3D5A44', fontFamily: "'Quicksand',sans-serif", fontSize: 12, fontWeight: 700 }}>
+                  {bulk
+                    ? `Making 512 copies — ${bulk.done} of ${bulk.total}… tap to stop`
+                    : `Make 512 copies (${needsRenderCopy.length})`}
+                </button>
+              )}
+              {bulkNote && !bulk && (
+                <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: '#6B8C74', fontFamily: "'Quicksand',sans-serif", textAlign: 'center' }}>
+                  {bulkNote}
+                </div>
+              )}
+
               <div style={s.recencyRow}>
                 {[[0, 'Any time'], [1, 'Today'], [7, '7 days'], [30, '30 days']].map(([days, label]) => (
                   <button key={days} onClick={() => setTouchedWithin(days)}
@@ -1911,6 +2060,16 @@ export default function ManageElements() {
                             {isOversized(selectedEl.file_size, isGlb) && ' · optimize'}
                           </span>
                         )}
+                        {/* 2D only — a GLB carries its own textures and its own budget (GlbStatChips). */}
+                        {!isGlb && (selectedEl.render_key
+                          ? <span title="This decoration has a 512px copy, and the 3D cake is drawn from it — a quarter of the GPU memory the master costs. Prints still use the master."
+                                  style={{ fontWeight: 700, color: '#6B8C74' }}>· 512 ready</span>
+                          : <button type="button" onClick={makeRenderVariant} disabled={renderBusy}
+                              title="Make the 512px copy the 3D cake is drawn from. A quarter of the GPU memory on a phone, and nobody can see the difference. Prints always use the master."
+                              style={{ ...s.smallBtn, marginBottom: 0, padding: '2px 9px', fontSize: 11, cursor: renderBusy ? 'wait' : 'pointer' }}>
+                              {renderBusy ? 'Making 512…' : 'Make 512 copy'}
+                            </button>)}
+                        {renderNote && <span style={{ color: '#9BB5A2' }}>· {renderNote}</span>}
                       </div>
                     )}
                     {/* Relief authoring is a 2D-image capability (the studio bakes displacement from the
@@ -2426,6 +2585,27 @@ export default function ManageElements() {
                             </div>
                           </div>
                         </label>
+                      )}
+                      {/* ⚠️ A FRACTION OF THE CAKE'S RADIUS, NOT A MILLIMETRE FIGURE, and the placeholder
+                          says so because it is the thing an admin will get wrong. The renderer computes
+                          `lift × tier radius`, so 0.07 is the same proportion on a 6-inch cake and a
+                          10-inch one; a world dimension typed here would be right on exactly one size
+                          (INVARIANTS #8, and the same reason the stick multipliers below are not lengths).
+                          ⚠️ SHOWN ONLY WITH RELIEF ON, because a thickness for a flat decal is a number
+                          that does nothing — "a form full of those is how an admin stops believing the
+                          form", as the stick depth beside it puts it.
+                          ⚠️ IT FEEDS BOTH SHAPES. The same value is the slab's extrude depth and the
+                          domed shell's displacement scale ("ONE lift→world formula, shared"), so the
+                          label says height rather than naming the cut-out. */}
+                      {reliefOn && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2C4433', minWidth: 100 }}>Height</span>
+                          <input type="number" min="0.01" max="0.4" step="0.01"
+                            style={{ ...s.input, flex: 1 }}
+                            value={reliefLift}
+                            placeholder="fraction of the cake's radius — blank = 0.07"
+                            onChange={e => { setReliefLift(e.target.value); patchRelief({ lift: numPatch(e.target.value) }); }} />
+                        </div>
                       )}
                     </div>
                     {reliefOn && (
