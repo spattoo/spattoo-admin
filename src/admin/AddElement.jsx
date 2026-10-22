@@ -303,6 +303,9 @@ export default function AddElement() {
   const [mediums, setMediums] = useState([]);
   const [elementColor, setElementColor]   = useState('#F0DEB8');
   const [userPickedColor, setUserPickedColor] = useState(false);
+  // Set when the GLB Studio measured a colour off the model — the swatch is then showing something
+  // real rather than its placeholder, which is what lets `default_color` be written without a pick.
+  const [glbColour, setGlbColour] = useState(false);
   const [glbRoughness, setGlbRoughness]   = useState(0.6);
   const [glbMetalness, setGlbMetalness]   = useState(0);
   const [glbEnvPreset, setGlbEnvPreset]   = useState('none');
@@ -517,10 +520,17 @@ export default function AddElement() {
   // GLB Studio returns the optimized model — swap it in as the working file so the existing 3D
   // preview / rotation / thumbnail flow continues on the optimized geometry, and record the stats
   // (their presence is the save gate). Geometry changed, so the front view must be re-confirmed.
-  function handleOptimized({ blob, stats }) {
+  function handleOptimized({ blob, stats, colour }) {
     const baseName = (assetFile?.name || 'model').replace(/\.(glb|gltf)$/i, '');
     setAssetFile(new File([blob], `${baseName}.glb`, { type: 'model/gltf-binary' }));
     setOptimizedStats(stats);
+    /* ⚠️ THE SWATCH ALREADY SAID "from GLB" AND NOTHING CARRIED ONE. Optimising bakes the model's
+       colour into its vertices, and the renderer takes that hue back out for anything
+       colour-changeable — so with `default_color` null the piece arrives on the cake grey, which
+       is what "i am loosing the original color" is. The studio now measures what the model
+       actually looked like and hands it over; recorded here only if nobody has picked a colour,
+       because a deliberate choice must not be overwritten by a measurement. */
+    if (colour && !userPickedColor) { setElementColor(colour); setGlbColour(true); }
     setGlbStudioFile(null);
     setFrontConfirmed(false);
     setGlbRotation([0, 0, 0]);
@@ -777,7 +787,19 @@ export default function AddElement() {
          * carry delete:false from before the rule, and editing any of them for an unrelated reason
          * would have re-saved it. The form shows the rule; this is what makes it true. */
         allowed_actions:  { ...capabilities, delete: true },
-        default_color:    (assetType === '3D' && userPickedColor) ? elementColor : null,
+        /* A 3D element keeps the colour it came in with — picked here, or measured off the model
+           by the studio — so it lands looking like itself and can still be recoloured. 2D is
+           untouched: a sticker's `default_color` does NOT seed a recolourable image (a palm tree
+           with a green default rendered uniformly green, trunk and all — see PLACEMENT_CONFIG.md). */
+        /* ⚠️ ONLY FOR A COLOUR-CHANGEABLE MODEL, and the distinction is the whole point. The
+           renderer strips the baked hue ONLY from elements that declare themselves recolourable —
+           those are the ones that arrive grey and need a default to look like themselves. A model
+           that is NOT colour-changeable keeps the colours it was authored with and they are
+           already right; writing a measured default there would multiply a tint over a unicorn
+           whose eyes are meant to be black. An explicit pick still wins in both cases: that is
+           somebody's decision, not a measurement. */
+        default_color:    (assetType === '3D' && (userPickedColor || (glbColour && capabilities.color)))
+          ? elementColor : null,
         sort_order:       0,
         // GLB cost stats from the Studio review (§3) — flagged, not gated.
         ...toStatColumns(optimizedStats),

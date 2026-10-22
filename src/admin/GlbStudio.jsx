@@ -8,7 +8,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { toCreasedNormals, mergeVertices, deinterleaveGeometry } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { fetchElementTypes, uploadBlob, uploadThumbnail, createGlobalElement, removeBg } from '../lib/api.js';
-import { measureGlbRoot, evaluateCaps, deriveAssetClass, measureForSave, toStatColumns, ASSET_CLASSES, CAPS } from '../lib/glb.js';
+import { measureGlbRoot, evaluateCaps, deriveAssetClass, measureForSave, toStatColumns, dominantColour, ASSET_CLASSES, CAPS } from '../lib/glb.js';
 import { GlbBudgetRows } from './GlbStats.jsx';
 
 // GLB Studio — import one or more GLBs as "pieces", position them with a gizmo,
@@ -1023,7 +1023,19 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
         allowed_zones: zones,
         placement_config: { ...placementConfig, r: topperSize, _model: { parts: partsMeta, source: 'glb-studio' } },
         allowed_actions: capabilities,
-        default_color: keepOriginal ? null : (parts[0]?.color ?? null),
+        /* ⚠️ WHAT THE MODEL LOOKED LIKE, so it still looks like itself on the cake. An optimised
+           GLB has had its colour baked into vertices and taken back out again by the renderer for
+           anything colour-changeable (lib/glb.js dominantColour explains the whole chain), so a
+           null here lands the piece grey. The part swatch wins when there is one — that is a
+           deliberate choice someone made in this studio — and the measured colour is the answer
+           when there is not, including under `keepOriginal`, which means "use the colours that
+           came in the file" and so wants them recorded more than anything else does.
+
+           ⚠️ MEASURED ONLY FOR A COLOUR-CHANGEABLE MODEL. The renderer strips the baked hue ONLY
+           from elements that declare themselves recolourable, so those are the ones that arrive
+           grey and need a default. One that is not keeps its authored colours and they are already
+           right — a measured default there would tint a unicorn whose eyes are meant to be black. */
+        default_color: parts[0]?.color ?? (capabilities.color ? dominantColour(root) : null) ?? null,
         sort_order: 0,
         ...toStatColumns(stats),
       });
@@ -1057,7 +1069,10 @@ export default function GlbStudio({ initialFile = null, onUse = null } = {}) {
       const base = measureGlbRoot(root);
       const stats = { ...base, sizeKB, assetClass, overCap: evaluateCaps({ ...base, sizeKB }, assetClass).anyOver };
       setMeasured({ ...base, sizeKB });
-      onUse({ blob, stats, parts: parts.filter(p => meshCountFor(p.id) > 0).map(p => ({ id: p.id, label: p.label, default: p.color, finish: p.finish })) });
+      // `colour` travels too: AddElement's swatch already says "from GLB" when nobody has picked
+      // one, and until now nothing carried a colour across for it to mean.
+      onUse({ blob, stats, colour: parts[0]?.color ?? dominantColour(root) ?? null,
+              parts: parts.filter(p => meshCountFor(p.id) > 0).map(p => ({ id: p.id, label: p.label, default: p.color, finish: p.finish })) });
     } catch (e) {
       setError(`Couldn't prepare GLB: ${e.message}`);
     } finally {
