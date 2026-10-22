@@ -18,7 +18,7 @@ import DecorationGuidePanel from './DecorationGuidePanel.jsx';
 import Modal from './Modal.jsx';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM, PATTERN_THUMB_DIM } from '../lib/elementImage.js';
-import { statsFromElement, readGlbParts, modelFromParts } from '../lib/glb.js';
+import { statsFromElement, readGlbParts, modelFromParts, measureGlbBuffer, toStatColumns, deriveAssetClass } from '../lib/glb.js';
 import { GlbStatChips, OverCapBadge } from './GlbStats.jsx';
 import { serializeZone, zoneValueMode, zoneValueSeat, zoneValueAlt, zoneAltMode, zoneShowsSeat, zoneShowsInsert, splitZoneValue, ringZonePrefix } from '../lib/placementSeat.js';
 import PlacementZoneRow from './PlacementZoneRow.jsx';
@@ -1434,6 +1434,31 @@ export default function ManageElements() {
       const assetSrc = (!isGlb && removeBgEnabled && newThumbBlob) ? newThumbBlob : newAssetFile;
       fields.image_url = await uploadAsset(folder, assetSrc);
       fields.file_size = assetSrc.size ?? null;
+      /* ⚠️ RE-MEASURE A REPLACED GLB, or the row keeps the OLD model's cost for ever. This path set
+         `file_size` and nothing else, so every other stat — triangles, texture size, decoded GPU
+         memory, and the `over_cap` flag read from them — stayed describing the file that was just
+         thrown away. Reported on Twisted seaweed: a 579 KB replacement still listed 3.6 MB, 91,728
+         tris and 66.6 MB GPU, and still wore the over-budget tag. The row said so itself —
+         `optimized_at` three minutes EARLIER than `updated_at`.
+
+         ⚠️ AND IT READS WORSE THAN A MISSING NUMBER. A stale stat is a confident wrong one: the
+         budget filter counts the element, the list warns about it, and the person who just fixed it
+         is told their fix did nothing. Nothing here was measuring; AddElement, the GLB Studio and
+         Generate Shape all measure on create — only REPLACE did not, which is why it survived.
+
+         The same three calls those three use, so there is one definition of what a GLB costs. A
+         measurement failure must not block the save: the asset is already uploaded and the row has
+         to point at it, so the stats are left alone and the save proceeds. */
+      if (isGlb) {
+        try {
+          const assetClass = deriveAssetClass({ placementConfig: parsedConfig, zones: applicableZones });
+          // sizeKB is an INTEGER column — a float makes the write fail, as AddElement records.
+          const stats = await measureGlbBuffer(await assetSrc.arrayBuffer(), Math.round(assetSrc.size / 1024), assetClass);
+          Object.assign(fields, toStatColumns(stats));
+        } catch (err) {
+          console.warn('could not measure the replaced GLB — cost stats left as they were:', err?.message);
+        }
+      }
     }
     if (altAssetFile) {
       const key = await uploadAsset('elements/files/3D', altAssetFile);
