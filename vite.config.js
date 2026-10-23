@@ -18,7 +18,37 @@ const CORE_SRC = path.resolve(import.meta.dirname, '../spattoo-core/src/index.js
    `git archive HEAD src` byte for byte, so nothing injected at pack time survives, and a committed
    flag cannot tell a tarball from a working tree that has moved past the same commit. Admin is the
    only place that knows, and it knows it HERE. See spattoo-docs/plans/renderer-version-floor.md. */
-const CORE_FROM_SOURCE = fs.existsSync(CORE_SRC);
+/* ── FREEZE_CORE=1 — work in admin while core is being edited ───────────────────────────────────
+ *
+ * Sandeep: *"since core is vendored into admin — when you are making changes in core, admin local
+ * keeps refreshing. i am not able to work in admin as long as you are working on something."*
+ *
+ * The alias below is why: it points the designer at core's working tree, so vite WATCHES that tree
+ * and every save over there full-reloads this app. Wonderful when you are building a studio against
+ * live core; useless when somebody else is typing in core and you are trying to use admin.
+ *
+ * `npm run dev:frozen` sets this. The alias is dropped, the `file:vendor/…tgz` in package.json
+ * resolves instead, and nothing in core is watched at all — admin runs the last RELEASED designer,
+ * a consistent snapshot, and sits still.
+ *
+ * ⚠️ IT FEEDS THE SAME BOOLEAN, DELIBERATELY, AND STAYS TRUTHFUL. `__CORE_FROM_SOURCE__` means "this
+ * admin is running uncommitted working-tree code, so BUILD.version is a floor rather than a fact"
+ * (see src/lib/designerBuild.js). Frozen, that is no longer true — the tarball's version IS exact —
+ * so the flag going false is correct, and the renderer-floor warning correctly disappears. Forcing
+ * it false while the alias was still live would be the lie that comment warns about.
+ *
+ * ⚠️ AND IT IS ANNOUNCED AT STARTUP, both ways. A dev server quietly running a DIFFERENT designer
+ * from the one on disk is the "stale vendor cannot be noticed by using the app" trap this file
+ * already names, with the staleness now deliberate — so the one thing it must never be is silent.
+ */
+const FREEZE_CORE = process.env.FREEZE_CORE === '1';
+const CORE_FROM_SOURCE = fs.existsSync(CORE_SRC) && !FREEZE_CORE;
+
+console.log(CORE_FROM_SOURCE
+  ? '\n  designer: core SOURCE (live — edits in ../spattoo-core reload this app)\n'
+  : FREEZE_CORE
+    ? '\n  designer: VENDORED TARBALL — frozen. Core edits are ignored until you restart with `npm run dev`.\n'
+    : '\n  designer: vendored tarball (core is not checked out beside admin)\n');
 
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
