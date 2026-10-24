@@ -7,7 +7,8 @@ import * as THREE from 'three';
 // is where the sliders start. SceneLights/SceneEnv are the designer's OWN rig, imported rather than
 // approximated: sand is judged almost entirely on how its facets catch the key light, so a studio
 // that lit itself would be tuning a colour nobody will ever see.
-import { SandBed, sandTriangleCount, SAND_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
+import { SandBed, sandTriangleCount, SAND_DEFAULTS, ZONES_TOP, ZONES_BOARD,
+         SceneLights, SceneEnv } from '@spattoo/designer';
 
 // ── Sand studio ───────────────────────────────────────────────────────────────────────────────
 // Crushed-biscuit sand banked round the foot of a cake, with shells and pebbles sitting in it —
@@ -71,7 +72,7 @@ function CakeMesh({ shapeKey, cakeColor }) {
 }
 
 export default function SandStudio() {
-  const [p, setP] = useState({ ...SAND_DEFAULTS });
+  const [p, setP] = useState({ ...SAND_DEFAULTS, board: true, top: true });
   const [shapeKey, setShapeKey] = useState('round');
   const [cakeColor, setCakeColor] = useState('#8fd3e8');
   const [bg, setBg] = useState('#efeae2');
@@ -107,7 +108,13 @@ export default function SandStudio() {
           ))}
         </Row>
 
+        {/* Sand goes on the board, on the top, or both — the first reference does both at once. */}
+        <Row label="Where">
+          <Btn on={p.board} onClick={() => set('board')(!p.board)}>Board</Btn>
+          <Btn on={p.top} onClick={() => set('top')(!p.top)}>Top</Btn>
+        </Row>
         <Sl label="Reach past the cake" v={p.width} min={0.08} max={0.9} step={0.01} on={set('width')} />
+        <Sl label="How much of the top" v={p.topSize} min={0.15} max={1} step={0.01} on={set('topSize')} />
         {/* Spacing is the underlying number; density is what a person is adjusting, so the track is
             flipped — dragging right means more sand. The same papercut GrassStudio fixed. */}
         <Sl label="Density" v={p.spacing} min={0.018} max={0.08} step={0.001} on={set('spacing')} inv />
@@ -115,6 +122,9 @@ export default function SandStudio() {
         <Sl label="Size variety" v={p.sizeVary} min={0} max={1.2} step={0.01} on={set('sizeVary')} />
         <Sl label="Thins outward" v={p.falloff} min={0} max={1} step={0.01} on={set('falloff')} />
         <Sl label="Shade variety" v={p.shadeVary} min={0} max={0.6} step={0.01} on={set('shadeVary')} />
+        <Sl label="Bank height" v={p.rise} min={0} max={0.14} step={0.002} on={set('rise')} />
+        <Sl label="Surface grain" v={p.moundGrain} min={0} max={1.5} step={0.01} on={set('moundGrain')} />
+        <Sl label="Edge wander" v={p.edgeBreak} min={0} max={1} step={0.01} on={set('edgeBreak')} />
         <Sl label="Roughness" v={p.roughness} min={0.3} max={1} step={0.01} on={set('roughness')} />
         <Sl label="Seed" v={p.seed} min={1} max={99} step={1} on={set('seed')} int />
 
@@ -149,12 +159,8 @@ export default function SandStudio() {
           <SceneLights shadows />
           <SceneEnv />
           <CakeMesh shapeKey={shapeKey} cakeColor={cakeColor} />
-          <SandBed
-            shape={shape} topY={BOARD_TOP}
-            colour={p.colour} width={p.width} spacing={p.spacing} jitter={p.jitter}
-            grainSize={p.grainSize} sizeVary={p.sizeVary} falloff={p.falloff}
-            shadeVary={p.shadeVary} roughness={p.roughness} seed={p.seed}
-          />
+          {p.board && <SandBed {...p} shape={shape} topY={BOARD_TOP} zone={ZONES_BOARD} size={p.width} />}
+          {p.top && <SandBed {...p} shape={shape} topY={BOARD_H + BOTTOM_H} zone={ZONES_TOP} size={p.topSize} />}
           {/* Low target: sand is judged along the board, not from above. */}
           <OrbitControls target={[0, BOARD_TOP + 0.3, 0]} />
         </Canvas>
