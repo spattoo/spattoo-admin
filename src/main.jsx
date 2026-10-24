@@ -67,6 +67,7 @@ const BalloonStudio         = lazy(() => import('./admin/BalloonStudio.jsx'));
 const TopperComposer        = lazy(() => import('./admin/TopperComposer.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
 const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
+const SandStudio            = lazy(() => import('./admin/SandStudio.jsx'));
 const RainbowStudio         = lazy(() => import('./admin/RainbowStudio.jsx'));
 const CloudStudio           = lazy(() => import('./admin/CloudStudio.jsx'));
 const BrushStrokeStudio     = lazy(() => import('./admin/BrushStrokeStudio.jsx'));
@@ -148,6 +149,7 @@ const ROUTES = {
   '/elements/topper-composer':   TopperComposer,
   '/elements/chocolate-drip':    ChocolateDripStudio,
   '/elements/grass':             GrassStudio,
+  '/elements/sand':              SandStudio,
   '/elements/rainbow':           RainbowStudio,
   '/elements/cloud':             CloudStudio,
   '/elements/brush-stroke':      BrushStrokeStudio,
@@ -216,6 +218,7 @@ const NAV_GROUPS = [
     { href: '/elements/topper-composer', label: 'Topper Composer' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
     { href: '/elements/grass',          label: 'Grass' },
+    { href: '/elements/sand',           label: 'Sand' },
     { href: '/elements/rainbow',        label: 'Rainbow' },
     { href: '/elements/cloud',          label: 'Cloud' },
     /* ⚠️ A POC GETS A DOOR, NOT A URL IN A CHAT MESSAGE. Sandeep, after a day of dev/ harnesses:
