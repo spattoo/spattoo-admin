@@ -8,7 +8,7 @@ import * as THREE from 'three';
 // approximated: sand is judged almost entirely on how its facets catch the key light, so a studio
 // that lit itself would be tuning a colour nobody will ever see.
 import { SandBed, sandTriangleCount, SAND_DEFAULTS, ZONES_TOP, ZONES_BOARD,
-         SceneLights, SceneEnv } from '@spattoo/designer';
+         REGION_KINDS, REGION_DEFAULTS, SceneLights, SceneEnv } from '@spattoo/designer';
 
 // ── Sand studio ───────────────────────────────────────────────────────────────────────────────
 // Crushed-biscuit sand banked round the foot of a cake, with shells and pebbles sitting in it —
@@ -79,6 +79,21 @@ export default function SandStudio() {
   const [shapeKey, setShapeKey] = useState('round');
   const [cakeColor, setCakeColor] = useState('#8fd3e8');
   const [bg, setBg] = useState('#efeae2');
+  /* ⚠️ THE AREA IS ITS OWN STATE, NOT PART OF `p`. A preset says what the sand LOOKS like — grain,
+     colour, how it banks — and has no business moving a patch somebody placed. Keeping them apart
+     is also what stops the preset bug from coming back by another door. */
+  const [area, setArea] = useState({ on: false, ...REGION_DEFAULTS });
+  const setA = (k) => (v) => setArea(q => ({ ...q, [k]: v }));
+  /* ⚠️ MEMOISED, OR THE WHOLE DRIFT IS REBUILT EVERY RENDER. SandBed keys its `useMemo` on the
+     region's identity, so a fresh object literal each render means `buildSandMound` — a 40,000-cell
+     lattice — runs on every mouse move. */
+  const region = useMemo(
+    () => (area.on ? { kind: area.kind, size: area.size, aspect: area.aspect,
+                       rotation: area.rotation, x: area.x, z: area.z } : null),
+    [area]);
+  /* Looking down is the only way to judge a drawn area; looking along the board is the only way to
+     judge how the sand banks. One screen cannot do both from one angle, so it offers both. */
+  const [view, setView] = useState('side');
   const set = (k) => (v) => { setPreset(null); setP(q => ({ ...q, [k]: v })); };
 
   const shape = SHAPES[shapeKey] ?? SHAPES.round;
@@ -98,6 +113,34 @@ export default function SandStudio() {
         <p style={{ margin: '0 0 14px', fontSize: 11.5, color: '#888', lineHeight: 1.45 }}>
           A drift banked round the foot of the cake. Does it read as sand, or as gravel?
         </p>
+
+        <Row label="Area — top surface only">
+          <Btn on={!area.on} onClick={() => setArea(q => ({ ...q, on: false }))}>Whole top</Btn>
+          {Object.keys(REGION_KINDS).map(k => (
+            <Btn key={k} on={area.on && area.kind === k}
+              onClick={() => setArea(q => ({ ...q, on: true, kind: k }))}>
+              {k === 'rect' ? 'Rectangle' : 'Triangle'}
+            </Btn>
+          ))}
+        </Row>
+        {area.on && (
+          <>
+            <Sl label="Size"    v={area.size}     min={0.1} max={1.3} step={0.01} on={setA('size')} />
+            <Sl label="Stretch" v={area.aspect}   min={0.25} max={4}  step={0.05} on={setA('aspect')} />
+            <Sl label="Turn"    v={area.rotation} min={0} max={Math.PI * 2} step={0.02} on={setA('rotation')} />
+            <Sl label="Across"  v={area.x}        min={-1} max={1} step={0.02} on={setA('x')} />
+            <Sl label="Up the cake" v={area.z}    min={-1} max={1} step={0.02} on={setA('z')} />
+            <p style={{ fontSize: 10.5, color: '#999', lineHeight: 1.5, margin: '0 0 11px' }}>
+              Size and position are fractions of the cake, so the same area fits any tier. Sand is
+              clipped to the cake&rsquo;s own edge, and <em>Edge break</em> at 0 keeps the shape crisp.
+            </p>
+          </>
+        )}
+
+        <Row label="View">
+          <Btn on={view === 'side'} onClick={() => setView('side')}>Along the board</Btn>
+          <Btn on={view === 'top'} onClick={() => setView('top')}>From above</Btn>
+        </Row>
 
         <Row label="Preset">
           {Object.keys(PRESETS).map(k => (
@@ -153,7 +196,8 @@ export default function SandStudio() {
         </Row>
 
         <div style={{ marginTop: 14, fontSize: 11, color: '#999', lineHeight: 1.5 }}>
-          ≈{estimate.toLocaleString()} triangles if merged — one draw call as drawn.
+          ≈{estimate.toLocaleString()} triangles for the BOARD RING if merged — one draw call as
+          drawn. An area on the top is a different count; this number does not cover it.
           <br />Sand is a SEAT problem: the ring, the hole for the cake and the instancing are
           grass's, reused. Only the grain and the thinning are new.
         </div>
@@ -162,16 +206,19 @@ export default function SandStudio() {
       <div style={{ flex: 1, position: 'relative' }}>
         {/* preserveDrawingBuffer, or a saved thumbnail is a blank png — WebGL clears the drawing
             buffer after compositing and toBlob() reads an empty one. */}
-        <Canvas gl={{ preserveDrawingBuffer: true }} shadows camera={{ position: [0, 1.9, 4.4], fov: 42 }}
+        {/* ⚠️ `key` REMOUNTS THE CANVAS when the view changes — r3f reads `camera` once, at mount,
+            so setting a new position prop on a live canvas moves nothing. */}
+        <Canvas key={view} gl={{ preserveDrawingBuffer: true }} shadows
+                camera={{ position: view === 'top' ? [0, 3.5, 3.0] : [0, 1.9, 4.4], fov: 42 }}
                 style={{ position: 'absolute', inset: 0 }}>
           <color attach="background" args={[bg]} />
           <SceneLights shadows />
           <SceneEnv />
           <CakeMesh shapeKey={shapeKey} cakeColor={cakeColor} />
           {p.board && <SandBed {...p} shape={shape} topY={BOARD_TOP} zone={ZONES_BOARD} size={p.width} />}
-          {p.top && <SandBed {...p} shape={shape} topY={BOARD_H + BOTTOM_H} zone={ZONES_TOP} size={p.topSize} />}
-          {/* Low target: sand is judged along the board, not from above. */}
-          <OrbitControls target={[0, BOARD_TOP + 0.3, 0]} />
+          {p.top && <SandBed {...p} shape={shape} topY={BOARD_H + BOTTOM_H} zone={ZONES_TOP}
+                             size={p.topSize} region={region} />}
+          <OrbitControls target={[0, view === 'top' ? BOARD_H + BOTTOM_H * 0.8 : BOARD_TOP + 0.3, 0]} />
         </Canvas>
       </div>
     </div>
