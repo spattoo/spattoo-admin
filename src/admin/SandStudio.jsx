@@ -73,10 +73,13 @@ function CakeMesh({ shapeKey, cakeColor }) {
 
 export default function SandStudio() {
   const [p, setP] = useState({ ...SAND_DEFAULTS, board: true, top: true });
+  /* Which preset is showing, so the row reads as a choice rather than four identical buttons.
+     Any slider move clears it — what is on screen is no longer that preset. */
+  const [preset, setPreset] = useState('Beach drift');
   const [shapeKey, setShapeKey] = useState('round');
   const [cakeColor, setCakeColor] = useState('#8fd3e8');
   const [bg, setBg] = useState('#efeae2');
-  const set = (k) => (v) => setP(q => ({ ...q, [k]: v }));
+  const set = (k) => (v) => { setPreset(null); setP(q => ({ ...q, [k]: v })); };
 
   const shape = SHAPES[shapeKey] ?? SHAPES.round;
   // What the drift costs if anybody merged it — as an InstancedMesh it is one draw call whatever
@@ -98,7 +101,13 @@ export default function SandStudio() {
 
         <Row label="Preset">
           {Object.keys(PRESETS).map(k => (
-            <Btn key={k} onClick={() => setP({ ...PRESETS[k] })}>{k}</Btn>
+            /* ⚠️ MERGED ONTO THE CURRENT STATE, NEVER SUBSTITUTED FOR IT. A preset is built from
+               SAND_DEFAULTS, which knows nothing about `board` and `top` — those are this screen's
+               own. Replacing the object dropped both flags to undefined, so every preset click
+               emptied the scene: Sandeep, *"when i click on any preset, sand disappears."* A preset
+               says what the sand LOOKS like, not which placements are on show. */
+            <Btn key={k} on={preset === k}
+              onClick={() => { setPreset(k); setP(q => ({ ...q, ...PRESETS[k] })); }}>{k}</Btn>
           ))}
         </Row>
 
