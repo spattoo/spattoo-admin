@@ -17,7 +17,8 @@
     "smoke:session": "node scripts/smoke-session.mjs",
     "check:studio-scene": "node scripts/check-studio-scene.mjs",
     "check:no-geometry-copy": "node scripts/check-no-geometry-copy.mjs",
-    "check:conditional-hooks": "node scripts/check-conditional-hooks.mjs"
+    "check:conditional-hooks": "node scripts/check-conditional-hooks.mjs",
+    "dev:live": "WATCH_CORE=1 vite"
   },
   "dependencies": {
     "@fontsource-variable/quicksand": "^5.3.0",
