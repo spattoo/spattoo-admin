@@ -10,6 +10,9 @@ import path from 'path';
 // Core's source, resolved RELATIVE to this file rather than hardcoded to one machine. Present on a
 // developer box with both repos checked out side by side; absent on any build server.
 const CORE_SRC = path.resolve(import.meta.dirname, '../spattoo-core/src/index.js');
+/* The repo, not just the entry file — the watcher has to be told about the whole tree the alias
+   drags in, and a studio imports from all over `src/designer`. */
+const CORE_DIR = path.resolve(import.meta.dirname, '../spattoo-core');
 /* ⚠️ ONE BOOLEAN, TWO CONSEQUENCES, SO THEY CANNOT DRIFT. The same check that decides whether to
    alias the designer to core's SOURCE also decides whether this build may stamp a template with a
    renderer floor — because running source means `BUILD.version` names the last RELEASE, not the
@@ -18,7 +21,64 @@ const CORE_SRC = path.resolve(import.meta.dirname, '../spattoo-core/src/index.js
    `git archive HEAD src` byte for byte, so nothing injected at pack time survives, and a committed
    flag cannot tell a tarball from a working tree that has moved past the same commit. Admin is the
    only place that knows, and it knows it HERE. See spattoo-docs/plans/renderer-version-floor.md. */
-const CORE_FROM_SOURCE = fs.existsSync(CORE_SRC);
+/* ── FREEZE_CORE=1 — work in admin while core is being edited ───────────────────────────────────
+ *
+ * Sandeep: *"since core is vendored into admin — when you are making changes in core, admin local
+ * keeps refreshing. i am not able to work in admin as long as you are working on something."*
+ *
+ * The alias below is why: it points the designer at core's working tree, so vite WATCHES that tree
+ * and every save over there full-reloads this app. Wonderful when you are building a studio against
+ * live core; useless when somebody else is typing in core and you are trying to use admin.
+ *
+ * `npm run dev:frozen` sets this. The alias is dropped, the `file:vendor/…tgz` in package.json
+ * resolves instead, and nothing in core is watched at all — admin runs the last RELEASED designer,
+ * a consistent snapshot, and sits still.
+ *
+ * ⚠️ IT FEEDS THE SAME BOOLEAN, DELIBERATELY, AND STAYS TRUTHFUL. `__CORE_FROM_SOURCE__` means "this
+ * admin is running uncommitted working-tree code, so BUILD.version is a floor rather than a fact"
+ * (see src/lib/designerBuild.js). Frozen, that is no longer true — the tarball's version IS exact —
+ * so the flag going false is correct, and the renderer-floor warning correctly disappears. Forcing
+ * it false while the alias was still live would be the lie that comment warns about.
+ *
+ * ⚠️ AND IT IS ANNOUNCED AT STARTUP, both ways. A dev server quietly running a DIFFERENT designer
+ * from the one on disk is the "stale vendor cannot be noticed by using the app" trap this file
+ * already names, with the staleness now deliberate — so the one thing it must never be is silent.
+ */
+/* ── WATCH_CORE=1 — reload this app when core changes ───────────────────────────────────────────
+ *
+ * ⚠️ THE ALIAS AND THE WATCH ARE TWO DIFFERENT THINGS, AND ONLY ONE OF THEM WAS EVER THE PROBLEM.
+ * `FREEZE_CORE` above answers "where does the designer come from" by dropping the alias — which
+ * also stops the reloads, but costs you core-from-source: a new export in core is then invisible
+ * here until somebody cuts a release. So the baker-app fix was too blunt for the common case, and
+ * the common case is exactly the one Sandeep keeps hitting: he wants to work IN admin, against
+ * live core, while core is being edited by someone else.
+ *
+ * Sandeep, 2026-10-27: *"when core changes are happening admin is still reloading several times. i
+ * cant work on admin locally. you fixed it, but that not working."* It was not working because the
+ * fix was `dev:frozen` and he was running `dev` — reasonably, since `dev` is the mode that
+ * resolves core from source.
+ *
+ * So the watch is now opt-IN and the alias is untouched. `npm run dev` keeps core-from-source and
+ * sits still; `npm run dev:live` adds the watch back for when you are editing core FOR admin and
+ * want the reload. Nothing about which designer is running has changed, which is why
+ * `__CORE_FROM_SOURCE__` is still keyed off the alias and not off this.
+ *
+ * Changes in core still arrive — on a manual refresh, because the alias still points at them.
+ * Only the automatic reload is gone.
+ */
+const FREEZE_CORE = process.env.FREEZE_CORE === '1';
+const WATCH_CORE  = process.env.WATCH_CORE === '1';
+const CORE_FROM_SOURCE = fs.existsSync(CORE_SRC) && !FREEZE_CORE;
+const IGNORING_CORE = CORE_FROM_SOURCE && !WATCH_CORE;
+
+console.log(CORE_FROM_SOURCE
+  ? (WATCH_CORE
+      ? '\n  designer: core SOURCE (live — edits in ../spattoo-core reload this app)\n'
+      : '\n  designer: core SOURCE, not watched — core edits need a manual refresh.'
+        + '\n            `npm run dev:live` to reload on every core save.\n')
+  : FREEZE_CORE
+    ? '\n  designer: VENDORED TARBALL — frozen. Core edits are ignored until you restart with `npm run dev`.\n'
+    : '\n  designer: vendored tarball (core is not checked out beside admin)\n');
 
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
@@ -67,6 +127,12 @@ export default defineConfig({
   build: { sourcemap: !!sentryAuthToken },   // emit maps only when we'll upload them
   server: {
     port: 5174,
+    /* ⚠️ CORE IS IN THE MODULE GRAPH BUT OUT OF THE WATCHER. The alias puts core's working tree in
+       this app's graph, so chokidar watches it and every save in core full-reloads admin. Ignoring
+       it here is what lets somebody use admin while core is being typed in — see WATCH_CORE above.
+       `**` on the end: without it chokidar ignores the directory entry and still watches its
+       children, which is the shape of this bug that looks fixed and is not. */
+    ...(IGNORING_CORE ? { watch: { ignored: [`${CORE_DIR}/**`] } } : {}),
     /* ⚠️ THE ASSETS ORIGIN, PROXIED, SO A STUDIO IS LIT LIKE A CAKE. `src/scene.js` points
        `configureEnvMap` at `/cdn`; without this proxy that is a 404 and SceneEnv falls back to
        drei's indoor preset, which is the fault scene.js exists to end. Proxied rather than fetched

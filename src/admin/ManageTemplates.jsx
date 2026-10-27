@@ -695,6 +695,80 @@ function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
  *
  * spattoo-docs/plans/renderer-version-floor.md
  */
+/* ── Words a person adds, so a cake can be found by something nobody tagged ──────────────────────
+ *
+ * Sandeep, after the twelve theme names did not fit a teddy-bear-and-balloons cake: *"can we allow
+ * user tags? meaning not just limiting to pre defined tags?"*
+ *
+ * ⚠️ THIS IS NOT A SECOND TAG VOCABULARY, AND THE DIFFERENCE IS THE POINT. `template_tags` is
+ * curated because it draws the filter CHIPS and the AI half picks from a closed list; free text
+ * there fragments into "makeup", "make-up", "Makeup", "beauty" — four chips for one idea. The rule
+ * already written in the API is the right one: search widens, the filter stays legible. So these
+ * are searched and never drawn.
+ *
+ * ⚠️ AND THEY ARE A DIFFERENT COLUMN FROM THE ONES ABOVE THEM. `search_slugs` is DERIVED — rebuilt
+ * from the design's elements and lettering every time the design is saved — so a term typed into it
+ * would survive until the next save and then vanish, silently, because that sync never throws on
+ * purpose. The derived half is shown here read-only precisely so nobody retypes what the cake
+ * already says about itself.
+ */
+function TemplateSearchTermsEditor({ template, onClose, onSaved }) {
+  /* ⚠️ THE LIST THE API RETURNS HERE IS ALREADY SPLIT — admin reads both columns separately while
+     the browsing list merges them. So `manual_slugs` is only ever what a person typed. */
+  const [text, setText] = useState((template.manual_slugs ?? []).join(', '));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState(null);
+  const derived = template.search_slugs ?? [];
+
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      /* Split on commas and newlines both: a comma-separated field invites a paste, and a pasted
+         list arrives with line breaks. The API lowercases, trims, dedupes and bounds it — this is
+         not the place that owns those rules, because the route has to enforce them anyway. */
+      const terms = text.split(/[,\n]/).map(t => t.trim()).filter(Boolean);
+      await updateTemplate(template.id, { manual_slugs: terms });
+      onSaved?.();
+      onClose();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  }
+
+  return (
+    <div style={{ marginTop: 10, padding: 12, background: '#F4F8F5', borderRadius: 10 }}>
+      <label style={s.label}>Your search terms</label>
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        rows={2}
+        placeholder="teddy bear, nursery, baby boy — comma separated"
+        style={{ ...s.input, fontFamily: "'Quicksand', sans-serif", fontSize: 12, resize: 'vertical', lineHeight: 1.5 }}
+      />
+      <div style={{ ...s.hint, marginTop: 4 }}>
+        Searched, never shown. Use these for words a customer would type that the tags do not cover.
+      </div>
+
+      {/* ⚠️ SHOWN, BECAUSE THE COMMONEST MISTAKE HERE IS RETYPING. The cake already answers to every
+          word below; adding "balloon" when a Balloon is on it costs a row and buys nothing. */}
+      <div style={{ marginTop: 10 }}>
+        <label style={s.label}>Already found by (from the cake itself)</label>
+        <div style={{ ...s.hint, lineHeight: 1.7 }}>
+          {derived.length
+            ? derived.join(' · ')
+            : 'Nothing yet — these come from the decorations on the cake and any words piped on it.'}
+        </div>
+      </div>
+
+      {err && <div style={{ ...s.hint, color: '#C0392B', marginTop: 8 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button style={s.btn()} onClick={save} disabled={busy}>
+          {busy ? 'Saving…' : 'Save terms'}
+        </button>
+        <button style={s.btn('secondary')} onClick={onClose} disabled={busy}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 function PublishDialog({ template, autoVersion, warning, busy, onCancel, onConfirm }) {
   const [floor, setFloor] = useState(autoVersion ?? '');
   const trimmed = floor.trim();
@@ -779,6 +853,7 @@ export default function ManageTemplates() {
   // Which template's tags are open. One at a time: the vocabulary is 56 tags across seven groups,
   // and several open at once is a wall.
   const [tagEditFor, setTagEditFor] = useState(null);
+  const [termsEditFor, setTermsEditFor] = useState(null);
   const [thumbEditFor, setThumbEditFor] = useState(null);
   // The whole vocabulary, once for the screen. The create form fetches it separately for its own
   // lifetime — it mounts and unmounts with the form — and both now feed the same TagChipPicker.
@@ -1015,6 +1090,13 @@ export default function ManageTemplates() {
                       onClick={() => setTagEditFor(tagEditFor === t.id ? null : t.id)}>
                       {tagEditFor === t.id ? 'Close tags' : 'Tags'}
                     </button>
+                    {/* Beside Tags, because they are the same job at two levels of formality: the
+                        curated list a customer FILTERS by, and the loose words they might TYPE. */}
+                    <button style={s.btn('secondary')}
+                      title="Extra words this cake can be found by — searched, never shown"
+                      onClick={() => setTermsEditFor(termsEditFor === t.id ? null : t.id)}>
+                      {termsEditFor === t.id ? 'Close terms' : 'Search terms'}
+                    </button>
                     <button style={s.btn('secondary')} onClick={() => toggleActive(t)}>
                       {t.is_active ? 'Deactivate' : 'Activate'}
                     </button>
@@ -1051,6 +1133,13 @@ export default function ManageTemplates() {
                     template={t}
                     allTags={allTags}
                     onClose={() => setTagEditFor(null)}
+                    onSaved={load}
+                  />
+                )}
+                {termsEditFor === t.id && (
+                  <TemplateSearchTermsEditor
+                    template={t}
+                    onClose={() => setTermsEditFor(null)}
                     onSaved={load}
                   />
                 )}

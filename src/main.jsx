@@ -49,6 +49,7 @@ const ManageNozzles         = lazy(() => import('./admin/ManageNozzles.jsx'));
 const NotificationChannels  = lazy(() => import('./admin/NotificationChannels.jsx'));
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
 const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
+const HelpQuestions         = lazy(() => import('./admin/HelpQuestions.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
 const PatternBuilder        = lazy(() => import('./admin/PatternBuilder.jsx'));
 const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'));
@@ -67,6 +68,7 @@ const BalloonStudio         = lazy(() => import('./admin/BalloonStudio.jsx'));
 const TopperComposer        = lazy(() => import('./admin/TopperComposer.jsx'));
 const ChocolateDripStudio   = lazy(() => import('./admin/ChocolateDripStudio.jsx'));
 const GrassStudio           = lazy(() => import('./admin/GrassStudio.jsx'));
+const SandStudio            = lazy(() => import('./admin/SandStudio.jsx'));
 const RainbowStudio         = lazy(() => import('./admin/RainbowStudio.jsx'));
 const CloudStudio           = lazy(() => import('./admin/CloudStudio.jsx'));
 const BrushStrokeStudio     = lazy(() => import('./admin/BrushStrokeStudio.jsx'));
@@ -122,6 +124,7 @@ const ROUTES = {
   '/bakers/onboard':      OnboardBaker,
   '/bakers/subscriptions': BakerSubscriptions,
   '/bakers/storefront-usage': StorefrontUsage,
+  '/bakers/help-questions': HelpQuestions,
   '/admin/legal':         LegalVersions,
   '/flavours':            ManageFlavours,
   '/notifications':       NotificationChannels,
@@ -148,6 +151,7 @@ const ROUTES = {
   '/elements/topper-composer':   TopperComposer,
   '/elements/chocolate-drip':    ChocolateDripStudio,
   '/elements/grass':             GrassStudio,
+  '/elements/sand':              SandStudio,
   '/elements/rainbow':           RainbowStudio,
   '/elements/cloud':             CloudStudio,
   '/elements/brush-stroke':      BrushStrokeStudio,
@@ -216,6 +220,7 @@ const NAV_GROUPS = [
     { href: '/elements/topper-composer', label: 'Topper Composer' },
     { href: '/elements/chocolate-drip', label: 'Chocolate Drip' },
     { href: '/elements/grass',          label: 'Grass' },
+    { href: '/elements/sand',           label: 'Sand' },
     { href: '/elements/rainbow',        label: 'Rainbow' },
     { href: '/elements/cloud',          label: 'Cloud' },
     /* ⚠️ A POC GETS A DOOR, NOT A URL IN A CHAT MESSAGE. Sandeep, after a day of dev/ harnesses:
@@ -245,6 +250,10 @@ const NAV_GROUPS = [
     { href: '/bakers/onboard',       label: 'Onboard Baker' },
     { href: '/bakers/subscriptions', label: 'Baker Subscriptions' },
     { href: '/bakers/storefront-usage', label: 'Storefront Usage' },
+    /* ⚠️ A LOG NOBODY CAN READ IS NOT A LOG. help/INDEX.md says to order the writing of new help
+       articles by this list rather than by what we imagine bakers need — which only works if the
+       list has a door. This is it. */
+    { href: '/bakers/help-questions', label: 'Help Questions' },
     { href: '/plans',                label: 'Subscription Plans' },
   ] },
   { title: 'Others', items: [
