@@ -49,6 +49,7 @@ const ManageNozzles         = lazy(() => import('./admin/ManageNozzles.jsx'));
 const NotificationChannels  = lazy(() => import('./admin/NotificationChannels.jsx'));
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
 const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
+const HelpQuestions         = lazy(() => import('./admin/HelpQuestions.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
 const PatternBuilder        = lazy(() => import('./admin/PatternBuilder.jsx'));
 const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'));
@@ -123,6 +124,7 @@ const ROUTES = {
   '/bakers/onboard':      OnboardBaker,
   '/bakers/subscriptions': BakerSubscriptions,
   '/bakers/storefront-usage': StorefrontUsage,
+  '/bakers/help-questions': HelpQuestions,
   '/admin/legal':         LegalVersions,
   '/flavours':            ManageFlavours,
   '/notifications':       NotificationChannels,
@@ -248,6 +250,10 @@ const NAV_GROUPS = [
     { href: '/bakers/onboard',       label: 'Onboard Baker' },
     { href: '/bakers/subscriptions', label: 'Baker Subscriptions' },
     { href: '/bakers/storefront-usage', label: 'Storefront Usage' },
+    /* ⚠️ A LOG NOBODY CAN READ IS NOT A LOG. help/INDEX.md says to order the writing of new help
+       articles by this list rather than by what we imagine bakers need — which only works if the
+       list has a door. This is it. */
+    { href: '/bakers/help-questions', label: 'Help Questions' },
     { href: '/plans',                label: 'Subscription Plans' },
   ] },
   { title: 'Others', items: [

@@ -511,6 +511,15 @@ export async function getStorefrontUsage(days = 30) {
   return get(`/api/admin/storefront-usage?days=${encodeURIComponent(days)}`);
 }
 
+// ── The help assistant's question log ─────────────────────────────────────────
+// What bakers asked, and whether it landed. `filter=missed` is both failures at once: nothing
+// found, and a baker who said the answer did not answer them.
+export async function getHelpQuestions({ days = 30, filter = '' } = {}) {
+  const qs = new URLSearchParams({ days: String(days) });
+  if (filter) qs.set('filter', filter);
+  return get(`/api/admin/help/questions?${qs}`);
+}
+
 // ── Legal document publishing ─────────────────────────────────────────────────
 // What the marketing site serves vs what is frozen in legal_document_versions. The API fetches the
 // site's canonical text server-side, so nothing is retyped here and the text that gets frozen is
