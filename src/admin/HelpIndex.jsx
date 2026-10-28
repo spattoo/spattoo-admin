@@ -120,6 +120,16 @@ export default function HelpIndex() {
           </div>
 
           {/* ⚠️ "59 new" and "59 changed" mean very different things to somebody about to press go. */}
+          {/* The one-time state after 145: rows exist, hashes do not, so everything reads as
+              changed. Saying "59 changed" to somebody who edited nothing is the kind of first
+              impression that makes a tool look untrustworthy. */}
+          {!plan.firstRun && plan.unhashed && (
+            <div style={{ fontSize: 13, color: C.chgInk, background: C.chgBg, padding: '8px 12px',
+                          borderRadius: 8, marginBottom: 14, lineHeight: 1.55 }}>
+              This index was built before change-tracking existed, so every article reads as
+              changed. One rebuild records them; after that only real edits appear here.
+            </div>
+          )}
           {plan.firstRun && (
             <div style={{ fontSize: 13, color: C.chgInk, background: C.chgBg, padding: '8px 12px',
                           borderRadius: 8, marginBottom: 14 }}>
