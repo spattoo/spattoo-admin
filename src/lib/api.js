@@ -520,6 +520,15 @@ export async function getHelpQuestions({ days = 30, filter = '' } = {}) {
   return get(`/api/admin/help/questions?${qs}`);
 }
 
+// ── The help assistant's index ────────────────────────────────────────────────
+// The articles are uploaded from the browser rather than fetched: they live in spattoo-docs and
+// the deployed API has no checkout of it. `dryRun` returns the diff — what changed, what is new,
+// what is no longer there — without embedding or writing anything.
+export async function reindexHelp(files, { dryRun = false, pruneMissing = false } = {}) {
+  const qs = dryRun ? '?dryRun=true' : '';
+  return post(`/api/admin/help/reindex${qs}`, { files, pruneMissing });
+}
+
 // ── Legal document publishing ─────────────────────────────────────────────────
 // What the marketing site serves vs what is frozen in legal_document_versions. The API fetches the
 // site's canonical text server-side, so nothing is retyped here and the text that gets frozen is

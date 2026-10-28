@@ -50,6 +50,7 @@ const NotificationChannels  = lazy(() => import('./admin/NotificationChannels.js
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
 const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
 const HelpQuestions         = lazy(() => import('./admin/HelpQuestions.jsx'));
+const HelpIndex             = lazy(() => import('./admin/HelpIndex.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
 const PatternBuilder        = lazy(() => import('./admin/PatternBuilder.jsx'));
 const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'));
@@ -125,6 +126,7 @@ const ROUTES = {
   '/bakers/subscriptions': BakerSubscriptions,
   '/bakers/storefront-usage': StorefrontUsage,
   '/bakers/help-questions': HelpQuestions,
+  '/bakers/help-index': HelpIndex,
   '/admin/legal':         LegalVersions,
   '/flavours':            ManageFlavours,
   '/notifications':       NotificationChannels,
@@ -254,6 +256,10 @@ const NAV_GROUPS = [
        articles by this list rather than by what we imagine bakers need — which only works if the
        list has a door. This is it. */
     { href: '/bakers/help-questions', label: 'Help Questions' },
+    /* What the assistant answers FROM, beside what bakers asked it. The articles live in
+       spattoo-docs; this is the door that gets them into an environment's index without anyone
+       running a script with the right keys in the right shell. */
+    { href: '/bakers/help-index',     label: 'Help Index' },
     { href: '/plans',                label: 'Subscription Plans' },
   ] },
   { title: 'Others', items: [
