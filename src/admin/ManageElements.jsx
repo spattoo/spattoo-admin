@@ -787,6 +787,7 @@ export default function ManageElements() {
      checkbox therefore reads as "always faces the viewer" and un-ticking is what gets recorded. */
   const [faceCamera,    setFaceCamera]    = useState(true);
   const [freeHand,      setFreeHand]      = useState(false);   // placement_config.free_hand
+  const [pierces,       setPierces]       = useState(false);   // placement_config.pierces
   const [foldAngle,     setFoldAngle]     = useState('');
   const [spineSplit,    setSpineSplit]    = useState('');
   const [recolorMethod, setRecolorMethod] = useState('opaque');
@@ -971,6 +972,7 @@ export default function ManageElements() {
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
     setFreeHand(pc.free_hand === true);
+    setPierces(pc.pierces === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -1241,6 +1243,7 @@ export default function ManageElements() {
     setFoldable(pc.foldable === true);
     setFaceCamera(pc.billboard !== false);
     setFreeHand(pc.free_hand === true);
+    setPierces(pc.pierces === true);
     setFoldAngle(pc.fold != null ? String(pc.fold) : '');
     setSpineSplit(pc.spine != null ? String(pc.spine) : '');
     setRecolorMethod(pc.recolor?.method ?? 'opaque');
@@ -3112,6 +3115,30 @@ export default function ManageElements() {
                           </div>
                         </div>
                       </label>
+                      {/* ⚠️ THE OTHER HALF OF FREE HAND, AND IT BELONGS BESIDE IT. Free hand lets the
+                          customer put the piece anywhere — and "anywhere" was including inside the
+                          sponge, because nothing stops a hand-placed piece the way the seating rules
+                          stopped a seated one. A fondant monkey is a body: it is stopped by icing.
+                          A flower on a wire is not. Sandeep: *"there elements like fondant monkey
+                          that dont get inserted into cake, so should be stopped by walls. there are
+                          elements like flowers, can be inserted."*
+                          ⚠️ OFF IS THE SAFE DEFAULT, so a row only speaks up for the exception and
+                          every decoration already in the catalogue is solid without being revisited.
+                          ⚠️ SHOWN ONLY UNDER FREE HAND, because that is where it has any effect — a
+                          seated piece is held off the cake by its own seat. */}
+                      {freeHand && (
+                        <label style={{ ...s.checkRow, alignItems: 'flex-start', marginTop: 4, marginLeft: 22 }}>
+                          <input type="checkbox" style={{ ...s.checkbox, marginTop: 1 }} checked={pierces}
+                            onChange={e => { const on = e.target.checked; setPierces(on);
+                              patchPc({ pierces: on ? true : '' }); }} />
+                          <div>
+                            <div style={s.checkLabel}>It can go into the cake</div>
+                            <div style={{ fontSize: 11, color: '#6B8C74', marginTop: 1 }}>
+                              Leave this OFF for anything with a body — a fondant figure, a bow, a topper. The cake and the board are solid for it: pushed at a wall it stops against the icing, lowered onto a tier it comes to rest on the surface, and it can still be put anywhere else, including out over the edge and in the air. Tick it only for a decoration that is genuinely pushed IN — a flower on a wire, a pick, a stem — which then passes through the cake freely.
+                            </div>
+                          </div>
+                        </label>
+                      )}
                       {applicableZones.some(z => (placementZoneConfig[z] ?? 'hug') === 'perch') && (
                         <>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>

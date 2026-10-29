@@ -50,6 +50,7 @@ const NotificationChannels  = lazy(() => import('./admin/NotificationChannels.js
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
 const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
 const HelpQuestions         = lazy(() => import('./admin/HelpQuestions.jsx'));
+const HelpIndex             = lazy(() => import('./admin/HelpIndex.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
 const PatternBuilder        = lazy(() => import('./admin/PatternBuilder.jsx'));
 const PipingCalibrator      = lazy(() => import('./admin/PipingCalibrator.jsx'));
@@ -62,6 +63,7 @@ const RecolorTester         = lazy(() => import('./admin/RecolorTester.jsx'));
 const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx'));
 const FlowerNailStudio      = lazy(() => import('./admin/FlowerNailStudio.jsx'));
 const CardCutoutStudio      = lazy(() => import('./admin/CardCutoutStudio.jsx'));
+const StudioBackdropStudio  = lazy(() => import('./admin/StudioBackdropStudio.jsx'));
 const WaferPaperStudio      = lazy(() => import('./admin/WaferPaperStudio.jsx'));
 const GypsophilaStudio      = lazy(() => import('./admin/GypsophilaStudio.jsx'));
 const BalloonStudio         = lazy(() => import('./admin/BalloonStudio.jsx'));
@@ -125,6 +127,7 @@ const ROUTES = {
   '/bakers/subscriptions': BakerSubscriptions,
   '/bakers/storefront-usage': StorefrontUsage,
   '/bakers/help-questions': HelpQuestions,
+  '/bakers/help-index': HelpIndex,
   '/admin/legal':         LegalVersions,
   '/flavours':            ManageFlavours,
   '/notifications':       NotificationChannels,
@@ -145,6 +148,7 @@ const ROUTES = {
   '/elements/freehand-pen':      FreehandPenStudio,
   '/elements/flower-nail':       FlowerNailStudio,
   '/elements/card-cutout':       CardCutoutStudio,
+  '/studio/backdrop':            StudioBackdropStudio,
   '/elements/wafer-paper':       WaferPaperStudio,
   '/elements/gypsophila':        GypsophilaStudio,
   '/elements/balloon':           BalloonStudio,
@@ -214,6 +218,7 @@ const NAV_GROUPS = [
     { href: '/elements/freehand-pen',   label: 'Freehand Pen' },
     { href: '/elements/flower-nail',    label: 'Flower Nail' },
     { href: '/elements/card-cutout',    label: 'Card Cutout' },
+    { href: '/studio/backdrop',        label: 'Studio Backdrop' },
     { href: '/elements/wafer-paper',    label: 'Wafer Paper' },
     { href: '/elements/gypsophila',     label: 'Gypsophila' },
     { href: '/elements/balloon',        label: 'Balloons' },
@@ -254,6 +259,10 @@ const NAV_GROUPS = [
        articles by this list rather than by what we imagine bakers need — which only works if the
        list has a door. This is it. */
     { href: '/bakers/help-questions', label: 'Help Questions' },
+    /* What the assistant answers FROM, beside what bakers asked it. The articles live in
+       spattoo-docs; this is the door that gets them into an environment's index without anyone
+       running a script with the right keys in the right shell. */
+    { href: '/bakers/help-index',     label: 'Help Index' },
     { href: '/plans',                label: 'Subscription Plans' },
   ] },
   { title: 'Others', items: [
