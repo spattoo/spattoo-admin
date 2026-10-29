@@ -403,8 +403,8 @@ export async function startMeshyGeneration(sourceImageKey, force = false) {
 /* ── 3D Element Studio: one flow, two vendors ──────────────────────────────────────────────────
    Separate from the Meshy helpers above on purpose — those serve the shipped Image → 3D wizard,
    which is a baker path; these serve a staff comparison tool and must not change its behaviour. */
-export async function startAi3dGeneration({ provider, mode, prompt, sourceImageKey, parts, texture }) {
-  return post('/api/admin/ai3d/generate', { provider, mode, prompt, sourceImageKey, parts, texture });
+export async function startAi3dGeneration({ provider, mode, prompt, sourceImageKey, parts, texture, lowPoly, faceLimit }) {
+  return post('/api/admin/ai3d/generate', { provider, mode, prompt, sourceImageKey, parts, texture, lowPoly, faceLimit });
 }
 export async function getAi3dGeneration(id) {
   return get(`/api/admin/ai3d/${id}`);
