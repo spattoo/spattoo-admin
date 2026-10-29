@@ -400,6 +400,20 @@ export async function startMeshyGeneration(sourceImageKey, force = false) {
   return post('/api/admin/meshy/generate', { sourceImageKey, force });
 }
 
+/* ── 3D Element Studio: one flow, two vendors ──────────────────────────────────────────────────
+   Separate from the Meshy helpers above on purpose — those serve the shipped Image → 3D wizard,
+   which is a baker path; these serve a staff comparison tool and must not change its behaviour. */
+export async function startAi3dGeneration({ provider, mode, prompt, sourceImageKey, parts, texture }) {
+  return post('/api/admin/ai3d/generate', { provider, mode, prompt, sourceImageKey, parts, texture });
+}
+export async function getAi3dGeneration(id) {
+  return get(`/api/admin/ai3d/${id}`);
+}
+/** Meshy only — Tripo splits at generation time. */
+export async function splitAi3dGeneration(id, { mode, prompt } = {}) {
+  return post(`/api/admin/ai3d/${id}/split`, { mode, prompt });
+}
+
 // Poll a generation row. While non-terminal the API live-polls Meshy and updates the row,
 // so this returns fresh { status, progress, glb_url, thumbnail_url, error }.
 export async function getMeshyGeneration(id) {

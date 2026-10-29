@@ -34,6 +34,7 @@ const GenerateModel    = lazy(() => import('./admin/GenerateModel.jsx'));
 const GlbStudio        = lazy(() => import('./admin/GlbStudio.jsx'));
 const GlbRecompose     = lazy(() => import('./admin/GlbRecompose.jsx'));
 const ImageTo3DWizard  = lazy(() => import('./admin/ImageTo3DWizard.jsx'));
+const Element3DStudio  = lazy(() => import('./admin/Element3DStudio.jsx'));
 const BuildFromInspiration = lazy(() => import('./admin/BuildFromInspiration.jsx'));
 const ExtractElements   = lazy(() => import('./admin/ExtractElements.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
@@ -118,6 +119,7 @@ const ROUTES = {
   '/glb-studio':          GlbStudio,
   '/glb-recompose':       GlbRecompose,
   '/elements/image-to-3d': ImageTo3DWizard,
+  '/elements/3d-studio':   Element3DStudio,
   '/elements/build-from-inspiration': BuildFromInspiration,
   '/elements/extract':    ExtractElements,
   '/elements/types':      ElementTypes,
@@ -202,6 +204,7 @@ const NAV_GROUPS = [
     { href: '/elements/build-from-inspiration', label: 'Build from Inspiration' },
     { href: '/elements/extract',        label: 'Extract Elements' },
     { href: '/elements/image-to-3d',    label: 'Image → 3D Cake' },
+    { href: '/elements/3d-studio',      label: '3D Element Studio' },
     { href: '/elements/generate',       label: 'Generate Shape' },
     { href: '/elements/polygon',        label: 'Polygon Cutter' },
     { href: '/elements/generate-model', label: 'Generate 3D Model' },
