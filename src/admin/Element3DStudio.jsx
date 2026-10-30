@@ -9,7 +9,8 @@ import { buildDecorationPrompt, promptWarnings, MATERIALS, POSES, DETAIL } from 
 /* ⚠️ `ColorWheel`, NOT A ROW OF SWATCHES OR `<input type=color>`. Root CLAUDE.md names it THE colour
    control for every colour anyone picks, "and that applies in spattoo-admin too" — which is exactly
    why it is exported from core rather than living where only the designer can reach it. */
-import { SceneLights, SceneEnv, ColorWheel } from '@spattoo/designer';
+import { SceneLights, SceneEnv, ColorWheel, SizeDial,
+         TIER_RADII, BOTTOM_H, NOMINAL_MM_PER_UNIT } from '@spattoo/designer';
 
 /* ── 3D Element Studio — Tripo and Meshy, side by side ───────────────────────────────────────────
  *
@@ -118,7 +119,7 @@ function readGlb(buf) {
  * named parts are unusable until you can see which is which, and that is also the work a human
  * still has to do before these map to real group names.
  */
-function Model({ buffer, colours, highlight, onParts, onPick, onHover }) {
+function Model({ buffer, colours, highlight, onParts, onPick, onHover, scale = 1 }) {
   const [root, setRoot] = useState(null);
   useEffect(() => {
     if (!buffer) { setRoot(null); return undefined; }
@@ -127,13 +128,20 @@ function Model({ buffer, colours, highlight, onParts, onPick, onHover }) {
        download and cannot fail on a signed URL expiring between the two. */
     new GLTFLoader().parse(buffer.slice(0), '', (gltf) => {
       if (!live) return;
-      /* Frame it: vendors return wildly different scales, and a bear 40 units tall is off camera. */
+      /* ⚠️ NORMALISE TO 2 UNITS, WHICH IS WHAT THE REST OF THE PIPELINE DOES. `glbRecomposeCore`
+         opens every import with "centre at origin, scale longest side to ~2 units", so a model
+         judged here at any other size is judged against a cake it will never meet. Vendors return
+         wildly different scales — this is the step that makes them comparable at all.
+         ⚠️ AND 2 UNITS IS ENORMOUS: a tier is 2.4 units ACROSS, so a freshly normalised decoration
+         is almost as wide as the cake — 16.9 cm tall on an 8-inch cake. That is the number this
+         screen now shows, because an admin was otherwise guessing the default scale blind. */
       const box = new THREE.Box3().setFromObject(gltf.scene);
       const size = box.getSize(new THREE.Vector3());
       const centre = box.getCenter(new THREE.Vector3());
-      const k = 1.8 / Math.max(size.x, size.y, size.z, 0.0001);
+      const k = 2 / Math.max(size.x, size.y, size.z, 0.0001);
       gltf.scene.scale.setScalar(k);
-      gltf.scene.position.set(-centre.x * k, -centre.y * k, -centre.z * k);
+      /* Sat ON the reference tier, not centred in mid-air: the question is whether it fits a cake. */
+      gltf.scene.position.set(-centre.x * k, -(centre.y - size.y / 2) * k, -centre.z * k);
       /* Give every mesh its own material — see the note above on the shared default. */
       gltf.scene.traverse(o => {
         if (!o.isMesh) return;
@@ -179,6 +187,7 @@ function Model({ buffer, colours, highlight, onParts, onPick, onHover }) {
   return root ? (
     <primitive
       object={root}
+      scale={[scale, scale, scale]}
       onClick={(e) => { e.stopPropagation(); onPick?.(e.object?.name || null); }}
       onPointerOver={(e) => { e.stopPropagation(); onHover?.(e.object?.name || null); document.body.style.cursor = 'pointer'; }}
       onPointerOut={() => { onHover?.(null); document.body.style.cursor = ''; }}
@@ -218,6 +227,12 @@ export default function Element3DStudio() {
   const [highlight, setHighlight] = useState(null);
   const [picking, setPicking] = useState(null);    // which part's wheel is open
   const [meshNames, setMeshNames] = useState([]);
+  /* ⚠️ THE SCALE A BAKER WOULD GET. `placement_config.scale` is the only statement of how big an
+     element may be (check:element-size exists because that rule has been broken four times), and
+     an admin authoring a new element has to pick its default. Picking it blind is how a decoration
+     ends up the size of the cake. Here it is picked against a real tier, with the centimetres shown. */
+  const [scale, setScale] = useState(0.3);
+  const [showCake, setShowCake] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const pollInFlight = useRef(false);
@@ -462,11 +477,19 @@ export default function Element3DStudio() {
                         border: '1px solid #E3EAE5', background: '#fff' }}>
             {/* ⚠️ EXPLICIT SIZE. Without it R3F left the canvas at the HTML default 300x150 inside a
                 420px box, so the first real model was invisible and looked like a load failure. */}
-            <Canvas camera={{ position: [0, 1.2, 3.2], fov: 42 }} dpr={[1, 2]}
+            <Canvas camera={{ position: [0, 1.1, 4.2], fov: 42 }} dpr={[1, 2]}
                     style={{ width: '100%', height: '100%', display: 'block' }}>
               <SceneLights shadows={false} />
               <SceneEnv />
-              {buffer && <Model buffer={buffer} colours={colours} highlight={highlight}
+              {showCake && (
+                /* The reference tier: the designer's own bottom-tier radius and height, so "does
+                   this fit on a cake" is answered against the cake we actually draw. */
+                <mesh position={[0, -BOTTOM_H / 2, 0]} receiveShadow>
+                  <cylinderGeometry args={[TIER_RADII[0], TIER_RADII[0], BOTTOM_H, 64]} />
+                  <meshStandardMaterial color="#F3EFE6" roughness={0.95} />
+                </mesh>
+              )}
+              {buffer && <Model buffer={buffer} scale={scale} colours={colours} highlight={highlight}
                                 onParts={setMeshNames} onHover={setHighlight}
                                 onPick={(name) => { setPicking(name); setHighlight(name);
                                   /* bring its row into view, so the wheel that just opened is on screen */
@@ -485,6 +508,50 @@ export default function Element3DStudio() {
             {row.error && <div style={{ color: '#9A3B2A', marginBottom: 6 }}>{row.error}</div>}
             {row.credits != null && <div style={{ color: '#6B8C74' }}>credits spent: {row.credits}</div>}
             <div style={{ color: '#9BB5A2', fontSize: 11, wordBreak: 'break-all' }}>id {row.id}</div>
+
+            {/* ── Is it the right size for a cake? ──────────────────────────────────────────
+                ⚠️ THE QUESTION AN ADMIN COULD NOT ANSWER BEFORE. Sandeep: "when generating- we
+                should take care of the size of the model, if its too huge or too small for the
+                cakes." Every import is normalised to 2 units, a tier is 2.4 ACROSS, so a raw
+                generated decoration is 16.9 cm tall on an 8-inch cake — taller than the cake is
+                wide. The default scale was being guessed; now it is chosen against a real tier
+                with the centimetres stated. `NOMINAL_MM_PER_UNIT` is core's own declared
+                assumption, imported rather than restated. */}
+            {buffer && (() => {
+              const cm = (2 * scale * NOMINAL_MM_PER_UNIT) / 10;
+              const tierCm = (TIER_RADII[0] * 2 * NOMINAL_MM_PER_UNIT) / 10;
+              const tooBig = cm > tierCm * 0.9;
+              const tooSmall = cm < 1.5;
+              return (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #EDF2EE' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <SizeDial size={scale} min={0.05} max={1} step={0.05}
+                              onChange={setScale} fmt={v => v.toFixed(2)} />
+                    <div>
+                      <div style={{ fontWeight: 800,
+                                    color: tooBig || tooSmall ? '#9A3B2A' : '#2C6E49' }}>
+                        ≈ {cm.toFixed(1)} cm tall
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9BB5A2' }}>
+                        on an 8-inch cake ({tierCm.toFixed(0)} cm across)
+                      </div>
+                    </div>
+                  </div>
+                  {tooBig && <div style={{ fontSize: 11.5, color: '#9A3B2A', marginTop: 4 }}>
+                    Wider than the cake it sits on — scale it down before saving.</div>}
+                  {tooSmall && <div style={{ fontSize: 11.5, color: '#9A3B2A', marginTop: 4 }}>
+                    Under 1.5 cm — detail at this size will not read on a cake.</div>}
+                  <label style={{ fontSize: 11.5, color: '#6B8C74', display: 'flex',
+                                  alignItems: 'center', gap: 6, marginTop: 6 }}>
+                    <input type="checkbox" checked={showCake}
+                           onChange={e => setShowCake(e.target.checked)} /> show the cake
+                  </label>
+                  <div style={{ fontSize: 11, color: '#9BB5A2', marginTop: 4 }}>
+                    This is the number to author as <code>placement_config.scale</code>’s default.
+                  </div>
+                </div>
+              );
+            })()}
 
             {stats?.error && <div style={{ color: '#9A3B2A' }}>{stats.error}</div>}
             {stats && !stats.error && (
