@@ -400,6 +400,28 @@ export async function startMeshyGeneration(sourceImageKey, force = false) {
   return post('/api/admin/meshy/generate', { sourceImageKey, force });
 }
 
+/* ── 3D Element Studio: one flow, two vendors ──────────────────────────────────────────────────
+   Separate from the Meshy helpers above on purpose — those serve the shipped Image → 3D wizard,
+   which is a baker path; these serve a staff comparison tool and must not change its behaviour. */
+export async function startAi3dGeneration({ provider, mode, prompt, sourceImageKey, parts, texture, lowPoly, faceLimit }) {
+  return post('/api/admin/ai3d/generate', { provider, mode, prompt, sourceImageKey, parts, texture, lowPoly, faceLimit });
+}
+export async function getAi3dGeneration(id) {
+  return get(`/api/admin/ai3d/${id}`);
+}
+/** The GLB itself, streamed through our API so a vendor's CORS policy cannot blank the studio.
+ *  Returns an ArrayBuffer — the studio reads the glTF JSON chunk out of it AND renders from it. */
+export async function fetchAi3dModel(id) {
+  const res = await fetch(`${BASE_URL}/api/admin/ai3d/${id}/model`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`model fetch failed (${res.status})`);
+  return res.arrayBuffer();
+}
+
+/** Meshy only — Tripo splits at generation time. */
+export async function splitAi3dGeneration(id, { mode, prompt } = {}) {
+  return post(`/api/admin/ai3d/${id}/split`, { mode, prompt });
+}
+
 // Poll a generation row. While non-terminal the API live-polls Meshy and updates the row,
 // so this returns fresh { status, progress, glb_url, thumbnail_url, error }.
 export async function getMeshyGeneration(id) {
@@ -509,6 +531,26 @@ export async function grantBakerMessageCredits(bakerId, { messages, note }) {
 // anything reading the views table alone would omit exactly the bakers this is opened to find.
 export async function getStorefrontUsage(days = 30) {
   return get(`/api/admin/storefront-usage?days=${encodeURIComponent(days)}`);
+}
+
+// ── Baker logos ───────────────────────────────────────────────────────────────
+// Every baker's cut-out logo and what it weighs, heaviest first. The cut-out used to be written as
+// lossless WebP whatever was in it, which is right for a flat wordmark and wrong for a rendered
+// emblem — one real logo reached 238 KB for a mark that draws 52px tall, and measured as 23% of a
+// cold template load on a phone. See spattoo-docs/features/background-removal.md.
+export async function getBakerLogos() {
+  return get('/api/admin/baker-logos');
+}
+
+// Re-encode one baker's logo. Without `apply` this writes nothing and answers what WOULD happen;
+// `preview` additionally returns the re-encoded image inline so the result can be seen beside the
+// original before anyone commits to it — it is a lossy conversion on somebody's brand mark.
+//
+// Applying mints a NEW key and deletes the old object. It cannot reuse the old one: everything we
+// store is marked immutable, so rewriting a key would leave the CDN and every browser that has it
+// serving the old bytes for months.
+export async function reencodeBakerLogo(bakerId, { apply = false, preview = false } = {}) {
+  return post(`/api/admin/baker-logos/${encodeURIComponent(bakerId)}/reencode`, { apply, preview });
 }
 
 // ── The help assistant's question log ─────────────────────────────────────────

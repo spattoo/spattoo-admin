@@ -34,6 +34,7 @@ const GenerateModel    = lazy(() => import('./admin/GenerateModel.jsx'));
 const GlbStudio        = lazy(() => import('./admin/GlbStudio.jsx'));
 const GlbRecompose     = lazy(() => import('./admin/GlbRecompose.jsx'));
 const ImageTo3DWizard  = lazy(() => import('./admin/ImageTo3DWizard.jsx'));
+const Element3DStudio  = lazy(() => import('./admin/Element3DStudio.jsx'));
 const BuildFromInspiration = lazy(() => import('./admin/BuildFromInspiration.jsx'));
 const ExtractElements   = lazy(() => import('./admin/ExtractElements.jsx'));
 const ElementTypes     = lazy(() => import('./admin/ElementTypes.jsx'));
@@ -49,6 +50,7 @@ const ManageNozzles         = lazy(() => import('./admin/ManageNozzles.jsx'));
 const NotificationChannels  = lazy(() => import('./admin/NotificationChannels.jsx'));
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
 const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
+const BakerLogos            = lazy(() => import('./admin/BakerLogos.jsx'));
 const HelpQuestions         = lazy(() => import('./admin/HelpQuestions.jsx'));
 const HelpIndex             = lazy(() => import('./admin/HelpIndex.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
@@ -118,6 +120,7 @@ const ROUTES = {
   '/glb-studio':          GlbStudio,
   '/glb-recompose':       GlbRecompose,
   '/elements/image-to-3d': ImageTo3DWizard,
+  '/elements/3d-studio':   Element3DStudio,
   '/elements/build-from-inspiration': BuildFromInspiration,
   '/elements/extract':    ExtractElements,
   '/elements/types':      ElementTypes,
@@ -126,6 +129,7 @@ const ROUTES = {
   '/bakers/onboard':      OnboardBaker,
   '/bakers/subscriptions': BakerSubscriptions,
   '/bakers/storefront-usage': StorefrontUsage,
+  '/bakers/logos':            BakerLogos,
   '/bakers/help-questions': HelpQuestions,
   '/bakers/help-index': HelpIndex,
   '/admin/legal':         LegalVersions,
@@ -202,6 +206,7 @@ const NAV_GROUPS = [
     { href: '/elements/build-from-inspiration', label: 'Build from Inspiration' },
     { href: '/elements/extract',        label: 'Extract Elements' },
     { href: '/elements/image-to-3d',    label: 'Image → 3D Cake' },
+    { href: '/elements/3d-studio',      label: '3D Element Studio' },
     { href: '/elements/generate',       label: 'Generate Shape' },
     { href: '/elements/polygon',        label: 'Polygon Cutter' },
     { href: '/elements/generate-model', label: 'Generate 3D Model' },
@@ -255,6 +260,9 @@ const NAV_GROUPS = [
     { href: '/bakers/onboard',       label: 'Onboard Baker' },
     { href: '/bakers/subscriptions', label: 'Baker Subscriptions' },
     { href: '/bakers/storefront-usage', label: 'Storefront Usage' },
+    /* Baker, not Editors: this is a baker's own asset and the people who open it are the people
+       who look after baker accounts. It replaced a scripts/*.mjs backfill — a tool with no door. */
+    { href: '/bakers/logos',           label: 'Baker Logos' },
     /* ⚠️ A LOG NOBODY CAN READ IS NOT A LOG. help/INDEX.md says to order the writing of new help
        articles by this list rather than by what we imagine bakers need — which only works if the
        list has a door. This is it. */
