@@ -409,6 +409,14 @@ export async function startAi3dGeneration({ provider, mode, prompt, sourceImageK
 export async function getAi3dGeneration(id) {
   return get(`/api/admin/ai3d/${id}`);
 }
+/** The GLB itself, streamed through our API so a vendor's CORS policy cannot blank the studio.
+ *  Returns an ArrayBuffer — the studio reads the glTF JSON chunk out of it AND renders from it. */
+export async function fetchAi3dModel(id) {
+  const res = await fetch(`${BASE_URL}/api/admin/ai3d/${id}/model`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`model fetch failed (${res.status})`);
+  return res.arrayBuffer();
+}
+
 /** Meshy only — Tripo splits at generation time. */
 export async function splitAi3dGeneration(id, { mode, prompt } = {}) {
   return post(`/api/admin/ai3d/${id}/split`, { mode, prompt });
