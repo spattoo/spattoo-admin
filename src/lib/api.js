@@ -533,6 +533,26 @@ export async function getStorefrontUsage(days = 30) {
   return get(`/api/admin/storefront-usage?days=${encodeURIComponent(days)}`);
 }
 
+// ── Baker logos ───────────────────────────────────────────────────────────────
+// Every baker's cut-out logo and what it weighs, heaviest first. The cut-out used to be written as
+// lossless WebP whatever was in it, which is right for a flat wordmark and wrong for a rendered
+// emblem — one real logo reached 238 KB for a mark that draws 52px tall, and measured as 23% of a
+// cold template load on a phone. See spattoo-docs/features/background-removal.md.
+export async function getBakerLogos() {
+  return get('/api/admin/baker-logos');
+}
+
+// Re-encode one baker's logo. Without `apply` this writes nothing and answers what WOULD happen;
+// `preview` additionally returns the re-encoded image inline so the result can be seen beside the
+// original before anyone commits to it — it is a lossy conversion on somebody's brand mark.
+//
+// Applying mints a NEW key and deletes the old object. It cannot reuse the old one: everything we
+// store is marked immutable, so rewriting a key would leave the CDN and every browser that has it
+// serving the old bytes for months.
+export async function reencodeBakerLogo(bakerId, { apply = false, preview = false } = {}) {
+  return post(`/api/admin/baker-logos/${encodeURIComponent(bakerId)}/reencode`, { apply, preview });
+}
+
 // ── The help assistant's question log ─────────────────────────────────────────
 // What bakers asked, and whether it landed. `filter=missed` is both failures at once: nothing
 // found, and a baker who said the answer did not answer them.
