@@ -51,6 +51,7 @@ const NotificationChannels  = lazy(() => import('./admin/NotificationChannels.js
 const BakerSubscriptions    = lazy(() => import('./admin/BakerSubscriptions.jsx'));
 const StorefrontUsage       = lazy(() => import('./admin/StorefrontUsage.jsx'));
 const BakerLogos            = lazy(() => import('./admin/BakerLogos.jsx'));
+const PromptQuestions       = lazy(() => import('./admin/PromptQuestions.jsx'));
 const HelpQuestions         = lazy(() => import('./admin/HelpQuestions.jsx'));
 const HelpIndex             = lazy(() => import('./admin/HelpIndex.jsx'));
 const LegalVersions         = lazy(() => import('./admin/LegalVersions.jsx'));
@@ -130,6 +131,7 @@ const ROUTES = {
   '/bakers/subscriptions': BakerSubscriptions,
   '/bakers/storefront-usage': StorefrontUsage,
   '/bakers/logos':            BakerLogos,
+  '/elements/prompt-questions': PromptQuestions,
   '/bakers/help-questions': HelpQuestions,
   '/bakers/help-index': HelpIndex,
   '/admin/legal':         LegalVersions,
@@ -201,6 +203,9 @@ const NAV_GROUPS = [
        decides what can be found (templateFilter searches tag slugs and display names). */
     { href: '/elements/tags',   label: 'Manage Tags' },
     { href: '/elements/material-styles', label: 'Material → Styles' },
+    /* What a baker is asked before we GENERATE a decoration — master data of the same kind as the
+       rows above it, and the place the 3D studio's questions come from. */
+    { href: '/elements/prompt-questions', label: 'Generation Questions' },
   ] },
   { title: 'Editors', index: '/editors', items: [
     { href: '/elements/build-from-inspiration', label: 'Build from Inspiration' },

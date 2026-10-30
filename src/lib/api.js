@@ -547,6 +547,41 @@ export async function getDecorationPromptQuestions(categoryId) {
   return get(`/api/decoration-prompt-questions${qs}`);
 }
 
+// ── Authoring the generation questions ────────────────────────────────────────
+// Rule 3: the questions came out of guesswork and will keep moving as real generations come back
+// wrong, so they must be editable without a deploy. `addPromptOption` is also called from the 3D
+// studio itself — when none of the chips fit, the gap is noticed while generating, and a trip to
+// another screen is how it never gets fixed.
+export async function getAdminPromptQuestions() {
+  return get('/api/admin/decoration-prompt-questions');
+}
+export async function createPromptQuestion(question) {
+  return post('/api/admin/decoration-prompt-questions', question);
+}
+export async function updatePromptQuestion(id, changes) {
+  return patch(`/api/admin/decoration-prompt-questions/${encodeURIComponent(id)}`, changes);
+}
+export async function addPromptOption(questionId, option) {
+  return post(`/api/admin/decoration-prompt-questions/${encodeURIComponent(questionId)}/options`, option);
+}
+export async function updatePromptOption(id, changes) {
+  return patch(`/api/admin/decoration-prompt-options/${encodeURIComponent(id)}`, changes);
+}
+export async function deletePromptOption(id) {
+  // 204 No Content — there is no body to parse, so this cannot go through the shared helpers.
+  const res = await fetch(`${BASE_URL}/api/admin/decoration-prompt-options/${encodeURIComponent(id)}`,
+                          { method: 'DELETE', headers: await authHeaders() });
+  if (!res.ok) throw await apiError(res);
+}
+
+// How each material reads TO A GENERATOR — authored, never derived from the human label.
+export async function getAdminDecorationMediums() {
+  return get('/api/admin/decoration-mediums');
+}
+export async function updateDecorationMediumPhrase(key, prompt_phrase) {
+  return patch(`/api/admin/decoration-mediums/${encodeURIComponent(key)}`, { prompt_phrase });
+}
+
 // ── Baker logos ───────────────────────────────────────────────────────────────
 // Every baker's cut-out logo and what it weighs, heaviest first. The cut-out used to be written as
 // lossless WebP whatever was in it, which is right for a flat wordmark and wrong for a rendered

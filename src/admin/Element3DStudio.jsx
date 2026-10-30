@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { startAi3dGeneration, getAi3dGeneration, splitAi3dGeneration, fetchAi3dModel } from '../lib/api.js';
 import { evaluateCaps, ASSET_CLASSES, CAPS } from '../lib/glb.js';
 import { buildDecorationPrompt, promptWarnings, defaultAnswers } from '../lib/decorationPrompt.js';
-import { getDecorationPromptQuestions, fetchAdminElementCategories } from '../lib/api.js';
+import { getDecorationPromptQuestions, addPromptOption } from '../lib/api.js';
 /* ⚠️ `ColorWheel`, NOT A ROW OF SWATCHES OR `<input type=color>`. Root CLAUDE.md names it THE colour
    control for every colour anyone picks, "and that applies in spattoo-admin too" — which is exactly
    why it is exported from core rather than living where only the designer can reach it. */
@@ -225,10 +225,14 @@ export default function Element3DStudio() {
      could be different."* A flower is never "sitting"; it is a bud or open, one bloom or a spray.
      So this component names no category, material or pose — it renders what it is handed. Adding a
      question for a new category is a row, never a branch here (migration 149). */
-  const [categories, setCategories] = useState([]);
-  const [categoryId, setCategoryId] = useState('');
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
+  /* ⚠️ ADDING AN OPTION WHERE THE GAP IS NOTICED. Sandeep asked for this inline rather than only on
+     the authoring screen, and he is right about why: the moment you discover none of the chips fit
+     is the moment you are mid-generation, and anything that needs a trip to another screen is a
+     thing that never gets fixed. Keyed by question id so two rows cannot share a draft. */
+  const [newOption, setNewOption] = useState({});
+  const [addError, setAddError] = useState('');
   const [partWords, setPartWords] = useState('');
   const [freeform, setFreeform] = useState(false);
   const [colours, setColours] = useState({});      // mesh name → hex
@@ -289,38 +293,25 @@ export default function Element3DStudio() {
     return () => clearInterval(id);
   }, [row?.id, row?.status]);
 
-  /* Categories once. They are catalogue master data and do not change while a studio is open. */
+  /* The question set, once. It no longer depends on anything the operator picks — see the note by
+     the fields below for why categories went. */
   useEffect(() => {
     let alive = true;
-    fetchAdminElementCategories()
-      .then(rows => { if (alive) setCategories(rows ?? []); })
-      .catch(() => { /* the studio still works with the universal questions only */ });
-    return () => { alive = false; };
-  }, []);
-
-  /* Questions follow the category. With no category chosen the server returns the UNIVERSAL set
-     rather than nothing — the honest answer to "I do not know what this is yet", and it keeps the
-     form usable instead of blank. */
-  useEffect(() => {
-    let alive = true;
-    getDecorationPromptQuestions(categoryId || undefined)
+    getDecorationPromptQuestions()
       .then(rows => {
         if (!alive) return;
         const list = rows ?? [];
         setQuestions(list);
-        /* ⚠️ KEEP WHAT THE BAKER ALREADY ANSWERED. Switching category swaps the per-category
-           questions but leaves the universal ones on screen, and silently resetting "Made of" back
-           to fondant because the category changed would undo a deliberate choice without saying
-           so. Defaults fill only the keys that have no answer yet. */
+        // Defaults fill only unanswered keys, so a reload never overwrites a deliberate choice.
         setAnswers(prev => ({ ...defaultAnswers(list), ...prev }));
       })
       .catch(() => { if (alive) setQuestions([]); });
     return () => { alive = false; };
-  }, [categoryId]);
+  }, []);
 
   const built = buildDecorationPrompt({ subject, questions, answers,
                                         parts: partWords.split(',').map(x => x.trim()).filter(Boolean) });
-  const warnings = promptWarnings({ subject });
+  const warnings = promptWarnings({ subject, questions, answers });
   /* What is actually sent. The builder writes it; `freeform` hands the pen back. */
   const effectivePrompt = freeform ? prompt : built;
 
@@ -429,22 +420,34 @@ export default function Element3DStudio() {
                           fontSize: 13, border: '1.5px solid #D8E0DA',
                           background: freeform ? '#F3F5F3' : '#fff' }} />
 
-          {/* ⚠️ THE CATEGORY IS ASKED FIRST BECAUSE IT DECIDES THE REST. It is also already a
-              required field on every element row, so this is not an extra question — it is an
-              existing one moved earlier, where it additionally earns its keep by choosing which
-              questions appear at all. */}
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-            <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }}>What is it</span>
-            <select value={categoryId} onChange={e => setCategoryId(e.target.value)} disabled={freeform}
-                    style={{ padding: '6px 10px', borderRadius: 9, fontFamily: 'inherit', fontSize: 12.5,
-                             fontWeight: 700, color: '#2C4433', border: '1.5px solid #D8E0DA',
-                             background: freeform ? '#F3F5F3' : '#fff' }}>
-              <option value="">Not sure yet</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-
-          {questions.map(q => (
+          {/* ⚠️ TWO QUESTIONS, BOTH GENERIC, BECAUSE NOTHING ELSE SURVIVES CONTACT WITH REAL INPUT.
+              Sandeep: *"we can only ask generic questions. if they type bat- how do you know which
+              bat is it? there are many sports use bat."* We do not — and a category picker only
+              moves that guess onto the operator. The free-text box is what settles it, because
+              "cricket bat, worn willow with a taped handle" is not ambiguous. Everything else that
+              makes a run fail — scale, flat base, untextured, the triangle cap — is ours and is
+              applied every time without asking. */}
+          {addError && (
+            <div style={{ fontSize: 11.5, color: '#991B1B', marginTop: 6 }}>{addError}</div>
+          )}
+          {questions.map(q => q.kind === 'text' ? (
+            <div key={q.key} style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11.5, color: '#9BB5A2', marginBottom: 4 }} title={q.help ?? ''}>
+                {q.label}
+              </div>
+              {/* A textarea, not an input: this is the field that carries the whole description, and
+                  a single line that scrolls sideways hides what the baker already wrote. */}
+              <textarea value={answers[q.key] ?? ''} disabled={freeform} rows={2}
+                        placeholder={q.placeholder ?? ''}
+                        onChange={e => setAnswers(a => ({ ...a, [q.key]: e.target.value }))}
+                        style={{ width: '100%', padding: 10, borderRadius: 10, fontFamily: 'inherit',
+                                 fontSize: 13, border: '1.5px solid #D8E0DA', resize: 'vertical',
+                                 background: freeform ? '#F3F5F3' : '#fff' }} />
+              {q.help && (
+                <div style={{ fontSize: 10.5, color: '#9BB5A2', marginTop: 3, lineHeight: 1.45 }}>{q.help}</div>
+              )}
+            </div>
+          ) : (
             <div key={q.key} style={{ display: 'flex', gap: 6, alignItems: 'center',
                                       flexWrap: 'wrap', marginTop: 8 }}>
               <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }} title={q.help ?? ''}>{q.label}</span>
@@ -459,6 +462,27 @@ export default function Element3DStudio() {
                   {o.label}
                 </button>
               ))}
+              {/* Saved for everyone, not just this run — which is the difference between this box
+                  and the free-text one above it, and why it says so out loud. */}
+              <input value={newOption[q.key] ?? ''} disabled={freeform}
+                     placeholder="+ add an option"
+                     onChange={e => setNewOption(n => ({ ...n, [q.key]: e.target.value }))}
+                     onKeyDown={async e => {
+                       if (e.key !== 'Enter') return;
+                       const label = (newOption[q.key] ?? '').trim();
+                       if (!label || !q.id) return;
+                       setAddError('');
+                       try {
+                         await addPromptOption(q.id, { label });
+                         setNewOption(n => ({ ...n, [q.key]: '' }));
+                         setQuestions(await getDecorationPromptQuestions());
+                       } catch (err) {
+                         setAddError(err.message || 'Could not save that option.');
+                       }
+                     }}
+                     style={{ width: 128, padding: '5px 9px', borderRadius: 9, fontFamily: 'inherit',
+                              fontSize: 12, border: '1px dashed #C5D4C8', color: '#2C4433',
+                              background: freeform ? '#F3F5F3' : '#fff' }} />
             </div>
           ))}
 

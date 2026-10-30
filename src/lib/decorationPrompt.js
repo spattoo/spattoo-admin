@@ -61,11 +61,21 @@ export function buildDecorationPrompt({ subject, questions = [], answers = {}, p
   const trimmed = String(subject ?? '').trim();
   if (!trimmed) return '';
 
+  /* ⚠️ A QUESTION IS EITHER CHIPS OR A BOX, AND THE ANSWER SHAPE FOLLOWS. For 'choice' the answer
+     is an option key and the phrase is authored; for 'text' the answer IS the phrase, because the
+     baker wrote it. That second kind is what makes this work for anything at all — Sandeep: *"if
+     they type bat- how do you know which bat is it? there are many sports use bat."* We do not.
+     Their own words settle it: "cricket bat, worn willow with a taped handle". */
   const phrases = [];
   for (const q of questions) {
+    if (q.kind === 'text') {
+      const typed = String(answers[q.key] ?? '').trim();
+      if (typed) phrases.push(typed);
+      continue;
+    }
     const chosen = pickOption(q, answers[q.key]);
-    // An empty phrase is legitimate — it is what "No preference" stores — and must not become the
-    // string "undefined" or drop the separator it sits between.
+    // An empty phrase is legitimate — it is what a "No preference" option stores — and must not
+    // become the string "undefined" or drop the separator it sits between.
     if (chosen?.phrase) phrases.push(chosen.phrase);
   }
 
@@ -95,6 +105,9 @@ export function pickOption(question, answerKey) {
 export function defaultAnswers(questions = []) {
   const out = {};
   for (const q of questions) {
+    // A text box has no default. Pre-filling one would put words in the baker's mouth and then
+    // charge them for it — the placeholder shows the example instead, and stays unsent.
+    if (q.kind === 'text') continue;
     const d = (q.options ?? []).find(o => o.is_default);
     if (d) out[q.key] = d.key;
   }
@@ -118,9 +131,22 @@ const COSTLY = [
     say: 'Realistic sends it towards a statue rather than a cake decoration. Use the Look question instead, where it is one word and not the whole brief.' },
 ];
 
-/** Warnings for the subject line. Never blocking — a warning that refuses is a rule in disguise. */
-export function promptWarnings({ subject } = {}) {
-  const text = String(subject ?? '');
+/**
+ * Warnings for everything the baker typed. Never blocking — a warning that refuses is a rule in
+ * disguise, and the baker may have a reason we do not know.
+ *
+ * ⚠️ IT READS THE FREE-TEXT ANSWERS TOO, NOT JUST THE SUBJECT. This checked `subject` alone, and
+ * the subject is the one place these words do NOT appear: nobody types "fluffy lion" as the
+ * subject, they type "lion" and then "sitting, with a big fluffy mane" in the look box. So the
+ * warning fired on the half nobody uses, and the prompt went out asking for a fluffy mane while the
+ * frame appended "no fur or hair" — a contradiction we paid for and the baker was never told about.
+ */
+export function promptWarnings({ subject, questions = [], answers = {} } = {}) {
+  const typed = [String(subject ?? '')];
+  for (const q of questions) {
+    if (q.kind === 'text') typed.push(String(answers[q.key] ?? ''));
+  }
+  const text = typed.join(' ');
   if (!text.trim()) return [];
   return COSTLY.filter(c => c.re.test(text)).map(c => c.say);
 }
