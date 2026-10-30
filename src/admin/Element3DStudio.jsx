@@ -3,8 +3,9 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { startAi3dGeneration, getAi3dGeneration, splitAi3dGeneration } from '../lib/api.js';
+import { startAi3dGeneration, getAi3dGeneration, splitAi3dGeneration, fetchAi3dModel } from '../lib/api.js';
 import { evaluateCaps, ASSET_CLASSES, CAPS } from '../lib/glb.js';
+import { buildDecorationPrompt, promptWarnings, MATERIALS, POSES, DETAIL } from '../lib/decorationPrompt.js';
 /* ⚠️ `ColorWheel`, NOT A ROW OF SWATCHES OR `<input type=color>`. Root CLAUDE.md names it THE colour
    control for every colour anyone picks, "and that applies in spattoo-admin too" — which is exactly
    why it is exported from core rather than living where only the designer can reach it. */
@@ -117,7 +118,7 @@ function readGlb(buf) {
  * named parts are unusable until you can see which is which, and that is also the work a human
  * still has to do before these map to real group names.
  */
-function Model({ buffer, colours, highlight, onParts }) {
+function Model({ buffer, colours, highlight, onParts, onPick, onHover }) {
   const [root, setRoot] = useState(null);
   useEffect(() => {
     if (!buffer) { setRoot(null); return undefined; }
@@ -170,7 +171,19 @@ function Model({ buffer, colours, highlight, onParts }) {
     });
   }, [root, colours, highlight]);
 
-  return root ? <primitive object={root} /> : null;
+  /* ⚠️ CLICK THE PART, NOT THE LIST. Sandeep: *"clicking on the mesh part is better i think. i can
+     directly go to the part i want to create."* Thirteen rows called `tripo_part_7` are unreadable;
+     the model itself is the only place a part has an identity a human can see. R3F raycasts for us,
+     so the nearest mesh under the pointer is `e.object` — `stopPropagation` keeps a click from also
+     hitting whatever is behind it. */
+  return root ? (
+    <primitive
+      object={root}
+      onClick={(e) => { e.stopPropagation(); onPick?.(e.object?.name || null); }}
+      onPointerOver={(e) => { e.stopPropagation(); onHover?.(e.object?.name || null); document.body.style.cursor = 'pointer'; }}
+      onPointerOut={() => { onHover?.(null); document.body.style.cursor = ''; }}
+    />
+  ) : null;
 }
 
 export default function Element3DStudio() {
@@ -183,11 +196,24 @@ export default function Element3DStudio() {
      parted, untextured bear at 501,326 triangles and 12.2 MB against caps of 25,000 and 1 MB.
      Low poly is capped by Tripo at 20,000 triangles, which lands under ours by construction. */
   const [lowPoly, setLowPoly] = useState(true);
+  /* ⚠️ A SEPARATE LEVER FROM `low poly`, AND THE DIFFERENCE IS THE WHOLE EXPERIMENT. `smart_low_poly`
+     RE-MESHES the model with hand-crafted topology — measured 2026-10-29, it returned a lovely
+     12,212-triangle 416 KB bear as ONE fused mesh, destroying the 13 parts. `face_limit` is just a
+     cap. Whether a cap keeps the parts is what decides if generated elements are viable at all. */
+  const [faceLimit, setFaceLimit] = useState('');
   const [assetClass, setAssetClass] = useState('decor');
   const [row, setRow] = useState(null);
   const [stats, setStats] = useState(null);
   const [buffer, setBuffer] = useState(null);
   const [recallId, setRecallId] = useState('');
+  /* The guided builder. `subject` is whatever the baker typed, however vague — everything else is a
+     chip. `freeform` lets someone who knows what they are doing ignore all of it. */
+  const [subject, setSubject] = useState('a bear with a small bow');
+  const [material, setMaterial] = useState('fondant');
+  const [pose, setPose] = useState('sitting');
+  const [detail, setDetail] = useState('simple');
+  const [partWords, setPartWords] = useState('');
+  const [freeform, setFreeform] = useState(false);
   const [colours, setColours] = useState({});      // mesh name → hex
   const [highlight, setHighlight] = useState(null);
   const [picking, setPicking] = useState(null);    // which part's wheel is open
@@ -200,7 +226,8 @@ export default function Element3DStudio() {
   async function generate() {
     setBusy(true); setError(null); setRow(null); setStats(null); setBuffer(null); setColours({}); setPicking(null);
     try {
-      const r = await startAi3dGeneration({ provider, mode, prompt, parts, texture, lowPoly });
+      const r = await startAi3dGeneration({ provider, mode, prompt: effectivePrompt, parts, texture, lowPoly,
+                                           faceLimit: faceLimit === '' ? undefined : Number(faceLimit) });
       setRow(r);
     } catch (e) { setError(e.message || String(e)); }
     finally { setBusy(false); }
@@ -239,6 +266,12 @@ export default function Element3DStudio() {
     return () => clearInterval(id);
   }, [row?.id, row?.status]);
 
+  const built = buildDecorationPrompt({ subject, material, pose, detail,
+                                        parts: partWords.split(',').map(x => x.trim()).filter(Boolean) });
+  const warnings = promptWarnings({ subject, detail });
+  /* What is actually sent. The builder writes it; `freeform` hands the pen back. */
+  const effectivePrompt = freeform ? prompt : built;
+
   const modelUrl = row?.vendorModelUrl ?? row?.glbUrl ?? null;
 
   /* Download once the vendor hands over a URL, then read the bytes. Kept out of the poll effect so
@@ -248,7 +281,9 @@ export default function Element3DStudio() {
     let live = true;
     (async () => {
       try {
-        const buf = await (await fetch(modelUrl)).arrayBuffer();
+        /* Through our API, not the vendor's CDN — Meshy's does not send a CORS header, so reading
+           it straight from the browser fails for one vendor and works for the other. */
+        const buf = await fetchAi3dModel(row.id);
         if (!live) return;
         setBuffer(buf);
         setStats(readGlb(buf));
@@ -281,7 +316,8 @@ export default function Element3DStudio() {
         Generate a decoration with <strong>Tripo</strong> or <strong>Meshy</strong> and see whether what
         comes back can become a Spattoo element. The test that matters is not how it looks — it is
         whether it arrives as <strong>separate parts with no baked texture</strong>, because that is
-        the only shape a baker can recolour.
+        the only shape a baker can recolour. <strong>Click a part on the model</strong> to open its
+        colour; the list is only there to show what else is in the file.
       </p>
 
       {/* ⚠️ The switch is the point of the screen, so it is the first control and it is labelled
@@ -307,6 +343,13 @@ export default function Element3DStudio() {
           <input type="checkbox" checked={lowPoly} onChange={e => setLowPoly(e.target.checked)} /> low poly
         </label>
         <label style={{ fontSize: 12, color: '#6B8C74', display: 'flex', alignItems: 'center', gap: 6 }}>
+          face limit
+          <input value={faceLimit} onChange={e => setFaceLimit(e.target.value.replace(/[^0-9]/g, ''))}
+                 placeholder="none" inputMode="numeric"
+                 style={{ width: 76, padding: '6px 8px', borderRadius: 8, fontFamily: 'inherit',
+                          fontSize: 12, border: '1.5px solid #D8E0DA' }} />
+        </label>
+        <label style={{ fontSize: 12, color: '#6B8C74', display: 'flex', alignItems: 'center', gap: 6 }}>
           judge as
           <select value={assetClass} onChange={e => setAssetClass(e.target.value)}
                   style={{ ...S.ghost, padding: '6px 8px' }}>
@@ -321,9 +364,71 @@ export default function Element3DStudio() {
       </p>
 
       {mode === 'text' && (
-        <textarea value={prompt} onChange={e => setPrompt(e.target.value)} rows={2}
-          style={{ width: '100%', maxWidth: 760, padding: 10, borderRadius: 10, fontFamily: 'inherit',
-                   fontSize: 13, border: '1.5px solid #D8E0DA', marginBottom: 12 }} />
+        <div style={{ maxWidth: 760, marginBottom: 12 }}>
+          {/* ⚠️ THE QUESTIONS EXIST TO SAVE CREDITS, NOT TO BE THOROUGH. Sandeep: "Not every baker
+              can prompt better, and it burns credits for them." A bad prompt is not free — it is
+              30 credits and three minutes, and the baker finds out at the end. Each chip adds a
+              clause we have actually measured; see lib/decorationPrompt.js. */}
+          <div style={{ fontSize: 11, fontWeight: 800, color: '#6B8C74', letterSpacing: 0.4,
+                        textTransform: 'uppercase', marginBottom: 6 }}>What are you making?</div>
+          <input value={subject} onChange={e => setSubject(e.target.value)} disabled={freeform}
+                 placeholder="a bear with a bow — plain words are fine"
+                 style={{ width: '100%', padding: 10, borderRadius: 10, fontFamily: 'inherit',
+                          fontSize: 13, border: '1.5px solid #D8E0DA',
+                          background: freeform ? '#F3F5F3' : '#fff' }} />
+
+          {[['Made of', MATERIALS, material, setMaterial],
+            ['How it sits', POSES, pose, setPose],
+            ['Detail', DETAIL, detail, setDetail]].map(([label, list, value, set]) => (
+            <div key={label} style={{ display: 'flex', gap: 6, alignItems: 'center',
+                                      flexWrap: 'wrap', marginTop: 8 }}>
+              <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }}>{label}</span>
+              {list.map(o => (
+                <button key={o.key} type="button" disabled={freeform} onClick={() => set(o.key)}
+                  style={{ ...S.ghost, padding: '5px 11px', fontSize: 12, fontWeight: 700,
+                           opacity: freeform ? 0.5 : 1,
+                           background: value === o.key ? '#2C4433' : '#fff',
+                           color: value === o.key ? '#fff' : '#2C4433',
+                           borderColor: value === o.key ? '#2C4433' : '#D8E0DA' }}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          ))}
+
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+            <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }}>Parts</span>
+            <input value={partWords} onChange={e => setPartWords(e.target.value)} disabled={freeform}
+                   placeholder="bow, ears, feet — naming them may get them back named"
+                   style={{ flex: 1, padding: '7px 10px', borderRadius: 8, fontFamily: 'inherit',
+                            fontSize: 12, border: '1.5px solid #D8E0DA',
+                            background: freeform ? '#F3F5F3' : '#fff' }} />
+          </div>
+
+          {warnings.length > 0 && !freeform && (
+            <div style={{ marginTop: 10, padding: 10, borderRadius: 10, fontSize: 12, lineHeight: 1.5,
+                          background: '#FDF6EC', border: '1px solid #EBD9BD', color: '#8A5A20' }}>
+              {warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
+            </div>
+          )}
+
+          {/* ⚠️ THE SENTENCE IS SHOWN, NOT HIDDEN. A builder that composes a prompt behind the
+              baker's back teaches them nothing and cannot be corrected — INVARIANTS #11, the
+              control and what it changes visible together. */}
+          <div style={{ marginTop: 10, fontSize: 11, fontWeight: 800, color: '#6B8C74',
+                        letterSpacing: 0.4, textTransform: 'uppercase' }}>What gets sent</div>
+          <textarea value={effectivePrompt} readOnly={!freeform}
+            onChange={e => setPrompt(e.target.value)} rows={2}
+            style={{ width: '100%', padding: 10, borderRadius: 10, fontFamily: 'inherit', marginTop: 4,
+                     fontSize: 13, border: '1.5px solid #D8E0DA',
+                     background: freeform ? '#fff' : '#F7FAF8', color: '#2C4433' }} />
+          <label style={{ fontSize: 12, color: '#6B8C74', display: 'flex', alignItems: 'center',
+                          gap: 6, marginTop: 6 }}>
+            <input type="checkbox" checked={freeform}
+                   onChange={e => { if (e.target.checked) setPrompt(built); setFreeform(e.target.checked); }} />
+            write it myself
+          </label>
+        </div>
       )}
       {mode === 'image' && (
         <p style={{ ...S.card, maxWidth: 760, marginBottom: 12 }}>
@@ -334,7 +439,8 @@ export default function Element3DStudio() {
       )}
 
       <div style={S.row}>
-        <button type="button" style={S.btn} disabled={busy || (mode === 'image')} onClick={generate}>
+        <button type="button" style={S.btn}
+                disabled={busy || mode === 'image' || !effectivePrompt.trim()} onClick={generate}>
           {busy ? 'Working…' : `Generate with ${PROVIDERS[provider].label}`}
         </button>
         {row?.provider === 'meshy' && row?.status === 'SUCCEEDED' && (
@@ -361,7 +467,12 @@ export default function Element3DStudio() {
               <SceneLights shadows={false} />
               <SceneEnv />
               {buffer && <Model buffer={buffer} colours={colours} highlight={highlight}
-                                onParts={setMeshNames} />}
+                                onParts={setMeshNames} onHover={setHighlight}
+                                onPick={(name) => { setPicking(name); setHighlight(name);
+                                  /* bring its row into view, so the wheel that just opened is on screen */
+                                  requestAnimationFrame(() => document
+                                    .querySelector(`[data-part="${name}"]`)
+                                    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })); }} />}
               <OrbitControls enablePan={false} />
             </Canvas>
           </div>
@@ -402,7 +513,7 @@ export default function Element3DStudio() {
                     const chosen = colours[p.name];
                     const open = picking === p.name;
                     return (
-                      <div key={p.name}
+                      <div key={p.name} data-part={p.name}
                            onMouseEnter={() => setHighlight(p.name)}
                            onMouseLeave={() => setHighlight(h => (h === p.name ? null : h))}
                            style={{ borderBottom: '1px solid #F1F5F2', padding: '5px 0' }}>
