@@ -533,6 +533,20 @@ export async function getStorefrontUsage(days = 30) {
   return get(`/api/admin/storefront-usage?days=${encodeURIComponent(days)}`);
 }
 
+// ── What to ask before generating a 3D decoration ─────────────────────────────
+// The question SET depends on what the thing IS — a flower is never "sitting"; it is a bud or open,
+// one bloom or a spray. So the server answers per element category (migration 149), and the client
+// renders whatever comes back without knowing a single category, material or pose by name.
+//
+// ⚠️ THE "MADE OF" OPTIONS ARRIVE RESOLVED, and that is deliberate. They come from
+// decoration_mediums where can_model — the one place that knows what a decoration can be made of.
+// This file used to hold its own five-item list; it offered "Buttercream", which maps to `cream`,
+// which cannot be modelled at all. Never reintroduce a local list: `check:prompt-vocab` fails on it.
+export async function getDecorationPromptQuestions(categoryId) {
+  const qs = categoryId ? `?category_id=${encodeURIComponent(categoryId)}` : '';
+  return get(`/api/decoration-prompt-questions${qs}`);
+}
+
 // ── Baker logos ───────────────────────────────────────────────────────────────
 // Every baker's cut-out logo and what it weighs, heaviest first. The cut-out used to be written as
 // lossless WebP whatever was in it, which is right for a flat wordmark and wrong for a rendered

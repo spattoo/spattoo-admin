@@ -1,101 +1,126 @@
 // ── Turning what a baker says into what a generator needs ────────────────────────────────────────
 //
 // Sandeep: *"Not every baker can prompt better, and it burns credits for them. we should be able to
-// convert their vague input to a good prompt and save their credits and time. when they want to
-// create a new model, lets ask few questions - like is it made of fondant etc."*
+// convert their vague input to a good prompt and save their credits and time."* And then, on what
+// to ask: *"if a baker asks for a lion, it might give a real lion 3d. but baker usually wants is a
+// fondant lion, and that too in seating position. we cant directly send that as prompt - but the
+// questions we ask are based on what element baker asks - for flowers it could be different."*
 //
-// ⚠️ EVERY CLAUSE HERE WAS PAID FOR, which is the only reason to encode them rather than let people
-// type freely. Measured against Tripo on 2026-10-29:
+// ── THE QUESTIONS ARE DATA, AND THEY LIVE IN THE DATABASE ───────────────────────────────────────
+// `decoration_prompt_questions` / `decoration_prompt_options` (migration 149), keyed by
+// `element_categories` — the identity axis the catalogue has had since 073. A flower is never
+// "sitting"; it is a bud or open, one bloom or a spray. So the question SET comes from the server
+// and this file never names a category, a material or a pose.
 //
-//   • "with fur" — fur cannot exist without a texture, and we generate UNTEXTURED because a Spattoo
-//     element only recolours when it carries no map. Asked for anyway, it becomes geometry, and
-//     geometry is what put the first run at 501,326 triangles against a 25,000 cap.
-//   • "simple rounded shapes" — the run that kept its parts AND hit budget had it.
-//   • "sitting" / "standing" — gives the model a flat base. Without one it floats, and a decoration
-//     that cannot sit on a cake is not a decoration.
+// ⚠️ THIS FILE USED TO HOLD ITS OWN MATERIAL LIST, AND IT WAS WRONG. Five hardcoded entries that
+// invented `sugar` and `buttercream` (neither is a key), wrote `wafer` where the key is
+// `wafer_paper`, missed marzipan, isomalt, modelling chocolate and royal icing — and offered
+// "Buttercream", which maps to `cream`, which has `can_model = false`. An option put in front of
+// staff that cannot be modelled at all. Migration 101 made that vocabulary a table precisely to
+// stop this, and said so: "admin can no longer hold its own copy". `check:medium-vocab` did not
+// catch it because it reads backend files only. The list now arrives from the API, resolved there,
+// so there is nothing here to drift. `check:prompt-vocab` guards the absence.
+//
+// ── WHAT IS STILL HARDCODED, AND WHY ────────────────────────────────────────────────────────────
+// The FRAME below. Every clause in it was measured against Tripo on 2026-10-29 and is a fact about
+// OUR pipeline, not a matter of taste an admin should tune:
+//
+//   • "untextured, no fur or hair" — fur cannot exist without a texture, and a Spattoo element only
+//     recolours when it carries NO map. Asked for anyway it becomes geometry: one run came back at
+//     501,326 triangles against a 25,000 decor cap.
 //   • "cake topper" — sets the scale. Vendors otherwise return something sized like a statue.
+//   • "separate parts" — what makes per-part recolouring possible at all, which is the entire
+//     reason we generate rather than buy.
 //
-// ⚠️ IT DOES NOT ASK FOR COLOURS, AND THAT IS DELIBERATE. The whole point of generating untextured
-// parts is that the baker colours them afterwards, per part, in the designer. A colour in the
-// prompt would be baked into geometry we then recolour anyway — paying for something we discard.
+// ⚠️ AND IT NEVER ASKS FOR COLOUR. The point of untextured parts is that the baker colours them per
+// part afterwards in the designer. A colour in the prompt is paid-for geometry we then discard.
 //
 // ⚠️ A PURE FUNCTION, SO IT CAN MOVE. This lives in admin because that is where the studio is, but
-// the baker-facing version will need the same sentence — and two copies of the vocabulary is the
-// drift INVARIANTS #15 is about. When bakers get this, the function moves to core and admin imports
-// it; nothing about its shape has to change.
+// the baker-facing version needs the same sentence — and two copies of the vocabulary is the drift
+// INVARIANTS #15 is about. When bakers get this, the function moves to core and admin imports it;
+// nothing about its shape has to change, because its inputs are already server data.
 
-/** What a decoration is made of. The word matters: vendors render "fondant" smoother than "clay". */
-export const MATERIALS = [
-  { key: 'fondant',     label: 'Fondant',      phrase: 'smooth fondant finish' },
-  { key: 'buttercream', label: 'Buttercream',  phrase: 'piped buttercream texture' },
-  { key: 'chocolate',   label: 'Chocolate',    phrase: 'moulded chocolate finish' },
-  { key: 'sugar',       label: 'Sugar paste',  phrase: 'matte sugar paste finish' },
-  { key: 'wafer',       label: 'Wafer paper',  phrase: 'thin wafer paper, flat layered shapes' },
-];
-
-/** How it sits on the cake. Each gives the model a base to stand on. */
-export const POSES = [
-  { key: 'sitting',  label: 'Sitting',       phrase: 'sitting upright with a flat base' },
-  { key: 'standing', label: 'Standing',      phrase: 'standing upright with a flat base' },
-  { key: 'lying',    label: 'Lying flat',    phrase: 'lying flat, low profile' },
-  { key: 'none',     label: 'No preference', phrase: '' },
-];
-
-/** How much detail to ask for. More detail is more triangles, and triangles are the budget. */
-export const DETAIL = [
-  { key: 'simple',   label: 'Simple',   phrase: 'simple rounded shapes, few separate pieces' },
-  { key: 'moderate', label: 'Moderate', phrase: 'clean shapes with a few distinct pieces' },
-  { key: 'detailed', label: 'Detailed', phrase: 'detailed sculpted shapes' },
-];
+/** The non-negotiable frame. Measured, not authored — see the note above. */
+export const PROMPT_FRAME = {
+  lead:  'cake topper',
+  tail:  'untextured, no fur or hair, separate parts for each coloured area',
+};
 
 /**
  * Compose the prompt.
  *
- * `subject` is whatever the baker typed, however vague — "a bear", "bear with bow". Everything else
- * is a chip they picked. Returns a single sentence, or '' when there is no subject yet.
+ * `subject`   — whatever the baker typed, however vague ("a lion", "lion with a bow").
+ * `questions` — exactly what GET /api/decoration-prompt-questions returned for their category.
+ * `answers`   — { [question.key]: option.key }. Missing keys fall back to the option marked
+ *               `is_default`, so a baker who answers nothing still gets a sane prompt rather than
+ *               a bare noun.
+ *
+ * Returns '' when there is no subject yet — there is nothing to say about nothing.
  */
-export function buildDecorationPrompt({ subject, material = 'fondant', pose = 'sitting',
-                                        detail = 'simple', parts = [] } = {}) {
+export function buildDecorationPrompt({ subject, questions = [], answers = {}, parts = [] } = {}) {
   const trimmed = String(subject ?? '').trim();
   if (!trimmed) return '';
 
-  const phrase = (list, key) => list.find(x => x.key === key)?.phrase ?? '';
-  const bits = [
-    trimmed,
-    phrase(POSES, pose),
-    phrase(MATERIALS, material),
-    phrase(DETAIL, detail),
-  ];
+  const phrases = [];
+  for (const q of questions) {
+    const chosen = pickOption(q, answers[q.key]);
+    // An empty phrase is legitimate — it is what "No preference" stores — and must not become the
+    // string "undefined" or drop the separator it sits between.
+    if (chosen?.phrase) phrases.push(chosen.phrase);
+  }
 
-  /* ⚠️ NAMING THE PARTS IS NOT DECORATION, IT IS THE POINT. Tripo returns parts called
-     `tripo_part_0…12` — carved correctly, named uselessly — so a human still has to say which is
-     which. Asking for them by name up front is the one lever that might fix that, and it is free. */
-  if (parts.length) bits.push(`separate ${parts.map(p => p.trim()).filter(Boolean).join(', ')}`);
+  /* ⚠️ NAMED PARTS ARE A SEGMENTATION HINT, NOT DECORATION. Tripo's Smart Segmentation takes a
+     `hint`, and a part it can name is a part the baker can recolour on its own — which is the whole
+     reason to generate rather than buy. Free text rather than a question, because the useful names
+     are whatever THIS subject happens to have ("mane", "bow", "wings") and no stored option list
+     could hold them. */
+  const named = (Array.isArray(parts) ? parts : [])
+    .map(x => String(x).trim()).filter(Boolean);
+  const partClause = named.length ? `distinct ${named.join(', ')}` : '';
 
-  bits.push('cake topper');
-  return bits.filter(Boolean).join(', ');
+  return [PROMPT_FRAME.lead, trimmed, ...phrases, partClause, PROMPT_FRAME.tail]
+    .filter(Boolean)
+    .join(', ');
+}
+
+/** The option a question is currently answered with: the explicit pick, else its default, else none. */
+export function pickOption(question, answerKey) {
+  const options = question?.options ?? [];
+  return options.find(o => o.key === answerKey)
+      ?? options.find(o => o.is_default)
+      ?? null;
+}
+
+/** Every question answered with its default — the starting state of a fresh form. */
+export function defaultAnswers(questions = []) {
+  const out = {};
+  for (const q of questions) {
+    const d = (q.options ?? []).find(o => o.is_default);
+    if (d) out[q.key] = d.key;
+  }
+  return out;
 }
 
 /**
- * Things a baker might ask for that cost credits and come back unusable. Returned as plain
- * sentences so the UI can warn BEFORE the spend rather than explain after it.
+ * What the baker typed that will cost them.
+ *
+ * ⚠️ THESE ARE THE WORDS THAT MADE A RUN UNUSABLE, not a style guide. Texture words are the
+ * expensive ones: we generate untextured so parts stay recolourable, so a texture request is spent
+ * entirely on geometry. Colour words are cheaper but still wasted — the baker recolours per part
+ * afterwards, so a colour in the prompt is bought and thrown away.
  */
-export function promptWarnings({ subject, detail } = {}) {
-  const t = String(subject ?? '').toLowerCase();
-  const out = [];
-  /* Fur, hair, grass and lace are all "many thin strands", which untextured means geometry. */
-  if (/\b(fur|furry|hair|hairy|grass|lace|feathers?)\b/.test(t)) {
-    out.push('Fur, hair and lace have to be modelled as geometry when there is no texture — that is '
-           + 'what took one run to 501,326 triangles against a 25,000 cap. Say "smooth" instead.');
-  }
-  if (/\b(realistic|photorealistic|lifelike)\b/.test(t)) {
-    out.push('Realistic subjects come back heavy and fiddly. Cake decorations read better stylised.');
-  }
-  if (/\b(thin|wire|string|whisker|antenna)\b/.test(t)) {
-    out.push('Very thin parts tend to arrive broken or fused to whatever they touch.');
-  }
-  if (detail === 'detailed') {
-    out.push('Detailed costs triangles, and the budget is 25,000 for a decoration.');
-  }
-  return out;
+const COSTLY = [
+  { re: /\b(fur|furry|hairy|hair|feather|feathers|fluffy)\b/i,
+    say: 'Fur and feathers need a texture, and we generate untextured so each part stays recolourable. Asked for anyway it comes back as geometry — one run hit 501,326 triangles against a 25,000 cap.' },
+  { re: /\b(red|blue|green|pink|yellow|purple|orange|golden|gold|silver|white|black|brown)\b/i,
+    say: 'Colour is set per part in the designer afterwards, so a colour here is paid for and then replaced.' },
+  { re: /\b(realistic|photoreal|photo-realistic|lifelike)\b/i,
+    say: 'Realistic sends it towards a statue rather than a cake decoration. Use the Look question instead, where it is one word and not the whole brief.' },
+];
+
+/** Warnings for the subject line. Never blocking — a warning that refuses is a rule in disguise. */
+export function promptWarnings({ subject } = {}) {
+  const text = String(subject ?? '');
+  if (!text.trim()) return [];
+  return COSTLY.filter(c => c.re.test(text)).map(c => c.say);
 }

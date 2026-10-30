@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { startAi3dGeneration, getAi3dGeneration, splitAi3dGeneration, fetchAi3dModel } from '../lib/api.js';
 import { evaluateCaps, ASSET_CLASSES, CAPS } from '../lib/glb.js';
-import { buildDecorationPrompt, promptWarnings, MATERIALS, POSES, DETAIL } from '../lib/decorationPrompt.js';
+import { buildDecorationPrompt, promptWarnings, defaultAnswers } from '../lib/decorationPrompt.js';
+import { getDecorationPromptQuestions, fetchAdminElementCategories } from '../lib/api.js';
 /* ⚠️ `ColorWheel`, NOT A ROW OF SWATCHES OR `<input type=color>`. Root CLAUDE.md names it THE colour
    control for every colour anyone picks, "and that applies in spattoo-admin too" — which is exactly
    why it is exported from core rather than living where only the designer can reach it. */
@@ -218,9 +219,16 @@ export default function Element3DStudio() {
   /* The guided builder. `subject` is whatever the baker typed, however vague — everything else is a
      chip. `freeform` lets someone who knows what they are doing ignore all of it. */
   const [subject, setSubject] = useState('a bear with a small bow');
-  const [material, setMaterial] = useState('fondant');
-  const [pose, setPose] = useState('sitting');
-  const [detail, setDetail] = useState('simple');
+  /* ⚠️ THE QUESTIONS COME FROM THE SERVER, KEYED BY CATEGORY. Sandeep: *"if a baker asks for a
+     lion, it might give a real lion 3d. but baker usually wants is a fondant lion, and that too in
+     seating position... the questions we ask are based on what element baker asks - for flowers it
+     could be different."* A flower is never "sitting"; it is a bud or open, one bloom or a spray.
+     So this component names no category, material or pose — it renders what it is handed. Adding a
+     question for a new category is a row, never a branch here (migration 149). */
+  const [categories, setCategories] = useState([]);
+  const [categoryId, setCategoryId] = useState('');
+  const [questions, setQuestions] = useState([]);
+  const [answers, setAnswers] = useState({});
   const [partWords, setPartWords] = useState('');
   const [freeform, setFreeform] = useState(false);
   const [colours, setColours] = useState({});      // mesh name → hex
@@ -281,9 +289,38 @@ export default function Element3DStudio() {
     return () => clearInterval(id);
   }, [row?.id, row?.status]);
 
-  const built = buildDecorationPrompt({ subject, material, pose, detail,
+  /* Categories once. They are catalogue master data and do not change while a studio is open. */
+  useEffect(() => {
+    let alive = true;
+    fetchAdminElementCategories()
+      .then(rows => { if (alive) setCategories(rows ?? []); })
+      .catch(() => { /* the studio still works with the universal questions only */ });
+    return () => { alive = false; };
+  }, []);
+
+  /* Questions follow the category. With no category chosen the server returns the UNIVERSAL set
+     rather than nothing — the honest answer to "I do not know what this is yet", and it keeps the
+     form usable instead of blank. */
+  useEffect(() => {
+    let alive = true;
+    getDecorationPromptQuestions(categoryId || undefined)
+      .then(rows => {
+        if (!alive) return;
+        const list = rows ?? [];
+        setQuestions(list);
+        /* ⚠️ KEEP WHAT THE BAKER ALREADY ANSWERED. Switching category swaps the per-category
+           questions but leaves the universal ones on screen, and silently resetting "Made of" back
+           to fondant because the category changed would undo a deliberate choice without saying
+           so. Defaults fill only the keys that have no answer yet. */
+        setAnswers(prev => ({ ...defaultAnswers(list), ...prev }));
+      })
+      .catch(() => { if (alive) setQuestions([]); });
+    return () => { alive = false; };
+  }, [categoryId]);
+
+  const built = buildDecorationPrompt({ subject, questions, answers,
                                         parts: partWords.split(',').map(x => x.trim()).filter(Boolean) });
-  const warnings = promptWarnings({ subject, detail });
+  const warnings = promptWarnings({ subject });
   /* What is actually sent. The builder writes it; `freeform` hands the pen back. */
   const effectivePrompt = freeform ? prompt : built;
 
@@ -392,19 +429,33 @@ export default function Element3DStudio() {
                           fontSize: 13, border: '1.5px solid #D8E0DA',
                           background: freeform ? '#F3F5F3' : '#fff' }} />
 
-          {[['Made of', MATERIALS, material, setMaterial],
-            ['How it sits', POSES, pose, setPose],
-            ['Detail', DETAIL, detail, setDetail]].map(([label, list, value, set]) => (
-            <div key={label} style={{ display: 'flex', gap: 6, alignItems: 'center',
+          {/* ⚠️ THE CATEGORY IS ASKED FIRST BECAUSE IT DECIDES THE REST. It is also already a
+              required field on every element row, so this is not an extra question — it is an
+              existing one moved earlier, where it additionally earns its keep by choosing which
+              questions appear at all. */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+            <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }}>What is it</span>
+            <select value={categoryId} onChange={e => setCategoryId(e.target.value)} disabled={freeform}
+                    style={{ padding: '6px 10px', borderRadius: 9, fontFamily: 'inherit', fontSize: 12.5,
+                             fontWeight: 700, color: '#2C4433', border: '1.5px solid #D8E0DA',
+                             background: freeform ? '#F3F5F3' : '#fff' }}>
+              <option value="">Not sure yet</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+
+          {questions.map(q => (
+            <div key={q.key} style={{ display: 'flex', gap: 6, alignItems: 'center',
                                       flexWrap: 'wrap', marginTop: 8 }}>
-              <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }}>{label}</span>
-              {list.map(o => (
-                <button key={o.key} type="button" disabled={freeform} onClick={() => set(o.key)}
+              <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }} title={q.help ?? ''}>{q.label}</span>
+              {q.options.map(o => (
+                <button key={o.key} type="button" disabled={freeform} title={o.phrase || 'adds nothing'}
+                  onClick={() => setAnswers(a => ({ ...a, [q.key]: o.key }))}
                   style={{ ...S.ghost, padding: '5px 11px', fontSize: 12, fontWeight: 700,
                            opacity: freeform ? 0.5 : 1,
-                           background: value === o.key ? '#2C4433' : '#fff',
-                           color: value === o.key ? '#fff' : '#2C4433',
-                           borderColor: value === o.key ? '#2C4433' : '#D8E0DA' }}>
+                           background: answers[q.key] === o.key ? '#2C4433' : '#fff',
+                           color: answers[q.key] === o.key ? '#fff' : '#2C4433',
+                           borderColor: answers[q.key] === o.key ? '#2C4433' : '#D8E0DA' }}>
                   {o.label}
                 </button>
               ))}
