@@ -10,7 +10,7 @@ import { getDecorationPromptQuestions, addPromptOption } from '../lib/api.js';
 /* ⚠️ `ColorWheel`, NOT A ROW OF SWATCHES OR `<input type=color>`. Root CLAUDE.md names it THE colour
    control for every colour anyone picks, "and that applies in spattoo-admin too" — which is exactly
    why it is exported from core rather than living where only the designer can reach it. */
-import { SceneLights, SceneEnv, ColorWheel, SizeDial,
+import { SceneLights, SceneEnv, ColorWheel, SizeDial, GenerationWizard,
          TIER_RADII, BOTTOM_H, NOMINAL_MM_PER_UNIT } from '@spattoo/designer';
 
 /* ── 3D Element Studio — Tripo and Meshy, side by side ───────────────────────────────────────────
@@ -254,6 +254,12 @@ export default function Element3DStudio() {
   const [addError, setAddError] = useState('');
   const [partWords, setPartWords] = useState('');
   const [freeform, setFreeform] = useState(false);
+  /* Where the wizard is. Sandeep: *"want user to focus at each on how exactly it should shape up.
+     if all at one place, easy to skip details."* The step list itself is derived from the questions
+     the API returns, so adding one in Admin → Elements → Generation Questions adds a step here with
+     no change to this file. */
+  const [step, setStep] = useState(0);
+  const [questionsReady, setQuestionsReady] = useState(false);
   const [colours, setColours] = useState({});      // mesh name → hex
   const [highlight, setHighlight] = useState(null);
   const [picking, setPicking] = useState(null);    // which part's wheel is open
@@ -335,8 +341,11 @@ export default function Element3DStudio() {
         setQuestions(list);
         // Defaults fill only unanswered keys, so a reload never overwrites a deliberate choice.
         setAnswers(prev => ({ ...defaultAnswers(list), ...prev }));
+        setQuestionsReady(true);
       })
-      .catch(() => { if (alive) setQuestions([]); });
+      // A failed fetch is not a loading state: the wizard is complete without the questions (they
+      // narrow a prompt that already works), so the count becomes true rather than staying hidden.
+      .catch(() => { if (alive) { setQuestions([]); setQuestionsReady(true); } });
     return () => { alive = false; };
   }, []);
 
@@ -442,66 +451,32 @@ export default function Element3DStudio() {
         20,000 triangles: without it the first real run came back at 501,326, twenty times our decor cap.
       </p>
 
-      {mode === 'text' && (
-        <div style={{ maxWidth: 760, marginBottom: 12 }}>
-          {/* ⚠️ THE QUESTIONS EXIST TO SAVE CREDITS, NOT TO BE THOROUGH. Sandeep: "Not every baker
-              can prompt better, and it burns credits for them." A bad prompt is not free — it is
-              30 credits and three minutes, and the baker finds out at the end. Each chip adds a
-              clause we have actually measured; see lib/decorationPrompt.js. */}
-          <div style={{ fontSize: 11, fontWeight: 800, color: '#6B8C74', letterSpacing: 0.4,
-                        textTransform: 'uppercase', marginBottom: 6 }}>What are you making?</div>
-          <input value={subject} onChange={e => setSubject(e.target.value)} disabled={freeform}
-                 placeholder="a bear with a bow — plain words are fine"
-                 style={{ width: '100%', padding: 10, borderRadius: 10, fontFamily: 'inherit',
-                          fontSize: 13, border: '1.5px solid #D8E0DA',
-                          background: freeform ? '#F3F5F3' : '#fff' }} />
+      {mode === 'text' && !freeform && (
+        /* ⚠️ ONE QUESTION AT A TIME, AND THE STEPS ARE NOT LISTED HERE. Sandeep: *"lets make it like
+           a wizard pls... if all at one place, easy to skip details. basically i want to save
+           baker's credits as much as possible."* The wizard lives in CORE because the baker's studio
+           is where it is going and imports only flow core → admin — building it here would mean
+           building it twice. It derives its steps from `questions`, so a question added in Admin →
+           Elements → Generation Questions grows a step with no edit to this file.
 
-          {/* ⚠️ TWO QUESTIONS, BOTH GENERIC, BECAUSE NOTHING ELSE SURVIVES CONTACT WITH REAL INPUT.
-              Sandeep: *"we can only ask generic questions. if they type bat- how do you know which
-              bat is it? there are many sports use bat."* We do not — and a category picker only
-              moves that guess onto the operator. The free-text box is what settles it, because
-              "cricket bat, worn willow with a taped handle" is not ambiguous. Everything else that
-              makes a run fail — scale, flat base, untextured, the triangle cap — is ours and is
-              applied every time without asking. */}
-          {addError && (
-            <div style={{ fontSize: 11.5, color: '#991B1B', marginTop: 6 }}>{addError}</div>
-          )}
-          {questions.map(q => q.kind === 'text' ? (
-            <div key={q.key} style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 11.5, color: '#9BB5A2', marginBottom: 4 }} title={q.help ?? ''}>
-                {q.label}
-              </div>
-              {/* A textarea, not an input: this is the field that carries the whole description, and
-                  a single line that scrolls sideways hides what the baker already wrote. */}
-              <textarea value={answers[q.key] ?? ''} disabled={freeform} rows={2}
-                        placeholder={q.placeholder ?? ''}
-                        onChange={e => setAnswers(a => ({ ...a, [q.key]: e.target.value }))}
-                        style={{ width: '100%', padding: 10, borderRadius: 10, fontFamily: 'inherit',
-                                 fontSize: 13, border: '1.5px solid #D8E0DA', resize: 'vertical',
-                                 background: freeform ? '#F3F5F3' : '#fff' }} />
-              {q.help && (
-                <div style={{ fontSize: 10.5, color: '#9BB5A2', marginTop: 3, lineHeight: 1.45 }}>{q.help}</div>
-              )}
-            </div>
-          ) : (
-            <div key={q.key} style={{ display: 'flex', gap: 6, alignItems: 'center',
-                                      flexWrap: 'wrap', marginTop: 8 }}>
-              <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }} title={q.help ?? ''}>{q.label}</span>
-              {q.options.map(o => (
-                <button key={o.key} type="button" disabled={freeform} title={o.phrase || 'adds nothing'}
-                  onClick={() => setAnswers(a => ({ ...a, [q.key]: o.key }))}
-                  style={{ ...S.ghost, padding: '5px 11px', fontSize: 12, fontWeight: 700,
-                           opacity: freeform ? 0.5 : 1,
-                           background: answers[q.key] === o.key ? '#2C4433' : '#fff',
-                           color: answers[q.key] === o.key ? '#fff' : '#2C4433',
-                           borderColor: answers[q.key] === o.key ? '#2C4433' : '#D8E0DA' }}>
-                  {o.label}
-                </button>
-              ))}
-              {/* Saved for everyone, not just this run — which is the difference between this box
-                  and the free-text one above it, and why it says so out loud. */}
-              <input value={newOption[q.key] ?? ''} disabled={freeform}
-                     placeholder="+ add an option"
+           What it does NOT own is the sentence: `buildDecorationPrompt` stays in this repo, where
+           `check:prompt-vocab` holds it to naming no material, pose or category of its own. The
+           wizard receives the finished string. */
+        <div style={{ marginBottom: 12 }}>
+          <GenerationWizard
+            questions={questions} output={parts ? 'recolourable' : 'ready'}
+            subject={subject} onSubject={setSubject}
+            answers={answers} onAnswer={(k, v) => setAnswers(a => ({ ...a, [k]: v }))}
+            partWords={partWords} onPartWords={setPartWords}
+            index={step} onIndex={setStep} questionsReady={questionsReady}
+            prompt={built} warnings={warnings}
+            busy={busy} onGenerate={generate}
+            generateLabel={`Generate with ${PROVIDERS[provider].label}`}
+            costNote={PROVIDERS[provider].price}
+            /* Admin-only, and injected rather than built in: saving an option saves it for EVERY
+               baker who opens this wizard, which is a decision staff make and bakers do not. */
+            renderQuestionExtra={q => (
+              <input value={newOption[q.key] ?? ''} placeholder="+ add an option for everyone"
                      onChange={e => setNewOption(n => ({ ...n, [q.key]: e.target.value }))}
                      onKeyDown={async e => {
                        if (e.key !== 'Enter') return;
@@ -516,46 +491,44 @@ export default function Element3DStudio() {
                          setAddError(err.message || 'Could not save that option.');
                        }
                      }}
-                     style={{ width: 128, padding: '5px 9px', borderRadius: 9, fontFamily: 'inherit',
-                              fontSize: 12, border: '1px dashed #C5D4C8', color: '#2C4433',
-                              background: freeform ? '#F3F5F3' : '#fff' }} />
-            </div>
-          ))}
-
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
-            <span style={{ fontSize: 11.5, color: '#9BB5A2', width: 72 }}>Parts</span>
-            <input value={partWords} onChange={e => setPartWords(e.target.value)} disabled={freeform}
-                   placeholder="bow, ears, feet — naming them may get them back named"
-                   style={{ flex: 1, padding: '7px 10px', borderRadius: 8, fontFamily: 'inherit',
-                            fontSize: 12, border: '1.5px solid #D8E0DA',
-                            background: freeform ? '#F3F5F3' : '#fff' }} />
-          </div>
-
-          {warnings.length > 0 && !freeform && (
-            <div style={{ marginTop: 10, padding: 10, borderRadius: 10, fontSize: 12, lineHeight: 1.5,
-                          background: '#FDF6EC', border: '1px solid #EBD9BD', color: '#8A5A20' }}>
-              {warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
-            </div>
-          )}
-
-          {/* ⚠️ THE SENTENCE IS SHOWN, NOT HIDDEN. A builder that composes a prompt behind the
-              baker's back teaches them nothing and cannot be corrected — INVARIANTS #11, the
-              control and what it changes visible together. */}
-          <div style={{ marginTop: 10, fontSize: 11, fontWeight: 800, color: '#6B8C74',
-                        letterSpacing: 0.4, textTransform: 'uppercase' }}>What gets sent</div>
-          <textarea value={effectivePrompt} readOnly={!freeform}
-            onChange={e => setPrompt(e.target.value)} rows={2}
-            style={{ width: '100%', padding: 10, borderRadius: 10, fontFamily: 'inherit', marginTop: 4,
-                     fontSize: 13, border: '1.5px solid #D8E0DA',
-                     background: freeform ? '#fff' : '#F7FAF8', color: '#2C4433' }} />
+                     style={{ width: 170, padding: '7px 10px', borderRadius: 9, fontFamily: 'inherit',
+                              fontSize: 12, border: '1px dashed #C5D4C8', color: '#2C4433' }} />
+            )}
+          />
+          {addError && <div style={{ fontSize: 11.5, color: '#991B1B', marginTop: 6 }}>{addError}</div>}
           <label style={{ fontSize: 12, color: '#6B8C74', display: 'flex', alignItems: 'center',
-                          gap: 6, marginTop: 6 }}>
+                          gap: 6, marginTop: 10 }}>
             <input type="checkbox" checked={freeform}
                    onChange={e => { if (e.target.checked) setPrompt(built); setFreeform(e.target.checked); }} />
             write it myself
           </label>
         </div>
       )}
+
+      {mode === 'text' && freeform && (
+        /* The escape hatch, unchanged in substance: staff comparing vendors need to send an exact
+           string, and the wizard's whole job is to compose one. Stepping through questions to reach
+           a box you are going to overwrite is worse than no wizard. Unticking restores the steps
+           with every answer still there. */
+        <div style={{ maxWidth: 760, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: '#6B8C74', letterSpacing: 0.4,
+                        textTransform: 'uppercase', marginBottom: 4 }}>What gets sent</div>
+          <textarea value={prompt} onChange={e => setPrompt(e.target.value)} rows={3}
+            style={{ width: '100%', padding: 10, borderRadius: 10, fontFamily: 'inherit',
+                     fontSize: 13, border: '1.5px solid #D8E0DA', background: '#fff', color: '#2C4433' }} />
+          <div style={S.row}>
+            <button type="button" style={S.btn} disabled={busy || !effectivePrompt.trim()} onClick={generate}>
+              {busy ? 'Working…' : `Generate with ${PROVIDERS[provider].label}`}
+            </button>
+            <label style={{ fontSize: 12, color: '#6B8C74', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={freeform}
+                     onChange={e => setFreeform(e.target.checked)} />
+              write it myself
+            </label>
+          </div>
+        </div>
+      )}
+
       {mode === 'image' && (
         <p style={{ ...S.card, maxWidth: 760, marginBottom: 12 }}>
           Image → 3D needs a source image already on R2. The shipped{' '}
@@ -565,10 +538,6 @@ export default function Element3DStudio() {
       )}
 
       <div style={S.row}>
-        <button type="button" style={S.btn}
-                disabled={busy || mode === 'image' || !effectivePrompt.trim()} onClick={generate}>
-          {busy ? 'Working…' : `Generate with ${PROVIDERS[provider].label}`}
-        </button>
         {row?.provider === 'meshy' && row?.status === 'SUCCEEDED' && (
           <button type="button" style={S.ghost} onClick={split}>Auto Split this model</button>
         )}
