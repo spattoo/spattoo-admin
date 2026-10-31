@@ -403,8 +403,11 @@ export async function startMeshyGeneration(sourceImageKey, force = false) {
 /* ── 3D Element Studio: one flow, two vendors ──────────────────────────────────────────────────
    Separate from the Meshy helpers above on purpose — those serve the shipped Image → 3D wizard,
    which is a baker path; these serve a staff comparison tool and must not change its behaviour. */
-export async function startAi3dGeneration({ provider, mode, prompt, sourceImageKey, parts, texture, lowPoly, faceLimit }) {
-  return post('/api/admin/ai3d/generate', { provider, mode, prompt, sourceImageKey, parts, texture, lowPoly, faceLimit });
+// ⚠️ EVERY FIELD IS NAMED TWICE HERE, so a new one must be added in BOTH or it is dropped in
+// silence — which is what nearly happened to `pbr`: the studio sent it, this signature did not
+// list it, and the generation would have come back matte with nobody able to say why.
+export async function startAi3dGeneration({ provider, mode, prompt, sourceImageKey, parts, texture, pbr, lowPoly, faceLimit }) {
+  return post('/api/admin/ai3d/generate', { provider, mode, prompt, sourceImageKey, parts, texture, pbr, lowPoly, faceLimit });
 }
 export async function getAi3dGeneration(id) {
   return get(`/api/admin/ai3d/${id}`);

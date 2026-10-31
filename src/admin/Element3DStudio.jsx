@@ -200,8 +200,16 @@ export default function Element3DStudio() {
   const [provider, setProvider] = useState('tripo');
   const [mode, setMode] = useState('text');
   const [prompt, setPrompt] = useState('a fondant monkey sitting, cake topper, simple shapes');
-  const [parts, setParts] = useState(true);
-  const [texture, setTexture] = useState(false);
+  /* ⚠️ ONE CHOICE, NOT TWO CHECKBOXES. Tripo refuses parts together with texture/pbr — it accepts
+     the request, spends the credits and returns a model missing one half — so two independent
+     toggles could only ever express a state the vendor rejects. The fork is also the product
+     decision: staff build catalogue elements that get finished by hand, a baker has a customer
+     waiting. Sandeep: *"if have to choose between parts vs colored output, i would choose colored
+     output... something that bakers can use directly."* */
+  const [output, setOutput] = useState('parts');   // 'parts' (catalogue) | 'ready' (baker)
+  const parts   = output === 'parts';
+  const texture = output === 'ready';
+  const pbr     = output === 'ready';
   /* ⚠️ ON BY DEFAULT, BECAUSE THE FIRST REAL RUN WAS 20x OVER BUDGET. Tripo returned a beautifully
      parted, untextured bear at 501,326 triangles and 12.2 MB against caps of 25,000 and 1 MB.
      Low poly is capped by Tripo at 20,000 triangles, which lands under ours by construction. */
@@ -253,7 +261,7 @@ export default function Element3DStudio() {
   async function generate() {
     setBusy(true); setError(null); setRow(null); setStats(null); setBuffer(null); setColours({}); setPicking(null);
     try {
-      const r = await startAi3dGeneration({ provider, mode, prompt: effectivePrompt, parts, texture, lowPoly,
+      const r = await startAi3dGeneration({ provider, mode, prompt: effectivePrompt, parts, texture, pbr, lowPoly,
                                            faceLimit: faceLimit === '' ? undefined : Number(faceLimit) });
       setRow(r);
     } catch (e) { setError(e.message || String(e)); }
@@ -376,12 +384,14 @@ export default function Element3DStudio() {
       <div style={S.row}>
         <button type="button" style={pill(mode === 'text')} onClick={() => setMode('text')}>Text → 3D</button>
         <button type="button" style={pill(mode === 'image')} onClick={() => setMode('image')}>Image → 3D</button>
-        <label style={{ fontSize: 12, color: '#6B8C74', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input type="checkbox" checked={parts} onChange={e => setParts(e.target.checked)} /> ask for parts
-        </label>
-        <label style={{ fontSize: 12, color: '#6B8C74', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input type="checkbox" checked={texture} onChange={e => setTexture(e.target.checked)} /> bake a texture
-        </label>
+        <button type="button" style={pill(output === 'parts')} onClick={() => setOutput('parts')}
+                title="Separate meshes, no maps. A baker picks a colour per part — but somebody has to do that first.">
+          Recolourable
+        </button>
+        <button type="button" style={pill(output === 'ready')} onClick={() => setOutput('ready')}
+                title="Textured + PBR, one fused mesh. Keeps its own colours and sheen; cannot be recoloured.">
+          Ready to use
+        </button>
         <label style={{ fontSize: 12, color: '#6B8C74', display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={lowPoly} onChange={e => setLowPoly(e.target.checked)} /> low poly
         </label>
