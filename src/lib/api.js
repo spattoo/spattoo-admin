@@ -440,6 +440,13 @@ export async function analyzeInspiration(imageBlob) {
   return post('/api/admin/inspiration/analyze', { imageBase64: btoa(binary), mimeType: imageBlob.type || 'image/jpeg' });
 }
 
+/* Compose a cake idea from a written brief → a BUNDLE (the spec AND the rows it names).
+ * Both, because a spec names element IDS: a screen that then had to fetch each row would be a
+ * second query deciding what a design is made of. See spattoo-api routes/ideas.js. */
+export async function composeIdea(brief, { pool = null, includeShortlist = false } = {}) {
+  return post('/api/admin/ideas/compose', { brief, pool, includeShortlist });
+}
+
 // Match an analysis spec's decorations to library elements → per-tier matches + coverage.
 export async function matchInspiration(analysis) {
   return post('/api/admin/inspiration/match', { analysis });

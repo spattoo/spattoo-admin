@@ -66,6 +66,7 @@ const RecolorTester         = lazy(() => import('./admin/RecolorTester.jsx'));
 const FreehandPenStudio     = lazy(() => import('./admin/FreehandPenStudio.jsx'));
 const FlowerNailStudio      = lazy(() => import('./admin/FlowerNailStudio.jsx'));
 const CardCutoutStudio      = lazy(() => import('./admin/CardCutoutStudio.jsx'));
+const CakeIdeaStudio        = lazy(() => import('./admin/CakeIdeaStudio.jsx'));
 const StudioBackdropStudio  = lazy(() => import('./admin/StudioBackdropStudio.jsx'));
 const WaferPaperStudio      = lazy(() => import('./admin/WaferPaperStudio.jsx'));
 const GypsophilaStudio      = lazy(() => import('./admin/GypsophilaStudio.jsx'));
@@ -154,6 +155,7 @@ const ROUTES = {
   '/elements/freehand-pen':      FreehandPenStudio,
   '/elements/flower-nail':       FlowerNailStudio,
   '/elements/card-cutout':       CardCutoutStudio,
+  '/elements/cake-idea':         CakeIdeaStudio,
   '/studio/backdrop':            StudioBackdropStudio,
   '/elements/wafer-paper':       WaferPaperStudio,
   '/elements/gypsophila':        GypsophilaStudio,
@@ -208,6 +210,7 @@ const NAV_GROUPS = [
     { href: '/elements/prompt-questions', label: 'Generation Questions' },
   ] },
   { title: 'Editors', index: '/editors', items: [
+    { href: '/elements/cake-idea',      label: 'Cake Idea Studio' },
     { href: '/elements/build-from-inspiration', label: 'Build from Inspiration' },
     { href: '/elements/extract',        label: 'Extract Elements' },
     { href: '/elements/image-to-3d',    label: 'Image → 3D Cake' },
