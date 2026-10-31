@@ -120,7 +120,7 @@ function readGlb(buf) {
  * named parts are unusable until you can see which is which, and that is also the work a human
  * still has to do before these map to real group names.
  */
-function Model({ buffer, colours, highlight, onParts, onPick, onHover, scale = 1 }) {
+function Model({ buffer, colours, highlight, onParts, onPick, onHover, onCentre, scale = 1 }) {
   const [root, setRoot] = useState(null);
   useEffect(() => {
     if (!buffer) { setRoot(null); return undefined; }
@@ -150,12 +150,16 @@ function Model({ buffer, colours, highlight, onParts, onPick, onHover, scale = 1
           ?? new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 });
       });
       setRoot(gltf.scene);
+      /* The centre AFTER the normalise-and-seat transform above, so the camera can look at the
+         model rather than at the origin. Reported in world units; the `scale` prop multiplies it. */
+      const seated = new THREE.Box3().setFromObject(gltf.scene);
+      onCentre?.(seated.getCenter(new THREE.Vector3()));
       onParts?.(gltf.scene.children.flatMap(function names(n) {
         return [...(n.isMesh ? [n.name || n.uuid] : []), ...n.children.flatMap(names)];
       }));
     }, () => { if (live) setRoot(null); });
     return () => { live = false; };
-  }, [buffer, onParts]);
+  }, [buffer, onParts, onCentre]);
 
   /* Repaint whenever a colour changes, or the hover moves. Writing straight onto the live
      materials, which is what the renderer does — no re-parse, no reload. */
@@ -226,7 +230,13 @@ export default function Element3DStudio() {
   const [recallId, setRecallId] = useState('');
   /* The guided builder. `subject` is whatever the baker typed, however vague — everything else is a
      chip. `freeform` lets someone who knows what they are doing ignore all of it. */
-  const [subject, setSubject] = useState('a bear with a small bow');
+  /* ⚠️ EMPTY, NOT A SAMPLE. This was pre-filled with 'a bear with a small bow' as a convenience,
+     and it cost a real generation: Sandeep typed "fondant flute" into the LOOK box, never touched
+     the subject, and 20 credits later got a teddy bear — the prompt read "...decoration, a bear
+     with a small bow, smooth fondant finish, fondant flute, ...". A default that is a plausible
+     answer is indistinguishable from an answer somebody gave. The placeholder shows the same
+     example and is never sent. */
+  const [subject, setSubject] = useState('');
   /* ⚠️ THE QUESTIONS COME FROM THE SERVER, KEYED BY CATEGORY. Sandeep: *"if a baker asks for a
      lion, it might give a real lion 3d. but baker usually wants is a fondant lion, and that too in
      seating position... the questions we ask are based on what element baker asks - for flowers it
@@ -253,7 +263,18 @@ export default function Element3DStudio() {
      an admin authoring a new element has to pick its default. Picking it blind is how a decoration
      ends up the size of the cake. Here it is picked against a real tier, with the centimetres shown. */
   const [scale, setScale] = useState(0.3);
-  const [showCake, setShowCake] = useState(true);
+  /* ⚠️ OFF BY DEFAULT. Sandeep: *"remove that white cake from out studio. thats not needed at
+     generation. i cant zoom into bear because of this cake. bear goes out of screen."* The tier is
+     the SCALE reference he asked for earlier — "we should take care of the size of the model, if
+     its too huge or too small for the cakes" — so it stays available, but it is a check you run
+     once rather than furniture you look past on every generation. The cm readout beside it does
+     not need the tier drawn to be correct. */
+  const [showCake, setShowCake] = useState(false);
+  /* Where the camera looks. The real cause of "it goes out of screen" was not the cake: OrbitControls
+     orbits the ORIGIN, which is the tier's middle, so zooming moved toward the cake and pushed the
+     model — which sits ON TOP of it — out of frame. Targeting the model's own centre fixes that
+     whether the tier is drawn or not. */
+  const [modelCentre, setModelCentre] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const pollInFlight = useRef(false);
@@ -580,13 +601,19 @@ export default function Element3DStudio() {
                 </mesh>
               )}
               {buffer && <Model buffer={buffer} scale={scale} colours={colours} highlight={highlight}
-                                onParts={setMeshNames} onHover={setHighlight}
+                                onParts={setMeshNames} onHover={setHighlight} onCentre={setModelCentre}
                                 onPick={(name) => { setPicking(name); setHighlight(name);
                                   /* bring its row into view, so the wheel that just opened is on screen */
                                   requestAnimationFrame(() => document
                                     .querySelector(`[data-part="${name}"]`)
                                     ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })); }} />}
-              <OrbitControls enablePan={false} />
+              {/* Pan is ON now: with the tier hidden there is nothing fixed to orbit around, and a
+                  tall model still needs nudging into frame. `target` follows the model's centre so
+                  the wheel zooms INTO it rather than past it. */}
+              <OrbitControls enablePan makeDefault
+                             target={modelCentre
+                               ? [modelCentre.x, modelCentre.y * scale, modelCentre.z]
+                               : [0, 0, 0]} />
             </Canvas>
           </div>
 
