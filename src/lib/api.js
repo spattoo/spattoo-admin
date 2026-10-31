@@ -454,6 +454,12 @@ export async function composeIdea(brief, { pool = null, includeShortlist = false
   return post('/api/admin/ideas/compose', { brief, pool, includeShortlist });
 }
 
+// One sentence -> one group of pieces to place ("add a coral on the board"). The response names
+// WHICH rows and HOW they sit together; the designer works out where.
+export async function placeFromInstruction(instruction, { pool = null } = {}) {
+  return post('/api/admin/ideas/place', { instruction, pool });
+}
+
 // Match an analysis spec's decorations to library elements → per-tier matches + coverage.
 export async function matchInspiration(analysis) {
   return post('/api/admin/inspiration/match', { analysis });
