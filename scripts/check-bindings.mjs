@@ -145,11 +145,17 @@ for (const rel of files) {
   // undefined; `x > n` is silently false), and they are rare enough in prose-inside-code to keep the
   // false alarms down. Anything looser flagged dozens of legitimate object keys and locals from
   // outer scopes, and a gate that cries wolf is a gate that gets deleted.
+  // ⚠️ NOT AFTER A BACKSLASH, AND THAT IS NOT A HYPOTHETICAL. `\b(fur|furry|hairy)` in a regex
+  // literal matched the first shape as a call to a function named `b`, and the gate had been red on
+  // a clean tree for it — reported against `lib/decorationPrompt.js`, which never called anything of
+  // the sort. Strings are blanked above but regex literals cannot be (the `/` is ambiguous with
+  // division), so the escape is excluded where it reads as a name. An identifier directly preceded
+  // by `\` is an escape sequence in every one of these shapes, never a reference.
   const sites = [
-    /[^A-Za-z0-9_.$]([a-z][A-Za-z0-9_$]*)\s*\(/g,              // name(
+    /[^A-Za-z0-9_.$\\]([a-z][A-Za-z0-9_$]*)\s*\(/g,            // name(
     // Not after a `/`, or a regex's own flags read as a name: `/phone/i.test(x)` is `i.test`.
-    /[^A-Za-z0-9_.$'"`/]([a-z][A-Za-z0-9_$]*)\s*\.[a-zA-Z]/g,  // name.foo
-    /[^A-Za-z0-9_.$]([a-z][A-Za-z0-9_$]*)\s*[<>]=?\s*[\d'"`]/g, // name > 4, name <= '…'
+    /[^A-Za-z0-9_.$'"`/\\]([a-z][A-Za-z0-9_$]*)\s*\.[a-zA-Z]/g, // name.foo
+    /[^A-Za-z0-9_.$\\]([a-z][A-Za-z0-9_$]*)\s*[<>]=?\s*[\d'"`]/g, // name > 4, name <= '…'
   ];
   for (const re of sites) {
     for (const m of src.matchAll(re)) {
