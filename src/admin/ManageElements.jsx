@@ -9,11 +9,13 @@ import {
   fetchAllElements, fetchParentElements,
   uploadThumbnail, uploadAsset, updateGlobalElement, createGlobalElement, deleteR2Object, exportElements,
   makeElementRenderVariant,
+  fetchAllTags, fetchElementTags, saveElementTags, retagElement,
 } from '../lib/api.js';
 /* The wire's bounds, from the one place that defines them — see the note on the Wire angle field. */
 import { WIRE_ANGLE, ELEMENT_WIRE_DEFAULTS } from '@spattoo/designer';
 import { PatternCakeThumb } from './PipingCalibrator.jsx';
 import CraftGuideEditor from './CraftGuideEditor.jsx';
+import TagEditor from './TagEditor.jsx';
 import DecorationGuidePanel from './DecorationGuidePanel.jsx';
 import Modal from './Modal.jsx';
 import { normalizeArtwork } from '@spattoo/designer';
@@ -509,6 +511,11 @@ export default function ManageElements() {
   // element does not error in prod, it is simply absent until somebody notices.
   const [touchedWithin, setTouchedWithin] = useState(0);   // days; 0 = any time
   const [selectedId,   setSelectedId]   = useState(null);
+  /* The tag vocabulary, read once. Sandeep: *"in manage elements - we dont have option to tag
+     them. this is becoming a prob when we clone an element and create a new one."* A clone goes
+     through `createGlobalElement`, which carries no tags — so a cloned element arrived untagged and
+     there was nowhere in this screen to fix it. */
+  const [allTags, setAllTags] = useState([]);
   const [cloneMode,    setCloneMode]    = useState(false);   // "create a NEW element from these settings"
   /* The preview is a POPUP, not a band in the flow. It used to sit inline under the placement
      editor — ~500px of 3D canvas that every element carried whether anybody was looking at it or
@@ -558,6 +565,10 @@ export default function ManageElements() {
 
   // Derive selected element from list (auto-updates after reload)
   const selectedEl = elements.find(e => e.id === selectedId) ?? null;
+
+  /* Failing quietly is right here: an unreachable tag vocabulary must not stop somebody editing an
+     element's geometry. The editor simply renders no chips. */
+  useEffect(() => { fetchAllTags().then(t => setAllTags(t ?? [])).catch(() => {}); }, []);
 
   /* ── The ≤512 copy the CAKE is textured from (render_key, migration 132) ───────────────────────
    * A 1024² sticker decodes to ~5.3 MB of RGBA on a GPU; at 512² it is ~1.3 MB, because the cost
@@ -2185,6 +2196,38 @@ export default function ManageElements() {
                     </button>
                   </div>
                 </div>
+
+                {/* ── Tags ──
+                    Next to Category because they answer the same question — how is this found —
+                    and differently: a category is the one shelf it sits on, tags are every word
+                    that should reach it. Both were authorable for templates and neither was for
+                    elements, which is how a cloned element stayed untagged with nowhere to fix it.
+
+                    ⚠️ WHY IT MATTERS MORE THAN TIDINESS: tags and the description embedding are
+                    what a composed cake searches. An untagged element is not untidy, it is
+                    unreachable — the same failure as a miscategorised one, and just as invisible.
+
+                    ⚠️ "Suggest tags" ADDS, IT NEVER REPLACES. Sandeep: *"if i already type some
+                    tags, it should not override them."* Server-side the upsert is
+                    `ignoreDuplicates`; client-side TagEditor unions the answer with whatever is
+                    ticked but not yet saved, which the server cannot see. */}
+                {selectedEl && (
+                  <div style={s.field}>
+                    <label style={s.label}>
+                      Tags <span style={{ fontWeight: 400, color: '#9b8f94' }}>— the words that should find it</span>
+                    </label>
+                    {allTags.length === 0
+                      ? <div style={{ fontSize: 11.5, color: '#9b8f94' }}>Tag vocabulary unavailable.</div>
+                      : <TagEditor
+                          entityId={selectedEl.id}
+                          allTags={allTags}
+                          fetchTags={fetchElementTags}
+                          saveTags={saveElementTags}
+                          suggestTags={retagElement}
+                          noun="element"
+                        />}
+                  </div>
+                )}
 
                 {/* ── Made with ──
                     ⚠️ IT WAS "MADE OF", AND MATERIAL ONLY. The rule was migration 032's: how a

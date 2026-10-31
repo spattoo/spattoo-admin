@@ -8,6 +8,7 @@ import { captureThumbnailBlob, thumbnailFromImage,
 import { fetchAdminTemplates, createTemplate, updateTemplate, deleteTemplate, uploadBlob, fetchAllTags, fetchTemplateTags, saveTemplateTags, saveTemplateAttrs, exportTemplates, publishTemplate
 } from '../lib/api.js';
 import { rendererFloor, stampWarning } from '../lib/designerBuild.js';
+import TagEditor, { TagChipPicker } from './TagEditor.jsx';
 
 const SHAPES = [
   { value: 'round',      label: 'Round' },
@@ -568,114 +569,10 @@ function TemplateThumbnailEditor({ template, onClose, onSaved }) {
   );
 }
 
-/* ── THE grouped chip picker, with two callers ───────────────────────────────────────────────────
- *
- * This screen had two tag pickers. The editor below grouped by `t.category ?? 'other'` and rendered
- * every group it found; the create form filtered to `category === 'occasion'` and drew a flat row.
- * Same data, same `saveTemplateTags(id, [...ids])` call at the end of both — only the picker
- * differed, and only one of them was right.
- *
- * ⚠️ WHICH MATTERS BECAUSE A TEMPLATE IS TAGGED AT BIRTH OR BY HAND LATER. With the create form
- * offering occasions alone, every new template needed a second pass through the editor on its card
- * to get an emotion — per template, forever. Migration 109 would have landed a vocabulary that the
- * screen creating the catalogue could not apply.
- *
- * ⚠️ NO CATEGORY FILTER, DELIBERATELY. An "intent categories" subset would be a fifth hardcoded list
- * of categories, after core's TMPL_CATS, core's save modal, this form, and ManageTags' CATEGORIES.
- * It renders what the tags carry, so a category added in admin appears here with no code change.
+/* The grouped chip picker and the tag editor now live in ./TagEditor.jsx — elements needed the
+ * same two, and this screen's own history (two pickers, same data, only one right) is the reason
+ * they were not copied a third time.
  */
-function TagChipPicker({ allTags, chosen, onToggle }) {
-  const groups = useMemo(() => {
-    const by = new Map();
-    for (const t of allTags) {
-      const k = t.category ?? 'other';
-      if (!by.has(k)) by.set(k, []);
-      by.get(k).push(t);
-    }
-    return [...by.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [allTags]);
-
-  return (
-    <>
-      {groups.map(([category, tags]) => (
-        <div key={category} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#6B8C74', marginBottom: 5 }}>
-            {category.replace(/_/g, ' ')}{REQUIRED_TAG_CATEGORIES.includes(category) ? ' *' : ''}
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {tags.map(tag => {
-              const on = chosen.has(tag.id);
-              return (
-                <button key={tag.id} type="button"
-                  style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    fontFamily: "'Quicksand', sans-serif",
-                    border: `1.5px solid ${on ? '#3D5A44' : '#C5D4C8'}`,
-                    background: on ? '#E8EDE9' : '#fff', color: on ? '#2C4433' : '#6B8C74' }}
-                  onClick={() => onToggle(tag.id)}>
-                  {tag.name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </>
-  );
-}
-
-function TemplateTagEditor({ template, allTags, onClose, onSaved }) {
-  const [chosen, setChosen] = useState(null);   // null = still loading
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    // The route returns join rows — { tag_id, source, tags: {…} } — so the id wanted is tag_id.
-    // Auto-tagged ones come back here too, and that is deliberate: a save REPLACES the whole set
-    // (the PUT deletes then inserts), so anything not shown would be silently dropped.
-    fetchTemplateTags(template.id)
-      .then(rows => { if (!cancelled) setChosen(new Set((rows ?? []).map(r => r.tag_id ?? r.id))); })
-      // A failed read must not look like "this template has no tags" — that reads as a fact and
-      // would be saved back as one, wiping whatever is really there.
-      .catch(e => { if (!cancelled) setErr(`Could not read its tags: ${e.message}`); });
-    return () => { cancelled = true; };
-  }, [template.id]);
-
-  async function save() {
-    setBusy(true); setErr(null);
-    try {
-      await saveTemplateTags(template.id, [...chosen]);
-      onSaved?.();
-      onClose();
-    } catch (e) { setErr(e.message); setBusy(false); }
-  }
-
-  if (err && !chosen) return <div style={{ ...s.hint, color: '#C0392B' }}>{err}</div>;
-  if (!chosen) return <div style={s.hint}>Reading its tags…</div>;
-
-  return (
-    <div style={{ marginTop: 10, padding: 12, background: '#F4F8F5', borderRadius: 10 }}>
-      <TagChipPicker
-        allTags={allTags}
-        chosen={chosen}
-        onToggle={id => setChosen(prev => {
-          const next = new Set(prev);
-          next.has(id) ? next.delete(id) : next.add(id);
-          return next;
-        })}
-      />
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
-        <button style={s.btn()} onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : `Save ${chosen.size} tag${chosen.size === 1 ? '' : 's'}`}
-        </button>
-        <button style={s.btn('secondary')} onClick={onClose} disabled={busy}>Cancel</button>
-        <span style={s.hint}>Saving replaces every tag on this template.</span>
-        {err && <span style={{ ...s.hint, color: '#C0392B' }}>{err}</span>}
-      </div>
-    </div>
-  );
-}
-
 /* ── The renderer floor, confirmed at the moment a template becomes everyone's ───────────────────
  *
  * A template is data, but it does not render itself — it renders on whatever build of
@@ -1129,9 +1026,12 @@ export default function ManageTemplates() {
                   />
                 )}
                 {tagEditFor === t.id && (
-                  <TemplateTagEditor
-                    template={t}
+                  <TagEditor
+                    entityId={t.id}
                     allTags={allTags}
+                    fetchTags={fetchTemplateTags}
+                    saveTags={saveTemplateTags}
+                    noun="template"
                     onClose={() => setTagEditFor(null)}
                     onSaved={load}
                   />
