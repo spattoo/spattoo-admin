@@ -278,7 +278,18 @@ export default function AddElement() {
      needed a click and the form refused to save without a parent until you found it. */
   const [isParent, setIsParent]           = useState(true);
   const [parentId, setParentId]           = useState('');
-  const [assetType, setAssetType]         = useState('2D');
+  /* ⚠️ A RUN IS ALWAYS A GLB, AND THIS MUST BE DECIDED AT INITIALISATION, NOT IN AN EFFECT.
+     Setting it afterwards leaves a window in which the form is in 2D mode holding a GLB, and that
+     window is not harmless — three things went wrong in it, all from one cause:
+       · the 2D effect treats `assetFile` as a picture and runs it through remove-bg + normalise,
+         which on a GLB yields a blob that is not an image. It renders as a broken thumbnail.
+       · the asset-type buttons call `setAssetFile(null)`, so clicking "3D Model (GLB)" to correct
+         the type threw the fetched model away and left "Click to choose file".
+       · and the remove-bg call is async, so its result could land AFTER that click and restore the
+         broken thumbnail the click had just cleared.
+     A lazy initial state closes all three: with `?run=`, the form is never in 2D mode at all. */
+  const [assetType, setAssetType]         = useState(
+    () => (new URLSearchParams(window.location.search).get('run') ? '3D' : '2D'));
   // Which generator draws a PROCEDURAL element. It becomes `placement_config.procedural`, the key
   // the designer's registry looks up to place one — so without it the row is inert: it appears in
   // the picker, and tapping it does nothing at all.
