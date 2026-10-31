@@ -123,8 +123,13 @@ export default function TagEditor({
   async function suggest() {
     setSuggesting(true); setErr(null); setNote(null);
     try {
-      const rows = await suggestTags(entityId);
-      const got  = new Set((rows ?? []).map(r => r.tag_id ?? r.id));
+      /* ⚠️ THE ROUTE ANSWERS `{ tags: [...] }`, NOT AN ARRAY — and I read it as one, which is the
+         `(rows ?? []).map is not a function` that reached the screen. Normalised here rather than
+         at the call site because `fetchTags` DOES return a bare array: two shapes arrive and only
+         one of them is obvious from the name. */
+      const res  = await suggestTags(entityId);
+      const rows = Array.isArray(res) ? res : (res?.tags ?? []);
+      const got  = new Set(rows.map(r => r.tag_id ?? r.id).filter(Boolean));
       /* ⚠️ UNION, NEVER REPLACE, AND THAT IS THE REQUIREMENT NOT A NICETY. Sandeep: *"if i already
          type some tags, it should not override them."* Two ways that could break and this closes
          both. Server-side the upsert is `ignoreDuplicates`, so the model can only ADD — but it
