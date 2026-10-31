@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { fetchElementTypes, fetchAdminElementCategories, createElementCategory, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide, fetchDecorationMediums } from '../lib/api.js';
+import { fetchElementTypes, fetchAdminElementCategories, createElementCategory, fetchParentElements, uploadThumbnail, uploadAsset, createGlobalElement, suggestElementMeta, suggestCraftGuide, saveCraftGuide, fetchDecorationMediums,
+  fetchAi3dModel, markAi3dPromoted,
+} from '../lib/api.js';
 import { normalizeArtwork } from '@spattoo/designer';
 import { prepareElementImage, ELEMENT_IMAGE_DIM } from '../lib/elementImage.js';
 import { toStatColumns, measureGlbBuffer, deriveAssetClass } from '../lib/glb.js';
@@ -315,7 +317,38 @@ export default function AddElement() {
   // file currently open in the embedded Studio; `optimizedStats` holds the measured cost returned —
   // its presence is the gate that a GLB has been reviewed.
   const [glbStudioFile, setGlbStudioFile] = useState(null);
+  /* ── Opened from a 3D generation ───────────────────────────────────────────────────────────────
+     `/elements/add?run=<id>` carries a finished generation straight into this form. The link is the
+     whole handoff: Element3DStudio deliberately saves nothing ("anything worth keeping goes through
+     RecomposeEditor / GlbStudio, which already do Save-as-Element properly"), and the answer to
+     that is a door into this screen, not a second save path over there.
+     Same `?param=` convention ReliefStickerStudio and ManageElements already use. */
+  const runId = useMemo(() => new URLSearchParams(window.location.search).get('run'), []);
+  const [runLoading, setRunLoading] = useState(() => !!new URLSearchParams(window.location.search).get('run'));
+  const [runError, setRunError] = useState(null);
   const [optimizedStats, setOptimizedStats] = useState(null);
+
+  /* Fetched through our own API, never from the vendor: `/admin/ai3d/:id/model` prefers our stored
+     copy and re-asks the vendor only if there is none, so this works whatever the vendor's CORS
+     policy is and whether or not their link has expired. Guarded by a ref because StrictMode mounts
+     twice in development and a 50 MB model is not something to fetch twice. */
+  const runFetched = useRef(false);
+  useEffect(() => {
+    if (!runId || runFetched.current) return;
+    runFetched.current = true;
+    (async () => {
+      try {
+        const buf = await fetchAi3dModel(runId);
+        // A File, not a Blob: the studio and the uploader both read `.name`, and a missing one
+        // shows as "undefined.glb" on the element's asset key for ever.
+        setAssetFile(new File([buf], `generated-${runId.slice(0, 8)}.glb`, { type: 'model/gltf-binary' }));
+      } catch (e) {
+        setRunError(`Could not load that generation: ${e.message}`);
+      } finally {
+        setRunLoading(false);
+      }
+    })();
+  }, [runId]);
   // Escape hatch: the GLB was ALREADY optimised outside the app (e.g. a Draco-compressed asset). Attesting
   // this MEASURES the GLB (records the mobile-budget cost) but skips the Studio's OPTIMISE step — so the
   // budget stats are preserved. `skipGlbReview` is the fallback that satisfies the gate if the measure fails.
@@ -814,7 +847,23 @@ export default function AddElement() {
         });
       }
 
-      setMsg({ ok: true, text: 'Element saved!' });
+      /* Step 3 — if this came from a generation, record that it became this element. AFTER the
+         element exists and deliberately not fatal: the element is saved either way, and failing the
+         save over a provenance write would destroy real work to protect a record of it. Says so
+         plainly instead, so somebody can re-link it rather than discovering a silent gap later. */
+      let promoteNote = '';
+      if (runId && created?.id) {
+        try {
+          const r = await markAi3dPromoted(runId, created.id);
+          promoteNote = r?.alreadyPromoted
+            ? ' That generation was already linked to an element, so the link was left alone.'
+            : ' Linked back to the generation it came from.';
+        } catch (e) {
+          promoteNote = ` Saved, but the generation could not be linked to it (${e.message}).`;
+        }
+      }
+
+      setMsg({ ok: true, text: `Element saved!${promoteNote}` });
       setName('');
       setElementTypeId('');
       setApplicableZones([]);
@@ -886,6 +935,24 @@ export default function AddElement() {
       <div style={s.page}>
         <div style={s.card}>
           <div style={s.title}>Add Element</div>
+
+          {/* Where this model came from. Said out loud because the form otherwise looks identical to
+              a hand-upload, and the difference matters: saving here writes a provenance link back to
+              the generation, and somebody who does not know that cannot reason about it. */}
+          {runId && (
+            <div style={{ margin: '0 0 14px', padding: '10px 12px', borderRadius: 10, fontSize: 12.5,
+                          lineHeight: 1.55,
+                          background: runError ? '#FDECEA' : '#F1F6F2',
+                          border: `1px solid ${runError ? '#E7B9B0' : '#CFE0D4'}`,
+                          color: runError ? '#9A3B2A' : '#2C4433' }}>
+              {runError
+                ? runError
+                : runLoading
+                  ? 'Loading the generated model…'
+                  : <>Loaded from 3D generation <code>{runId.slice(0, 8)}</code>. Saving will record
+                     that this element came from it.</>}
+            </div>
+          )}
 
           <div style={s.field}>
             <label style={s.label}>Asset Type</label>

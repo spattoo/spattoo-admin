@@ -420,6 +420,13 @@ export async function fetchAi3dModel(id) {
   return res.arrayBuffer();
 }
 
+/** Record that a generation became an element. RECORDS ONLY — the element itself is created by
+ *  AddElement through the one path that does it properly. First promotion wins; a second call
+ *  reports the existing link rather than repointing it. */
+export async function markAi3dPromoted(id, elementId) {
+  return post(`/api/admin/ai3d/${id}/promoted`, { elementId });
+}
+
 /** Meshy only — Tripo splits at generation time. */
 export async function splitAi3dGeneration(id, { mode, prompt } = {}) {
   return post(`/api/admin/ai3d/${id}/split`, { mode, prompt });

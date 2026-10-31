@@ -714,11 +714,35 @@ export default function Element3DStudio() {
                 )}
               </>
             )}
-            {modelUrl && (
-              <a href={modelUrl} target="_blank" rel="noreferrer"
-                 style={{ display: 'inline-block', marginTop: 10, color: '#2C4433', fontWeight: 700 }}>
-                open the raw GLB
-              </a>
+            {/* ── The door out of this screen ────────────────────────────────────────────────────
+                Until now a finished generation offered a download link and nothing else. That was
+                not an oversight — this studio deliberately saves nothing, because Add Element
+                already does it properly (thumbnail, R2 copy, row, guide, reindex) and a second save
+                path here would be the drift INVARIANTS #15 is about. What was missing was a DOOR:
+                the model had to be downloaded by hand and uploaded again on the other side.
+
+                So this is a link, not a save. Add Element fetches the model through our own API,
+                and when it saves, it records the generation this element came from. */}
+            {row?.status === 'SUCCEEDED' && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
+                {row.promotedElementId ? (
+                  <a href={`/elements/manage?element=${row.promotedElementId}`}
+                     style={{ ...S.btn, textDecoration: 'none', display: 'inline-block' }}>
+                    Already an element — open it
+                  </a>
+                ) : (
+                  <a href={`/elements/add?run=${row.id}`}
+                     style={{ ...S.btn, textDecoration: 'none', display: 'inline-block' }}>
+                    Make this an element
+                  </a>
+                )}
+                {modelUrl && (
+                  <a href={modelUrl} target="_blank" rel="noreferrer"
+                     style={{ color: '#2C4433', fontWeight: 700, fontSize: 12.5 }}>
+                    open the raw GLB
+                  </a>
+                )}
+              </div>
             )}
           </div>
         </div>
