@@ -545,6 +545,10 @@ export async function getStorefrontUsage(days = 30) {
 // decoration_mediums where can_model — the one place that knows what a decoration can be made of.
 // This file used to hold its own five-item list; it offered "Buttercream", which maps to `cream`,
 // which cannot be modelled at all. Never reintroduce a local list: `check:prompt-vocab` fails on it.
+// ⚠️ RETURNS { frame, questions }, NOT A BARE ARRAY. The frame is what goes in every prompt
+// whatever the baker answered, and it ships WITH the questions on purpose: a client that had to
+// fetch it separately is one that will one day forget to and send a prompt with no frame at all —
+// which is the bare noun that returned a turned baluster for "flute".
 export async function getDecorationPromptQuestions(categoryId) {
   const qs = categoryId ? `?category_id=${encodeURIComponent(categoryId)}` : '';
   return get(`/api/decoration-prompt-questions${qs}`);
@@ -575,6 +579,15 @@ export async function deletePromptOption(id) {
   const res = await fetch(`${BASE_URL}/api/admin/decoration-prompt-options/${encodeURIComponent(id)}`,
                           { method: 'DELETE', headers: await authHeaders() });
   if (!res.ok) throw await apiError(res);
+}
+
+// The clauses appended to EVERY prompt. Most are judgement and get revised; the measured ones
+// carry a note saying what they cost to learn.
+export async function getPromptFrame() {
+  return get('/api/admin/decoration-prompt-frame');
+}
+export async function updatePromptFrame(id, changes) {
+  return patch(`/api/admin/decoration-prompt-frame/${encodeURIComponent(id)}`, changes);
 }
 
 // How each material reads TO A GENERATOR — authored, never derived from the human label.

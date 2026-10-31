@@ -234,6 +234,7 @@ export default function Element3DStudio() {
      So this component names no category, material or pose — it renders what it is handed. Adding a
      question for a new category is a row, never a branch here (migration 149). */
   const [questions, setQuestions] = useState([]);
+  const [frame, setFrame] = useState([]);
   const [answers, setAnswers] = useState({});
   /* ⚠️ ADDING AN OPTION WHERE THE GAP IS NOTICED. Sandeep asked for this inline rather than only on
      the authoring screen, and he is right about why: the moment you discover none of the chips fit
@@ -306,9 +307,10 @@ export default function Element3DStudio() {
   useEffect(() => {
     let alive = true;
     getDecorationPromptQuestions()
-      .then(rows => {
+      .then(res => {
         if (!alive) return;
-        const list = rows ?? [];
+        const list = res?.questions ?? [];
+        setFrame(res?.frame ?? []);
         setQuestions(list);
         // Defaults fill only unanswered keys, so a reload never overwrites a deliberate choice.
         setAnswers(prev => ({ ...defaultAnswers(list), ...prev }));
@@ -317,7 +319,10 @@ export default function Element3DStudio() {
     return () => { alive = false; };
   }, []);
 
-  const built = buildDecorationPrompt({ subject, questions, answers,
+  /* `output` decides which half of the frame applies: a recolourable model must be told
+     "untextured", a ready-to-use one must NOT be — we ask the vendor for texture on that path. */
+  const built = buildDecorationPrompt({ subject, questions, answers, frame,
+                                        output: parts ? 'recolourable' : 'ready',
                                         parts: partWords.split(',').map(x => x.trim()).filter(Boolean) });
   const warnings = promptWarnings({ subject, questions, answers });
   /* What is actually sent. The builder writes it; `freeform` hands the pen back. */
@@ -485,7 +490,7 @@ export default function Element3DStudio() {
                        try {
                          await addPromptOption(q.id, { label });
                          setNewOption(n => ({ ...n, [q.key]: '' }));
-                         setQuestions(await getDecorationPromptQuestions());
+                         setQuestions((await getDecorationPromptQuestions())?.questions ?? []);
                        } catch (err) {
                          setAddError(err.message || 'Could not save that option.');
                        }

@@ -40,11 +40,34 @@
 // INVARIANTS #15 is about. When bakers get this, the function moves to core and admin imports it;
 // nothing about its shape has to change, because its inputs are already server data.
 
-/** The non-negotiable frame. Measured, not authored — see the note above. */
-export const PROMPT_FRAME = {
-  lead:  'cake topper',
-  tail:  'untextured, no fur or hair, separate parts for each coloured area',
-};
+/**
+ * The frame — what goes in EVERY prompt whatever the baker answered.
+ *
+ * ⚠️ IT IS SERVER DATA NOW, not a constant here. Sandeep: *"its not only about the questions- there
+ * could be few things that we always have to append in the prompt to narrow it. likes its for a
+ * cake decoration, bakeability etc. and we dont rely on bakers answers alone."* Two questions
+ * cannot carry what we know and a baker should never have to type — that this is sugarcraft someone
+ * has to MAKE, that it must stand on a cake, that thin parts snap in fondant and blow the triangle
+ * cap. See migration 152; each clause carries a `note` saying what it cost to learn.
+ *
+ * ⚠️ AND IT SPLITS BY PATH, which closes a contradiction this file shipped. The old constant
+ * appended "untextured, no fur or hair, separate parts" to every prompt — including the ready-to-use
+ * path, which asks Tripo for `texture: true, pbr: true`. We were paying for a textured model and
+ * telling it not to texture. `applies_to` makes that unsayable.
+ *
+ * ⚠️ A LAST-RESORT FALLBACK, used only if the frame could not be fetched. Generating with NO frame
+ * is worse than generating with a stale one — it is the bare noun that returned a baluster for
+ * "flute" — so an empty server response must not silently mean "no frame".
+ */
+export const FALLBACK_FRAME = [
+  { key: 'kind',       phrase: 'a hand-modelled sugarcraft cake decoration', applies_to: 'always',       position: 'lead' },
+  { key: 'scale',      phrase: 'sized to sit on top of a cake',              applies_to: 'always',       position: 'tail' },
+  { key: 'bakeable',   phrase: 'simplified rounded forms with soft edges, no thin fragile parts', applies_to: 'always', position: 'tail' },
+  { key: 'standable',  phrase: 'a single solid closed shape with a flat base', applies_to: 'always',     position: 'tail' },
+  { key: 'no_texture', phrase: 'untextured, plain matte surface',            applies_to: 'recolourable', position: 'tail' },
+  { key: 'no_fur',     phrase: 'no fur, hair or feathers',                   applies_to: 'recolourable', position: 'tail' },
+  { key: 'parts',      phrase: 'separate parts for each coloured area',      applies_to: 'recolourable', position: 'tail' },
+];
 
 /**
  * Compose the prompt.
@@ -57,9 +80,18 @@ export const PROMPT_FRAME = {
  *
  * Returns '' when there is no subject yet — there is nothing to say about nothing.
  */
-export function buildDecorationPrompt({ subject, questions = [], answers = {}, parts = [] } = {}) {
+export function buildDecorationPrompt({ subject, questions = [], answers = {}, parts = [],
+                                        frame = null, output = 'recolourable' } = {}) {
   const trimmed = String(subject ?? '').trim();
   if (!trimmed) return '';
+
+  /* `output` picks which half of the frame applies. 'recolourable' is the default because it is the
+     stricter one: a prompt that wrongly says "untextured" wastes a generation, while one that
+     wrongly omits it produces a model that merely cannot be recoloured. */
+  const rows  = (frame?.length ? frame : FALLBACK_FRAME)
+    .filter(f => f.applies_to === 'always' || f.applies_to === output);
+  const lead  = rows.filter(f => f.position === 'lead').map(f => f.phrase).filter(Boolean);
+  const tail  = rows.filter(f => f.position !== 'lead').map(f => f.phrase).filter(Boolean);
 
   /* ⚠️ A QUESTION IS EITHER CHIPS OR A BOX, AND THE ANSWER SHAPE FOLLOWS. For 'choice' the answer
      is an option key and the phrase is authored; for 'text' the answer IS the phrase, because the
@@ -88,7 +120,7 @@ export function buildDecorationPrompt({ subject, questions = [], answers = {}, p
     .map(x => String(x).trim()).filter(Boolean);
   const partClause = named.length ? `distinct ${named.join(', ')}` : '';
 
-  return [PROMPT_FRAME.lead, trimmed, ...phrases, partClause, PROMPT_FRAME.tail]
+  return [...lead, trimmed, ...phrases, partClause, ...tail]
     .filter(Boolean)
     .join(', ');
 }

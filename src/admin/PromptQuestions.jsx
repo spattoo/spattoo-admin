@@ -3,6 +3,7 @@ import {
   getAdminPromptQuestions, createPromptQuestion, updatePromptQuestion,
   addPromptOption, updatePromptOption, deletePromptOption,
   getAdminDecorationMediums, updateDecorationMediumPhrase,
+  getPromptFrame, updatePromptFrame,
 } from '../lib/api.js';
 
 // ── What we ask before generating a 3D decoration ───────────────────────────────────────────────
@@ -80,6 +81,7 @@ function OptionRow({ option, onSave, onRemove, onMakeDefault }) {
 export default function PromptQuestions() {
   const [questions, setQuestions] = useState([]);
   const [mediums, setMediums]     = useState([]);
+  const [frame, setFrame]         = useState([]);
   const [error, setError]         = useState('');
   const [loading, setLoading]     = useState(true);
   const [adding, setAdding]       = useState({});   // questionId -> typed label
@@ -87,9 +89,10 @@ export default function PromptQuestions() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [qs, ms] = await Promise.all([getAdminPromptQuestions(), getAdminDecorationMediums()]);
+      const [qs, ms, fr] = await Promise.all([getAdminPromptQuestions(), getAdminDecorationMediums(), getPromptFrame()]);
       setQuestions(qs ?? []);
       setMediums(ms ?? []);
+      setFrame(fr ?? []);
     } catch (e) {
       setError(e.message || 'Could not load the questions.');
     } finally { setLoading(false); }
@@ -180,6 +183,36 @@ export default function PromptQuestions() {
         </div>
       ))}
 
+      {/* ── The frame ───────────────────────────────────────────────────────────────────────── */}
+      <h2 style={{ fontSize: 15, fontWeight: 800, color: C.ink, margin: '26px 0 6px' }}>
+        Always said, whatever they answer
+      </h2>
+      <p style={{ fontSize: 12.5, color: C.muted, lineHeight: 1.55, margin: '0 0 12px', maxWidth: 640 }}>
+        Two questions cannot carry what we know and a baker should never have to type — that this is
+        sugarcraft someone has to <em>make</em>, that it must stand on a cake, that thin parts snap
+        in fondant. <strong>Some of these were expensive to learn</strong>; the note says which.
+      </p>
+      <div style={S.card}>
+        {['always', 'recolourable', 'ready'].map(scope => {
+          const rows = frame.filter(f => f.applies_to === scope);
+          if (!rows.length) return null;
+          return (
+            <div key={scope} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: C.faint, letterSpacing: 0.4,
+                            textTransform: 'uppercase', marginBottom: 6 }}>
+                {scope === 'always' ? 'every prompt'
+                  : scope === 'recolourable' ? 'only when asking for parts'
+                  : 'only when asking for a textured, ready-to-use model'}
+              </div>
+              {rows.map(f => (
+                <FrameRow key={f.id} row={f}
+                          onSave={(changes) => run(() => updatePromptFrame(f.id, changes))} />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
       {/* ── Adding one ──────────────────────────────────────────────────────────────────────── */}
       <NewQuestion onCreate={(q) => run(() => createPromptQuestion(q))} />
 
@@ -226,6 +259,36 @@ function NewQuestion({ onCreate }) {
         A chip question starts with no options — add them here, or from the 3D studio when you hit a
         gap mid-generation. Everything you add is asked of <strong>every</strong> element.
       </div>
+    </div>
+  );
+}
+
+/* ⚠️ THE NOTE IS SHOWN, NOT HIDDEN BEHIND A TOOLTIP. Three of these clauses cost a wasted
+   generation to discover — one of them 501,326 triangles against a 25,000 cap — and the person most
+   likely to delete one is the person who has not met that failure yet. */
+function FrameRow({ row, onSave }) {
+  const [phrase, setPhrase] = useState(row.phrase);
+  const dirty = phrase !== row.phrase;
+  const measured = /MEASURED/i.test(row.note ?? '');
+  return (
+    <div style={{ marginBottom: 10, opacity: row.is_active ? 1 : 0.55 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: C.faint, width: 84 }}>{row.key}</span>
+        <input value={phrase} onChange={e => setPhrase(e.target.value)}
+               style={{ ...S.input, flex: '1 1 320px' }} />
+        {measured && <Badge bg={C.warnBg} ink={C.warnInk}>measured</Badge>}
+        {dirty && (
+          <button type="button" style={{ ...S.btn, background: C.ink, color: '#fff', borderColor: C.ink }}
+                  onClick={() => onSave({ phrase })}>Save</button>
+        )}
+        <button type="button" style={S.btn} onClick={() => onSave({ is_active: !row.is_active })}>
+          {row.is_active ? 'Switch off' : 'Switch on'}
+        </button>
+      </div>
+      {row.note && (
+        <div style={{ fontSize: 10.5, color: C.faint, marginTop: 3, marginLeft: 92, lineHeight: 1.5,
+                      maxWidth: 620 }}>{row.note}</div>
+      )}
     </div>
   );
 }
